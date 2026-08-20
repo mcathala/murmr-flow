@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Microphone access under the Hardened Runtime. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+
+	<!--
+	  App Sandbox is deliberately ABSENT, not set to false.
+
+	  Sandboxed apps cannot use the Accessibility APIs, which is exactly how Murmr
+	  Flow types text at the cursor. This is also why the app can never ship on the
+	  Mac App Store, which requires sandboxing.
+
+	  This is a constraint, not a preference.
+	-->
+</dict>
+</plist>
