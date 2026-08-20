@@ -20,9 +20,17 @@ let package = Package(
         // taps (meetings mode, v2) require 14.4+.
         .macOS(.v14)
     ],
+    dependencies: [
+        // Parakeet speech-to-text, Silero VAD and speaker diarization as CoreML models
+        // that run on the Apple Neural Engine. Apache-2.0.
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.6")
+    ],
     targets: [
         .executableTarget(
             name: "MurmrFlow",
+            dependencies: [
+                .product(name: "FluidAudio", package: "FluidAudio")
+            ],
             path: "src/murmr-flow",
             swiftSettings: [
                 .swiftLanguageMode(.v6)
