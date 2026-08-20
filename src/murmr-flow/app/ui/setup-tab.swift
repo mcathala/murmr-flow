@@ -192,6 +192,19 @@ struct SetupTab: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("Pause music while dictating", isOn: Binding(
+                get: { dictation.settings.pauseMediaWhileDictating },
+                set: { dictation.settings.pauseMediaWhileDictating = $0 }
+            ))
+            .font(.caption)
+            .controlSize(.small)
+
+            Text("Only pauses if something is actually playing, and only resumes what it "
+                 + "paused.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
