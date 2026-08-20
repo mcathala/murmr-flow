@@ -29,6 +29,17 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
     /// Rough on-disk size, for the download prompt.
     var approximateSizeMB: Int { 600 }
 
+    /// The HuggingFace repo backing this model. Needed to resolve the on-disk cache
+    /// location, because `AsrModels.modelsExist(at:)` expects a directory that already
+    /// includes the repo folder — it calls `deletingLastPathComponent()` internally, so
+    /// handing it the models *root* silently looks one level too high.
+    var repo: Repo {
+        switch self {
+        case .parakeetV3: .parakeetV3
+        case .parakeetV2: .parakeetV2
+        }
+    }
+
     var asrVersion: AsrModelVersion {
         switch self {
         case .parakeetV3: .v3
