@@ -1,15 +1,14 @@
 import SwiftUI
 
-/// Phase 0: a menu-bar stub whose only job is to prove that macOS permission grants
-/// survive a rebuild.
+/// Phase 1: microphone in, transcribed text out.
 ///
-/// There is deliberately no audio capture, no hotkey, and no transcription yet. If
-/// signing is wrong, every one of those features becomes miserable to develop, so the
-/// signing harness is proven first.
+/// There is no hotkey and no text injection yet — the transcript is displayed rather
+/// than typed at the cursor. Those arrive in Phase 2, along with AI cleanup.
 @main
 struct MurmrFlowApp: App {
 
     @State private var permissions = PermissionManager()
+    @State private var dictation = DictationCoordinator()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
@@ -23,7 +22,15 @@ struct MurmrFlowApp: App {
         // This window also becomes the Settings window later, so it isn't throwaway
         // scaffolding.
         Window("Murmr Flow", id: Self.panelWindowID) {
-            PermissionsPanel(permissions: permissions)
+            // No ScrollView here: it has no intrinsic height, so
+            // `windowResizability(.contentSize)` would collapse the window to the first
+            // subview. Stack the panels and let the content size the window.
+            VStack(spacing: 0) {
+                PermissionsPanel(permissions: permissions)
+                Divider()
+                DictationPanel(coordinator: dictation)
+            }
+            .frame(width: 380)
         }
         .windowResizability(.contentSize)
 
