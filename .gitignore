@@ -32,4 +32,6 @@ Models/
 *.xcuserstate
 *.xcworkspace/xcuserdata/
 .swiftpm/
-Package.resolved
+
+# Package.resolved IS tracked: this is an application, not a library, so pinning
+# exact dependency versions is what makes builds reproducible.
