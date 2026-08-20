@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import OSLog
 
 /// Drives one dictation end to end: hold the key, speak, release, text appears.
 ///
@@ -44,6 +45,15 @@ final class DictationCoordinator {
             case .cleaning: "Cleaning up…"
             case .injecting: "Typing…"
             case .failed: "Failed"
+            }
+        }
+
+        /// The reason, when there is one. `label` alone threw the associated message
+        /// away, so a failure showed a bare "Failed" with nothing actionable.
+        var detail: String? {
+            switch self {
+            case .failed(let message): message
+            default: nil
             }
         }
     }
@@ -95,7 +105,13 @@ final class DictationCoordinator {
     private let transcriber = TranscriptionService()
     private let cleanup = CleanupService()
     private let hotkey = HotkeyMonitor()
+    private let media = MediaPlaybackController()
+    private static let mediaLog = Logger(subsystem: "app.murmr.MurmrFlow", category: "media")
     private var tickTask: Task<Void, Never>?
+
+    /// Started at key-down so pausing never delays the recording; awaited before
+    /// resuming so we know whether we were the ones who paused.
+    private var mediaPauseTask: Task<Bool, Never>?
 
     /// Captured when recording starts. The HUD is non-activating so this should not
     /// change under us, but the paste needs to land where the user was actually typing.
@@ -166,6 +182,13 @@ final class DictationCoordinator {
             elapsed = 0
             stage = .recording
             startTicking()
+
+            // Runs alongside recording rather than before it. The adapter reports the
+            // media app's own playback state, which our microphone cannot influence, so
+            // there is no need to serialise this ahead of opening the mic.
+            if settings.pauseMediaWhileDictating {
+                mediaPauseTask = Task { [media] in await media.pauseIfPlaying() }
+            }
         } catch {
             stage = .failed(error.localizedDescription)
         }
@@ -176,10 +199,16 @@ final class DictationCoordinator {
         recorder.cancel()
         stage = .idle
         elapsed = 0
+        Task { await restoreMedia() }
     }
 
     func endDictation() async {
-        guard stage == .recording else { return }
+        guard stage == .recording else {
+            // Not recording, but a pause may still be outstanding from a run that ended
+            // some other way. Never leave playback stopped.
+            await restoreMedia()
+            return
+        }
         stopTicking()
         stage = .transcribing
 
@@ -187,10 +216,12 @@ final class DictationCoordinator {
         let releasedAt = clock.now
 
         do {
-            // Resampling is CPU work — keep it off the main actor.
-            let recorder = self.recorder
+            // Stop on the main actor: an off-main AVAudioEngine teardown leaves the
+            // input device configured, which pins a Bluetooth headset to mono 16 kHz for
+            // the rest of the process. Only the resampling goes off-main.
+            let capture = try recorder.finishCapture()
             let samples = try await Task.detached(priority: .userInitiated) {
-                try recorder.stop()
+                try MicRecorder.resample(capture)
             }.value
 
             try await ensureModelLoaded()
@@ -200,8 +231,12 @@ final class DictationCoordinator {
             let transcribeTime = (clock.now - transcribeStart).seconds
 
             let raw = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !raw.isEmpty else {
+            if raw.isEmpty {
+                // Nothing was said. Deliberately *not* an early return: this used to
+                // `return` here, which skipped restoring paused music — so holding the
+                // key without speaking left playback paused for good.
                 stage = .idle
+                await restoreMedia()
                 return
             }
 
@@ -247,6 +282,19 @@ final class DictationCoordinator {
         } catch {
             stage = .failed(error.localizedDescription)
         }
+
+        // Always restore, including on the failure paths above.
+        await restoreMedia()
+    }
+
+    /// Resumes playback only if we paused it. Anything the user paused stays paused.
+    private func restoreMedia() async {
+        guard let task = mediaPauseTask else {
+            Self.mediaLog.notice("restoreMedia: nothing to restore")
+            return
+        }
+        mediaPauseTask = nil
+        await media.resumeIfWePaused(task.value)
     }
 
     // MARK: - Model

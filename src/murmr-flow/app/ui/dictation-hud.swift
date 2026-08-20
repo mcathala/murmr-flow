@@ -19,6 +19,8 @@ final class DictationHUD {
     private var recordingStartedAt: Date?
 
     private static let size = CGSize(width: 240, height: 52)
+    /// Failures need room for a sentence, not just a word.
+    private static let failureSize = CGSize(width: 360, height: 76)
 
     /// Called on stage transitions only. The elapsed counter is driven by this class's
     /// own ticker — routing it through the coordinator rebuilt the hosting view ten times
@@ -82,14 +84,20 @@ final class DictationHUD {
 
     private func present(stage: DictationCoordinator.Stage, elapsed: TimeInterval) {
         let view = HUDContent(stage: stage, elapsed: elapsed)
+        let size = stage.detail == nil ? Self.size : Self.failureSize
 
         if let panel {
             (panel.contentView as? NSHostingView<HUDContent>)?.rootView = view
+            // A failure needs more room than the status pill it replaces.
+            if panel.frame.size != size {
+                panel.setContentSize(size)
+                position(panel, size: size)
+            }
             return
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(origin: .zero, size: Self.size),
+            contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -105,7 +113,7 @@ final class DictationHUD {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.contentView = NSHostingView(rootView: view)
 
-        position(panel)
+        position(panel, size: size)
         // orderFrontRegardless, never makeKeyAndOrderFront: the latter would activate us.
         panel.orderFrontRegardless()
         self.panel = panel
@@ -113,14 +121,14 @@ final class DictationHUD {
 
     /// Bottom-centre of whichever screen holds the pointer, so on a multi-display setup
     /// it appears where the user is actually working.
-    private func position(_ panel: NSPanel) {
+    private func position(_ panel: NSPanel, size: CGSize) {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
         guard let frame = screen?.visibleFrame else { return }
 
         panel.setFrameOrigin(
             NSPoint(
-                x: frame.midX - Self.size.width / 2,
+                x: frame.midX - size.width / 2,
                 y: frame.minY + 96
             )
         )
@@ -146,7 +154,7 @@ private struct HUDContent: View {
     var body: some View {
         HStack(spacing: 10) {
             icon
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(stage.label)
                     .font(.subheadline.weight(.medium))
                 if case .recording = stage {
@@ -155,11 +163,19 @@ private struct HUDContent: View {
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
+                if let detail = stage.detail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
-        .frame(width: 240, height: 52)
+        .padding(.vertical, 10)
+        .frame(width: stage.detail == nil ? 240 : 360, alignment: .leading)
+        .frame(minHeight: 52)
         .background(.regularMaterial, in: .rect(cornerRadius: 14))
         .overlay {
             RoundedRectangle(cornerRadius: 14)

@@ -17,6 +17,7 @@ final class SettingsStore {
         static let prompt = "cleanup.prompt"
         static let customWords = "cleanup.customWords"
         static let hotkey = "dictation.hotkey"
+        static let pauseMedia = "dictation.pauseMedia"
         static let speechModel = "stt.model"
     }
 
@@ -41,6 +42,8 @@ final class SettingsStore {
         self.speechModel =
             SpeechModel(rawValue: defaults.string(forKey: Key.speechModel) ?? "")
             ?? .parakeetV3
+        self.pauseMediaWhileDictating =
+            defaults.object(forKey: Key.pauseMedia) as? Bool ?? true
     }
 
     // MARK: - Cleanup
@@ -78,6 +81,11 @@ final class SettingsStore {
 
     var speechModel: SpeechModel {
         didSet { defaults.set(speechModel.rawValue, forKey: Key.speechModel) }
+    }
+
+    /// Pause whatever is playing while dictating, then put it back.
+    var pauseMediaWhileDictating: Bool {
+        didSet { defaults.set(pauseMediaWhileDictating, forKey: Key.pauseMedia) }
     }
 
     // MARK: - Derived

@@ -4,9 +4,16 @@ import FluidAudio
 /// Captures microphone audio and hands back 16 kHz mono Float samples, which is the
 /// only format Parakeet accepts.
 ///
-/// Conversion happens **once, at stop** rather than per buffer. Resampling each
-/// captured buffer independently introduces discontinuities at buffer boundaries,
-/// because the resampler has no history across calls.
+/// **The engine is created per recording and fully released afterwards.** Holding one
+/// `AVAudioEngine` for the process lifetime leaves the input device configured even after
+/// `stop()`, and on a Bluetooth headset that pins the link to hands-free mode — mono
+/// 16 kHz output instead of 48 kHz stereo — until the app quits. Measured across repeated
+/// runs: with the engine held the headset never recovered; released per recording it
+/// recovered within three seconds and stayed recovered.
+///
+/// Conversion happens **once, at the end** rather than per buffer, because resampling
+/// each captured buffer independently introduces discontinuities at the boundaries — the
+/// resampler carries no history between calls.
 final class MicRecorder: @unchecked Sendable {
 
     enum RecorderError: LocalizedError {
@@ -26,10 +33,17 @@ final class MicRecorder: @unchecked Sendable {
         }
     }
 
+    /// Raw capture, before rate conversion.
+    struct Capture: Sendable {
+        let samples: [Float]
+        let sampleRate: Double
+    }
+
     /// Target rate for Parakeet.
     static let targetSampleRate: Double = 16_000
 
-    private let engine = AVAudioEngine()
+    /// Nil whenever we are not recording, so no audio hardware stays claimed.
+    private var engine: AVAudioEngine?
 
     /// Guards `samples` and `inputSampleRate`, both touched from the audio thread.
     private let lock = NSLock()
@@ -42,13 +56,17 @@ final class MicRecorder: @unchecked Sendable {
 
     private(set) var startedAt: Date?
 
-    var isRecording: Bool { engine.isRunning }
+    var isRecording: Bool { engine?.isRunning ?? false }
 
     // MARK: - Control
 
+    /// Main actor because `AVAudioEngine` lifecycle must not be driven from a background
+    /// thread — see the note on `releaseEngine()`.
+    @MainActor
     func start() throws {
-        guard !engine.isRunning else { return }
+        guard engine == nil else { return }
 
+        let engine = AVAudioEngine()
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
@@ -61,9 +79,11 @@ final class MicRecorder: @unchecked Sendable {
         inputSampleRate = format.sampleRate
         lock.unlock()
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            self?.append(buffer)
-        }
+        // Installed from a nonisolated helper on purpose. A closure written inline here
+        // would inherit this method's @MainActor isolation, and AVFoundation invokes the
+        // tap on the audio thread — Swift 6 then traps on the actor assumption the first
+        // time a buffer arrives (EXC_BREAKPOINT in _swift_task_checkIsolatedSwift).
+        installTap(on: input, format: format)
 
         engine.prepare()
         do {
@@ -72,13 +92,19 @@ final class MicRecorder: @unchecked Sendable {
             input.removeTap(onBus: 0)
             throw RecorderError.engineFailed(error.localizedDescription)
         }
+
+
+        self.engine = engine
         startedAt = Date()
     }
 
-    /// Stops capture and returns the recording as 16 kHz mono Float samples.
-    func stop() throws -> [Float] {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+    /// Stops the engine, releases it, and returns the raw capture.
+    ///
+    /// Resampling is deliberately *not* done here — that is CPU work and belongs off the
+    /// main actor, whereas the teardown must happen on it.
+    @MainActor
+    func finishCapture() throws -> Capture {
+        releaseEngine()
         startedAt = nil
 
         lock.lock()
@@ -90,31 +116,61 @@ final class MicRecorder: @unchecked Sendable {
         guard !captured.isEmpty else { throw RecorderError.nothingRecorded }
         guard rate > 0 else { throw RecorderError.noInputDevice }
 
-        // Already at the target rate — no conversion needed.
-        if abs(rate - Self.targetSampleRate) < 1 { return captured }
-
-        // AudioConverter rather than hand-rolled resampling: bit depth, channel layout
-        // and rate conversion all have edge cases that show up as empty transcripts
-        // rather than as errors.
-        return try AudioConverter(sampleRate: Self.targetSampleRate)
-            .resample(captured, from: rate)
+        return Capture(samples: captured, sampleRate: rate)
     }
 
     /// Discards the recording without transcribing.
+    @MainActor
     func cancel() {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        releaseEngine()
         startedAt = nil
         lock.lock()
         samples.removeAll(keepingCapacity: true)
         lock.unlock()
     }
 
+    /// Converts a capture to the 16 kHz mono Float samples Parakeet expects. Pure CPU
+    /// work, safe to call from any thread.
+    static func resample(_ capture: Capture) throws -> [Float] {
+        if abs(capture.sampleRate - targetSampleRate) < 1 { return capture.samples }
+
+        // AudioConverter rather than hand-rolled resampling: bit depth, channel layout
+        // and rate conversion all have edge cases that show up as empty transcripts
+        // rather than as errors.
+        return try AudioConverter(sampleRate: targetSampleRate)
+            .resample(capture.samples, from: capture.sampleRate)
+    }
+
+    // MARK: - Teardown
+
+    /// Every step matters: the tap holds a reference, `stop()` ends the stream, `reset()`
+    /// tears down the node graph, and dropping the reference is what actually lets
+    /// CoreAudio hand the device back.
+    @MainActor
+    private func releaseEngine() {
+        guard let engine else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        engine.reset()
+        self.engine = nil
+    }
+
     // MARK: - Audio thread
+
+    /// Installs the capture tap.
+    ///
+    /// `nonisolated` so the closure is not inferred as `@MainActor` from the caller.
+    /// AVFoundation runs it on the real-time audio thread, and an actor-isolated closure
+    /// there is an immediate crash under Swift 6 concurrency checking.
+    nonisolated private func installTap(on input: AVAudioInputNode, format: AVAudioFormat) {
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            self?.append(buffer)
+        }
+    }
 
     /// Called on the real-time audio thread. Keep it short and allocation-free in the
     /// common case — the capacity reserved in `start()` is what makes the append cheap.
-    private func append(_ buffer: AVAudioPCMBuffer) {
+    nonisolated private func append(_ buffer: AVAudioPCMBuffer) {
         guard let channels = buffer.floatChannelData else { return }
         let frames = Int(buffer.frameLength)
         guard frames > 0 else { return }
