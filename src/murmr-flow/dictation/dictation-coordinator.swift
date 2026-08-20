@@ -196,10 +196,12 @@ final class DictationCoordinator {
         let releasedAt = clock.now
 
         do {
-            // Resampling is CPU work — keep it off the main actor.
-            let recorder = self.recorder
+            // Stop on the main actor: an off-main AVAudioEngine teardown leaves the
+            // input device configured, which pins a Bluetooth headset to mono 16 kHz for
+            // the rest of the process. Only the resampling goes off-main.
+            let capture = try recorder.finishCapture()
             let samples = try await Task.detached(priority: .userInitiated) {
-                try recorder.stop()
+                try MicRecorder.resample(capture)
             }.value
 
             try await ensureModelLoaded()
