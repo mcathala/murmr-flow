@@ -1,46 +1,41 @@
 import SwiftUI
 
-/// Phase 1: microphone in, transcribed text out.
+/// Phase 2: hold the key, speak, release, and cleaned-up text appears at the cursor.
 ///
-/// There is no hotkey and no text injection yet — the transcript is displayed rather
-/// than typed at the cursor. Those arrive in Phase 2, along with AI cleanup.
+/// Startup lives in `AppDelegate` / `AppServices`, not here — see `AppServices` for why.
 @main
 struct MurmrFlowApp: App {
 
-    @State private var permissions = PermissionManager()
-    @State private var dictation = DictationCoordinator()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
+    private var services: AppServices { AppServices.shared }
+
     var body: some Scene {
-        // A real window, not only a menu-bar item.
-        //
-        // The menu bar is not a reliable place to *find* something: on a notched
-        // MacBook with a busy menu bar, new items get pushed into the hidden overflow
-        // region and are simply invisible. With external displays the item also only
-        // appears on whichever screen currently owns the menu bar.
-        //
-        // This window also becomes the Settings window later, so it isn't throwaway
-        // scaffolding.
+        // A window as well as a menu-bar item. On a notched MacBook with a busy menu bar,
+        // new items land in the hidden overflow region and are simply invisible; with
+        // external displays they only appear on whichever screen owns the menu bar.
         Window("Murmr Flow", id: Self.panelWindowID) {
-            // No ScrollView here: it has no intrinsic height, so
-            // `windowResizability(.contentSize)` would collapse the window to the first
-            // subview. Stack the panels and let the content size the window.
-            VStack(spacing: 0) {
-                PermissionsPanel(permissions: permissions)
-                Divider()
-                DictationPanel(coordinator: dictation)
-            }
-            .frame(width: 380)
+            MainWindow(permissions: services.permissions, dictation: services.dictation)
+                // Backstop: see AppServices.start() for why this is not the only trigger.
+                .task { services.start(trigger: "window.task") }
         }
         .windowResizability(.contentSize)
 
         MenuBarExtra {
-            PermissionsPanel(permissions: permissions)
+            MenuBarContent(permissions: services.permissions, dictation: services.dictation)
         } label: {
-            // Filled icon once everything is granted, hollow while something is missing.
-            Image(systemName: permissions.allGranted ? "waveform.circle.fill" : "waveform.circle")
+            Image(systemName: menuBarSymbol)
         }
         .menuBarExtraStyle(.window)
+    }
+
+    /// The icon carries the state, since the menu bar is often all that's visible.
+    private var menuBarSymbol: String {
+        let dictation = services.dictation
+        if dictation.stage.isRecording { return "waveform.circle.fill" }
+        if dictation.stage.isBusy { return "ellipsis.circle.fill" }
+        if !services.permissions.allGranted { return "exclamationmark.circle" }
+        return dictation.hotkeyActive ? "waveform.circle" : "waveform.circle.badge.xmark"
     }
 
     static let panelWindowID = "panel"
