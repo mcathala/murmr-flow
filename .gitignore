@@ -1,0 +1,35 @@
+# Build output
+.build/
+build/
+*.app
+
+# Signing — never commit certificates or keys
+*.p12
+*.pem
+*.key
+*.cer
+*.certSigningRequest
+
+# Local overrides
+.env
+.env.local
+scripts/local-*.sh
+
+# Agent scratch space and git worktrees
+.claude/
+
+# Design docs are kept locally for now
+docs/
+
+# Models are downloaded at runtime, never committed (~600 MB each)
+Models/
+
+# macOS
+.DS_Store
+._*
+
+# Xcode / SwiftPM
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+.swiftpm/
+Package.resolved
