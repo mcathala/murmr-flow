@@ -46,6 +46,15 @@ final class DictationCoordinator {
             case .failed: "Failed"
             }
         }
+
+        /// The reason, when there is one. `label` alone threw the associated message
+        /// away, so a failure showed a bare "Failed" with nothing actionable.
+        var detail: String? {
+            switch self {
+            case .failed(let message): message
+            default: nil
+            }
+        }
     }
 
     /// What one dictation cost, broken down so a slow step is identifiable.
