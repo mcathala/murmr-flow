@@ -89,6 +89,33 @@ sed -e "s|__VERSION__|$VERSION|g" \
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 # ---------------------------------------------------------------------------
+# Vendored mediaremote-adapter
+# ---------------------------------------------------------------------------
+# Built by its own script, which caches on a source hash — see that script and
+# resources/mediaremote-adapter/VENDORED.md.
+./scripts/build-adapter.sh
+
+ADAPTER_FW="$APP/Contents/Frameworks/MediaRemoteAdapter.framework"
+mkdir -p "$APP/Contents/Frameworks"
+# ditto rather than cp -R: it preserves the framework's symlinks correctly.
+ditto ".build/adapter/MediaRemoteAdapter.framework" "$ADAPTER_FW"
+
+# perl loads the dylib; the script is what we actually invoke.
+cp "resources/mediaremote-adapter/bin/mediaremote-adapter.pl" "$APP/Contents/Resources/"
+# BSD-3 requires the licence to travel with the binary.
+cp "resources/mediaremote-adapter/LICENSE" \
+   "$APP/Contents/Resources/MediaRemoteAdapter-LICENSE.txt"
+
+# Apache-2.0 requires a copy of the licence in the distribution. SwiftPM does not bundle
+# dependency licences, so it has to be done here.
+FLUIDAUDIO_LICENSE=".build/checkouts/FluidAudio/LICENSE"
+if [ -f "$FLUIDAUDIO_LICENSE" ]; then
+    cp "$FLUIDAUDIO_LICENSE" "$APP/Contents/Resources/FluidAudio-LICENSE.txt"
+else
+    warn "FluidAudio LICENSE not found — the app will ship without it (Apache-2.0 requires it)"
+fi
+
+# ---------------------------------------------------------------------------
 # Sign
 # ---------------------------------------------------------------------------
 bold "Signing with: $SIGNING_IDENTITY"
@@ -108,8 +135,13 @@ if [ "$CONFIG" != "release" ]; then
     CODESIGN_FLAGS+=(--timestamp=none)
 fi
 
+# Nested code must be signed before the enclosing bundle, or the outer signature
+# covers an unsigned binary and verification fails.
+codesign "${CODESIGN_FLAGS[@]}" "$ADAPTER_FW" \
+    || fail "Failed to sign MediaRemoteAdapter"
+
 codesign "${CODESIGN_FLAGS[@]}" "$APP"
-codesign --verify --strict "$APP" || fail "Signature verification failed"
+codesign --verify --strict --deep "$APP" || fail "Signature verification failed"
 
 # ---------------------------------------------------------------------------
 # Report
