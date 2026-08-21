@@ -2,18 +2,26 @@ import SwiftUI
 
 /// The floating panel's contents.
 ///
-/// One view for every state on purpose. The panel's whole character is that it *grows*
-/// between states rather than swapping a box's insides, so the states share a container
-/// and differ only in what fills it.
+/// **Every state goes through one container.** Each state used to apply its own
+/// `frame(maxWidth:maxHeight:alignment:)` and its own padding, in a different order — so
+/// each one centred slightly differently, and some not at all. Position belongs to the
+/// container now; the states own only their contents.
 struct PanelView: View {
 
     @Bindable var model: PanelModel
 
     var body: some View {
-        content
-            .frame(width: model.size.width, height: model.size.height)
-            .contentShape(.rect)
-            .onHover { model.hover($0) }
+        // Bottom-aligned, because the panel grows upward from where it rests. The
+        // `Color.clear` is what gives the stack the whole window to align within —
+        // without it the stack shrinks to its content and there is nothing to centre
+        // against.
+        ZStack(alignment: .bottom) {
+            Color.clear
+            content
+        }
+        .frame(width: model.size.width, height: model.size.height)
+        .contentShape(.rect)
+        .onHover { model.hover($0) }
     }
 
     @ViewBuilder
@@ -37,8 +45,7 @@ struct PanelView: View {
         Capsule()
             .fill(.secondary.opacity(0.55))
             .frame(width: 44, height: 5)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .padding(.bottom, 4)
+            .padding(.bottom, 5)
     }
 
     // MARK: - Hover
@@ -47,6 +54,7 @@ struct PanelView: View {
         VStack(spacing: 7) {
             Text(model.mode == .note ? "Start meeting" : "Dictate")
                 .font(.caption.weight(.semibold))
+                .fixedSize()
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(.regularMaterial, in: .capsule)
@@ -57,7 +65,7 @@ struct PanelView: View {
                     model.mode = .dictation
                     model.onToggleDictation?()
                 }
-                .onHover { if $0 { model.mode = .dictation; model.armIfHovering() } }
+                .onHover { if $0 { model.mode = .dictation } }
 
                 round("text.document", active: model.mode == .note) {
                     model.mode = .note
@@ -66,8 +74,7 @@ struct PanelView: View {
                 .onHover { if $0 { model.mode = .note } }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .padding(.bottom, 5)
+        .padding(.bottom, 6)
     }
 
     private func round(_ symbol: String, active: Bool, action: @escaping () -> Void) -> some View {
@@ -83,94 +90,89 @@ struct PanelView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Armed
+    // MARK: - Open states
 
     /// The icon *is* the app name, and the key needs no verb in front of it.
     private var armed: some View {
         shell {
-            modes
-            divider
-            appIcon
-            Text(hotkeyHint)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            promptChip
-            closeButton
-        }
-    }
-
-    private var hotkeyHint: String {
-        model.mode == .note ? "Start meeting" : "Hold to speak"
-    }
-
-    // MARK: - Dictating
-
-    private var dictating: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if !model.preview.isEmpty {
-                Text(model.preview)
-                    .font(.callout)
-                    .lineLimit(2)
-                    .truncationMode(.head)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
-            }
             HStack(spacing: 8) {
                 modes
                 divider
                 appIcon
-                Waveform(level: model.micLevel)
-                Text(model.clock)
-                    .font(.caption.monospacedDigit())
+                Text(model.mode == .note ? "Start meeting" : "Hold to speak")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 promptChip
+                closeButton
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(.regularMaterial, in: shape)
-        .overlay(shape.stroke(.separator, lineWidth: 0.5))
     }
 
-    // MARK: - Meeting
+    private var dictating: some View {
+        shell {
+            VStack(alignment: .leading, spacing: 6) {
+                if !model.preview.isEmpty {
+                    Text(model.preview)
+                        .font(.callout)
+                        .lineLimit(2)
+                        .truncationMode(.head)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                HStack(spacing: 8) {
+                    modes
+                    divider
+                    appIcon
+                    Waveform(level: model.micLevel)
+                    Text(model.clock)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    promptChip
+                }
+            }
+        }
+    }
 
     private var meeting: some View {
         shell {
-            modes
-            divider
-            HStack(spacing: 5) {
-                Circle().fill(.red).frame(width: 7, height: 7)
-                Text(model.clock).font(.caption.monospacedDigit())
+            HStack(spacing: 8) {
+                modes
+                divider
+                HStack(spacing: 5) {
+                    Circle().fill(.red).frame(width: 7, height: 7)
+                    Text(model.clock).font(.caption.monospacedDigit())
+                }
+                Meter(label: "You", level: model.youLevel)
+                Meter(label: "Them", level: model.themLevel)
+                Spacer(minLength: 0)
             }
-            Meter(label: "You", level: model.youLevel)
-            Meter(label: "Them", level: model.themLevel)
-            Spacer(minLength: 0)
         }
     }
 
-    // MARK: - Working & failed
-
     private func working(_ label: String) -> some View {
         shell {
-            modes
-            divider
-            ProgressView().controlSize(.small).scaleEffect(0.7)
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                modes
+                divider
+                ProgressView().controlSize(.small).scaleEffect(0.7)
+                Text(label).font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
         }
     }
 
     private func failed(_ failure: PanelModel.Failure) -> some View {
         shell {
-            modes
-            divider
-            Text(failure.message)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.orange)
-            Spacer(minLength: 0)
-            closeButton
+            HStack(spacing: 8) {
+                modes
+                divider
+                Text(failure.message)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.orange)
+                Spacer(minLength: 0)
+                closeButton
+            }
         }
     }
 
@@ -184,34 +186,34 @@ struct PanelView: View {
         RoundedRectangle(cornerRadius: Self.corner, style: .continuous)
     }
 
+    /// The chrome every open state shares: fill the window, one set of insets, one
+    /// background. States supply contents and nothing else, which is what stopped them
+    /// each aligning differently.
     private func shell<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        HStack(spacing: 8) { content() }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+        content()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.regularMaterial, in: shape)
             .overlay(shape.stroke(.separator, lineWidth: 0.5))
     }
 
-    /// Present in every open state, and dead while something runs — you cannot slide
-    /// from dictating into a meeting, you stop first.
+    /// Present in every open state, and dead while something runs — you cannot slide from
+    /// dictating into a meeting, you stop first.
     private var modes: some View {
         HStack(spacing: 2) {
-            modeDot("mic.fill", isOn: model.mode == .dictation) {
-                guard !model.phase.isBusy else { return }
-                model.mode = .dictation
-            }
-            modeDot("text.document", isOn: model.mode == .note) {
-                guard !model.phase.isBusy else { return }
-                model.mode = .note
-            }
+            modeDot("mic.fill", isOn: model.mode == .dictation) { model.mode = .dictation }
+            modeDot("text.document", isOn: model.mode == .note) { model.mode = .note }
         }
     }
 
     private func modeDot(
         _ symbol: String, isOn: Bool, action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        Button {
+            guard !model.phase.isBusy else { return }
+            action()
+        } label: {
             Image(systemName: symbol)
                 .font(.system(size: 10, weight: .medium))
                 .frame(width: 22, height: 22)
@@ -244,6 +246,7 @@ struct PanelView: View {
             } label: {
                 Text(model.promptName)
                     .font(.caption2)
+                    .fixedSize()
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(.quaternary, in: .capsule)
@@ -307,6 +310,7 @@ private struct Meter: View {
             Text(label)
                 .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(.tertiary)
+                .fixedSize()
             ForEach(0..<3, id: \.self) { index in
                 Capsule()
                     .fill(lit(index) ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))

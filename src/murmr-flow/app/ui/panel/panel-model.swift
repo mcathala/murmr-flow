@@ -141,7 +141,10 @@ final class PanelModel {
         case .resting:
             CGSize(width: 62, height: 18)
         case .hovering:
-            CGSize(width: 116, height: 86)
+            // Wide enough for the longest tooltip ("Start meeting") rather than for the
+            // two buttons alone — at 116 the label was being squeezed, which pulled the
+            // whole cluster off centre.
+            CGSize(width: 132, height: 88)
         case .armed:
             CGSize(width: 272, height: 48)
         case .dictating:

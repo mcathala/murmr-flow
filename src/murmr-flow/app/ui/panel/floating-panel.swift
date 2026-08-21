@@ -15,11 +15,16 @@ final class FloatingPanel {
     private var panel: NSPanel?
     private var host: NSHostingView<PanelView>?
 
-    /// Where the user dragged it to, if they did. Nil means bottom-centre of whichever
-    /// screen the pointer is on.
-    private var pinnedOrigin: CGPoint? {
+    /// Where the user dragged it to: the **centre** of its bottom edge, not a corner.
+    ///
+    /// Storing a corner meant every resize had to guess how to compensate, and the guess
+    /// drifted a few points each time the panel grew or shrank. An anchor the panel is
+    /// laid out *around* stays correct at any size.
+    ///
+    /// Nil means bottom-centre of whichever screen the pointer is on.
+    private var pinnedAnchor: CGPoint? {
         get {
-            guard let stored = UserDefaults.standard.string(forKey: Self.originKey) else {
+            guard let stored = UserDefaults.standard.string(forKey: Self.anchorKey) else {
                 return nil
             }
             let parts = stored.split(separator: ",").compactMap { Double($0) }
@@ -28,14 +33,16 @@ final class FloatingPanel {
         }
         set {
             guard let newValue else {
-                UserDefaults.standard.removeObject(forKey: Self.originKey)
+                UserDefaults.standard.removeObject(forKey: Self.anchorKey)
                 return
             }
-            UserDefaults.standard.set("\(newValue.x),\(newValue.y)", forKey: Self.originKey)
+            UserDefaults.standard.set("\(newValue.x),\(newValue.y)", forKey: Self.anchorKey)
         }
     }
 
-    private static let originKey = "panel.origin"
+    /// Deliberately a new key. The previous one accumulated a position saved from our own
+    /// resizes, so anything stored under it is wrong.
+    private static let anchorKey = "panel.anchor"
 
     init() {
         model.onPickPrompt = { [weak self] point in self?.showPromptMenu(at: point) }
@@ -64,8 +71,15 @@ final class FloatingPanel {
         }
 
         let size = model.size
-        let origin = anchoredOrigin(for: size, current: panel.frame)
+        let origin = self.origin(for: size, current: panel.frame)
+
+        // The flag has to wrap `setFrame` itself. It used to be set and cleared inside the
+        // origin calculation, which meant it was already false by the time the window
+        // moved — so every resize we performed was recorded as a user drag, and the panel
+        // pinned itself on first launch and then crept off centre.
+        isAdjusting = true
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        isAdjusting = false
 
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
@@ -95,6 +109,9 @@ final class FloatingPanel {
 
         let host = NSHostingView(rootView: PanelView(model: model))
         host.frame = NSRect(origin: .zero, size: model.size)
+        // Without this the hosting view keeps its original size while the window resizes
+        // around it, so the contents stop being centred the first time the panel grows.
+        host.autoresizingMask = [.width, .height]
         panel.contentView = host
 
         // Remember a drag. `didMove` also fires for our own resizes, so only a move that
@@ -104,7 +121,8 @@ final class FloatingPanel {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let panel = self.panel, !self.isAdjusting else { return }
-                self.pinnedOrigin = panel.frame.origin
+                let frame = panel.frame
+                self.pinnedAnchor = CGPoint(x: frame.midX, y: frame.minY)
             }
         }
 
@@ -114,28 +132,24 @@ final class FloatingPanel {
 
     private var isAdjusting = false
 
-    private func anchoredOrigin(for size: CGSize, current: NSRect) -> CGPoint {
-        isAdjusting = true
-        defer { isAdjusting = false }
-
-        if let pinned = pinnedOrigin, current.width > 0 {
-            // Grow upward and outward from where it sits, keeping the bottom-left corner
-            // put unless that would push it off the top of the screen.
-            return CGPoint(x: pinned.x - (size.width - current.width) / 2, y: pinned.y)
-        }
-        if current.width > 0, panel?.isVisible == true {
-            return CGPoint(x: current.midX - size.width / 2, y: current.minY)
-        }
-        return defaultOrigin(for: size)
+    /// Lays the panel out around its anchor, so growing is symmetrical and repeatable.
+    private func origin(for size: CGSize, current: NSRect) -> CGPoint {
+        let anchor = pinnedAnchor ?? defaultAnchor()
+        return CGPoint(x: (anchor.x - size.width / 2).rounded(), y: anchor.y.rounded())
     }
 
     /// Bottom-centre of whichever screen holds the pointer, so on a multi-display setup it
     /// appears where you are actually working.
-    private func defaultOrigin(for size: CGSize) -> CGPoint {
+    ///
+    /// `frame`, not `visibleFrame`: a Dock on the left or right shifts the visible area
+    /// sideways, and centring against that puts the panel visibly off the middle of the
+    /// screen. The bottom inset is taken from `visibleFrame` so a bottom Dock is cleared.
+    private func defaultAnchor() -> CGPoint {
         let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
-        guard let frame = screen?.visibleFrame else { return .zero }
-        return CGPoint(x: frame.midX - size.width / 2, y: frame.minY + 10)
+        let screen = NSScreen.screens.first { $0.frame.contains(mouse) }
+            ?? NSScreen.main
+        guard let screen else { return .zero }
+        return CGPoint(x: screen.frame.midX, y: screen.visibleFrame.minY + 10)
     }
 
     // MARK: - Prompt menu
