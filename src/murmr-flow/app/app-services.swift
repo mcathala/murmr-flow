@@ -19,7 +19,10 @@ final class AppServices {
     /// One settings store, one model, one transcriber — shared by both modes. Two
     /// `ModelManager`s would each load their own copy of the model, and two
     /// `SettingsStore`s would not see each other's changes.
-    private let settings = SettingsStore()
+    let settings = SettingsStore()
+    let history = HistoryStore()
+    let notes = MeetingStore()
+    let prompts = PromptStore()
     private let models = ModelManager()
     private let transcriber = TranscriptionService()
 
@@ -36,9 +39,12 @@ final class AppServices {
 
     private init() {
         dictation = DictationCoordinator(
-            settings: settings, models: models, transcriber: transcriber
+            settings: settings, models: models, transcriber: transcriber,
+            history: history, prompts: prompts
         )
-        meetings = MeetingCoordinator(models: models, transcriber: transcriber)
+        meetings = MeetingCoordinator(
+            models: models, transcriber: transcriber, notes: notes
+        )
     }
 
     // MARK: - Launch

@@ -150,7 +150,7 @@ struct MeetingsTab: View {
                 }
                 GridRow {
                     Text("Saved to").foregroundStyle(.secondary)
-                    Text(result.file.lastPathComponent)
+                    Text(result.note.title)
                         .lineLimit(2)
                         .truncationMode(.middle)
                 }
