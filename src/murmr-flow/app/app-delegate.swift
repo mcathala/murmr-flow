@@ -40,7 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func presentMainWindow() {
         Task { @MainActor in
             for _ in 0..<60 {
-                if let window = NSApp.windows.first(where: \.canBecomeMain) {
+                if let window = Self.mainWindow() {
                     Self.moveOnScreenIfNeeded(window)
                     NSApp.activate(ignoringOtherApps: true)
                     window.makeKeyAndOrderFront(nil)
@@ -49,6 +49,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }
+    }
+
+    /// The main window, specifically.
+    ///
+    /// `canBecomeMain` alone is not enough any more: the Settings scene produces a window
+    /// that also answers yes, so picking the first match could order Settings forward and
+    /// leave the real window unshown. Matching the title we set is exact; the rest is a
+    /// fallback for a future scene we haven't thought of.
+    @MainActor
+    private static func mainWindow() -> NSWindow? {
+        let windows = NSApp.windows
+        if let titled = windows.first(where: { $0.title == "Murmr Flow" }) { return titled }
+        if let identified = windows.first(where: {
+            $0.identifier?.rawValue.contains(MurmrFlowApp.mainWindowID) == true
+        }) { return identified }
+        return windows.first { $0.canBecomeMain && $0.title != "Settings" }
     }
 
     /// macOS restores the last window position, which may be on a display that is no

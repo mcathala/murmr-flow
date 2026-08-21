@@ -10,7 +10,7 @@ import Foundation
 /// The machine-readable part lives in YAML front matter, which is the convention every
 /// Markdown editor already understands, so making the file parseable also made it more
 /// portable rather than less.
-struct NoteFile: Identifiable, Sendable, Equatable {
+struct NoteFile: Identifiable, Sendable, Hashable {
 
     let url: URL
     let title: String

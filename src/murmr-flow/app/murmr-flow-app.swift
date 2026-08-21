@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Phase 2: hold the key, speak, release, and cleaned-up text appears at the cursor.
+/// Dictation and meeting notes, on this machine.
 ///
 /// Startup lives in `AppDelegate` / `AppServices`, not here — see `AppServices` for why.
 @main
@@ -14,19 +14,22 @@ struct MurmrFlowApp: App {
         // A window as well as a menu-bar item. On a notched MacBook with a busy menu bar,
         // new items land in the hidden overflow region and are simply invisible; with
         // external displays they only appear on whichever screen owns the menu bar.
-        Window("Murmr Flow", id: Self.panelWindowID) {
-            MainWindow(
-                permissions: services.permissions,
-                dictation: services.dictation,
-                meetings: services.meetings
-            )
+        Window("Murmr Flow", id: Self.mainWindowID) {
+            MainWindow(services: services)
                 // Backstop: see AppServices.start() for why this is not the only trigger.
                 .task { services.start(trigger: "window.task") }
         }
-        .windowResizability(.contentSize)
+        // Resizable now, not sized to its contents: Notes is a list beside a reading pane
+        // and has to be able to grow.
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 1000, height: 680)
+
+        Settings {
+            SettingsView(services: services)
+        }
 
         MenuBarExtra {
-            MenuBarContent(permissions: services.permissions, dictation: services.dictation)
+            MenuBarContent(services: services)
         } label: {
             Image(systemName: menuBarSymbol)
         }
@@ -36,11 +39,19 @@ struct MurmrFlowApp: App {
     /// The icon carries the state, since the menu bar is often all that's visible.
     private var menuBarSymbol: String {
         let dictation = services.dictation
+        // A meeting outranks everything: it is the one thing that can be running with no
+        // other sign of it on screen.
+        if services.meetings.stage.isRecording { return "record.circle.fill" }
         if dictation.stage.isRecording { return "waveform.circle.fill" }
         if dictation.stage.isBusy { return "ellipsis.circle.fill" }
         if !services.permissions.allGranted { return "exclamationmark.circle" }
         return dictation.hotkeyActive ? "waveform.circle" : "waveform.circle.badge.xmark"
     }
 
-    static let panelWindowID = "panel"
+    /// Renamed from "panel", which now means the floating panel — one name for two very
+    /// different windows was going to cause a mistake sooner or later.
+    ///
+    /// It doubles as the autosave key for the window's position, so the rename also
+    /// discards the frame saved when the window was 400×480.
+    static let mainWindowID = "main"
 }
