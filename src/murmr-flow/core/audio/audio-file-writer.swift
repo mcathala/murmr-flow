@@ -57,6 +57,19 @@ final class AudioFileWriter: @unchecked Sendable {
     private var framesWritten: AVAudioFramePosition = 0
     private var isFinished = false
 
+    /// Loudness of the most recent buffer, 0…1. Its own lock rather than the queue,
+    /// because the UI reads it ten times a second and must never wait behind a disk write.
+    private let levelLock = NSLock()
+    private var recentLevel: Float = 0
+
+    /// For the live meters. A flat meter is how you find out a stream is silent while
+    /// there is still time to do something about it.
+    var level: Float {
+        levelLock.lock()
+        defer { levelLock.unlock() }
+        return recentLevel
+    }
+
     init(sourceFormat: AVAudioFormat, url: URL, label: String) throws {
         guard let target = Self.fileFormat else { throw WriterError.formatUnavailable }
         guard let converter = AVAudioConverter(from: sourceFormat, to: target) else {
@@ -182,6 +195,8 @@ final class AudioFileWriter: @unchecked Sendable {
         }
         guard error == nil, output.frameLength > 0 else { return }
 
+        note(level: Self.peak(of: output))
+
         guard let file else { return }
         do {
             try file.write(from: output)
@@ -190,6 +205,25 @@ final class AudioFileWriter: @unchecked Sendable {
             // A failed write means a full disk or a vanished file. Nothing useful can be
             // done from the writer queue, and the transcript will simply be short.
         }
+    }
+
+    private func note(level: Float) {
+        levelLock.lock()
+        recentLevel = max(level, recentLevel * 0.72)
+        levelLock.unlock()
+    }
+
+    /// Peak of an Int16 buffer, normalised to 0…1.
+    private static func peak(of buffer: AVAudioPCMBuffer) -> Float {
+        guard let channel = buffer.int16ChannelData?[0] else { return 0 }
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return 0 }
+
+        var loudest: Int32 = 0
+        for index in 0..<frames {
+            loudest = max(loudest, Int32(abs(Int32(channel[index]))))
+        }
+        return Float(loudest) / Float(Int16.max)
     }
 
     /// Yields the input buffer exactly once, which is the contract `AVAudioConverter`'s

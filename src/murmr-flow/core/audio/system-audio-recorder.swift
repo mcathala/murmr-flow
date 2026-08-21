@@ -57,6 +57,9 @@ final class SystemAudioRecorder: @unchecked Sendable {
 
     var isRecording: Bool { ioProcID != nil }
 
+    /// Loudness of what the Mac is currently playing, 0…1.
+    var level: Float { writer?.level ?? 0 }
+
     // MARK: - Availability
 
     /// Whether the OS is new enough for process taps at all.

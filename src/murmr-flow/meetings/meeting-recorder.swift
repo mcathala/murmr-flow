@@ -57,6 +57,16 @@ final class MeetingRecorder {
 
     var isRecording: Bool { startedAt != nil }
 
+    /// Loudness of your microphone, 0…1.
+    var youLevel: Float { micWriter?.level ?? 0 }
+
+    /// Loudness of everything the Mac is playing, 0…1.
+    ///
+    /// The pair of these is the whole reason the panel has meters: a system-audio tap can
+    /// start cleanly and capture nothing, and without a meter you find out half an hour
+    /// later from an empty transcript.
+    var themLevel: Float { system.level }
+
     /// How long the current recording has been running.
     var elapsed: TimeInterval {
         guard let startedAt else { return 0 }
