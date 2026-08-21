@@ -14,9 +14,9 @@ final class SettingsStore {
         static let prompt = "cleanup.prompt"
         static let customWords = "cleanup.customWords"
         static let hotkey = "dictation.hotkey"
+        static let meetingHotkey = "meeting.hotkey"
         static let pauseMedia = "dictation.pauseMedia"
         static let holdToTalk = "dictation.holdToTalk"
-        static let speechModel = "stt.model"
     }
 
     private let defaults: UserDefaults
@@ -28,12 +28,8 @@ final class SettingsStore {
         self.promptTemplate =
             defaults.string(forKey: Key.prompt) ?? PromptLibrary.defaultCleanupPrompt
         self.customWords = defaults.stringArray(forKey: Key.customWords) ?? []
-        self.hotkey =
-            HotkeyMonitor.Trigger(rawValue: defaults.integer(forKey: Key.hotkey))
-            ?? .rightOption
-        self.speechModel =
-            SpeechModel(rawValue: defaults.string(forKey: Key.speechModel) ?? "")
-            ?? .parakeetV3
+        self.hotkey = Self.decode(defaults.data(forKey: Key.hotkey)) ?? .default
+        self.meetingHotkey = Self.decode(defaults.data(forKey: Key.meetingHotkey))
         self.pauseMediaWhileDictating =
             defaults.object(forKey: Key.pauseMedia) as? Bool ?? true
         self.holdToTalk = defaults.object(forKey: Key.holdToTalk) as? Bool ?? true
@@ -56,12 +52,25 @@ final class SettingsStore {
 
     // MARK: - Dictation
 
-    var hotkey: HotkeyMonitor.Trigger {
-        didSet { defaults.set(hotkey.rawValue, forKey: Key.hotkey) }
+    /// The key that starts a dictation.
+    var hotkey: Hotkey {
+        didSet { defaults.set(Self.encode(hotkey), forKey: Key.hotkey) }
     }
 
-    var speechModel: SpeechModel {
-        didSet { defaults.set(speechModel.rawValue, forKey: Key.speechModel) }
+    /// The key that starts a meeting. Optional, because there is no sensible default to
+    /// impose — a global key that begins recording everything you hear should be one you
+    /// asked for.
+    var meetingHotkey: Hotkey? {
+        didSet { defaults.set(meetingHotkey.flatMap(Self.encode), forKey: Key.meetingHotkey) }
+    }
+
+    private static func encode(_ hotkey: Hotkey) -> Data? {
+        try? JSONEncoder().encode(hotkey)
+    }
+
+    private static func decode(_ data: Data?) -> Hotkey? {
+        guard let data else { return nil }
+        return try? JSONDecoder().decode(Hotkey.self, from: data)
     }
 
     /// Pause whatever is playing while dictating, then put it back.

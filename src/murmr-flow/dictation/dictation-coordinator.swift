@@ -186,7 +186,7 @@ final class DictationCoordinator {
                 guard let self, self.settings.holdToTalk else { return }
                 Task { @MainActor in await self.endDictation() }
             }
-            try hotkey.start(trigger: settings.hotkey)
+            try hotkey.start(hotkey: settings.hotkey)
             hotkeyActive = true
         } catch {
             hotkeyActive = false
@@ -194,8 +194,8 @@ final class DictationCoordinator {
         }
     }
 
-    func changeHotkey(to trigger: HotkeyMonitor.Trigger) {
-        settings.hotkey = trigger
+    func changeHotkey(to newHotkey: Hotkey) {
+        settings.hotkey = newHotkey
         guard hotkeyActive else { return }
         installHotkey()
     }
@@ -401,7 +401,7 @@ final class DictationCoordinator {
     ///  2. A model already on disk should reload immediately instead of showing a
     ///     download prompt for something the user already has.
     func changeSpeechModel(_ model: SpeechModel) {
-        guard model != settings.speechModel else { return }
+        guard model != speech.activeModel else { return }
         speech.setActive(model)
         models.select(model)
         Task {
