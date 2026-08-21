@@ -35,6 +35,18 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v6)
             ]
+        ),
+
+        // Covers the pure logic that can't be exercised by clicking: parsing a note
+        // file, counting streaks, and grouping tokens into speech segments. All three
+        // have edge cases that would otherwise only surface as a wrong number on screen.
+        .testTarget(
+            name: "MurmrFlowTests",
+            dependencies: ["MurmrFlow"],
+            path: "tests/murmr-flow-tests",
+            swiftSettings: [
+                .swiftLanguageMode(.v6)
+            ]
         )
     ]
 )
