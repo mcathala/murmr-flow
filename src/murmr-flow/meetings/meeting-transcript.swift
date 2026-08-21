@@ -97,12 +97,13 @@ struct MeetingTranscript: Sendable {
     /// text, which matters for something the user owns rather than something we host.
     var markdown: String {
         var lines: [String] = []
+        // Front matter first: it is what lets the app read this file back as a note
+        // rather than keeping a second copy of the truth in a database.
+        lines.append(NoteFile.frontMatter(title: title, date: startedAt, duration: duration))
+        lines.append("")
         lines.append("# \(title)")
         lines.append("")
-        lines.append("- **Date:** \(Self.dateFormatter.string(from: startedAt))")
-        lines.append("- **Duration:** \(Self.clock(duration))")
-        lines.append("")
-        lines.append("## Transcript")
+        lines.append("\(Self.dateFormatter.string(from: startedAt)) · \(Self.clock(duration))")
         lines.append("")
 
         if utterances.isEmpty {

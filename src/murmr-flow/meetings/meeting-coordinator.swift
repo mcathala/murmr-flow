@@ -65,7 +65,7 @@ final class MeetingCoordinator {
     /// What the last finished meeting produced.
     struct Result: Sendable {
         let transcript: MeetingTranscript
-        let file: URL
+        let note: NoteFile
         /// Time spent transcribing, not the meeting's length.
         let processingTime: TimeInterval
     }
@@ -95,12 +95,14 @@ final class MeetingCoordinator {
 
     private let models: ModelManager
     private let transcriber: TranscriptionService
+    private let notes: MeetingStore
     private let recorder = MeetingRecorder()
     private var tickTask: Task<Void, Never>?
 
-    init(models: ModelManager, transcriber: TranscriptionService) {
+    init(models: ModelManager, transcriber: TranscriptionService, notes: MeetingStore) {
         self.models = models
         self.transcriber = transcriber
+        self.notes = notes
     }
 
     var isRecording: Bool { recorder.isRecording }
@@ -174,11 +176,11 @@ final class MeetingCoordinator {
                 duration: recording.duration,
                 title: MeetingStore.defaultTitle(for: recording.startedAt)
             )
-            let file = try MeetingStore.save(transcript)
+            let saved = try notes.save(transcript)
 
             lastResult = Result(
                 transcript: transcript,
-                file: file,
+                note: saved,
                 processingTime: (clock.now - started).seconds
             )
             stage = .saved
@@ -249,20 +251,16 @@ final class MeetingCoordinator {
     // MARK: - Files
 
     func revealLastNote() {
-        guard let file = lastResult?.file else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([file])
+        guard let note = lastResult?.note else { return }
+        notes.reveal(note)
     }
 
     func openLastNote() {
-        guard let file = lastResult?.file else { return }
-        NSWorkspace.shared.open(file)
+        guard let note = lastResult?.note else { return }
+        notes.open(note)
     }
 
-    func openNotesFolder() {
-        let folder = MeetingStore.folder
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(folder)
-    }
+    func openNotesFolder() { notes.openFolder() }
 
     /// Opens the pane holding the System Audio Recording toggle, for when the tap was
     /// refused. There is no API to grant it and no notification when it changes.
