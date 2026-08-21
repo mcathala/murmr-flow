@@ -56,10 +56,13 @@ struct HomeView: View {
 
     private var cleanupLevel: StatusChip.Level {
         guard services.settings.cleanupEnabled else { return .waiting }
-        switch services.dictation.providerTest {
+        let providers = services.providers
+        switch providers.state(for: providers.activeID).verification {
         case .working: return .ok
         case .failed: return .bad
-        case .idle, .running: return services.settings.hasAPIKey ? .waiting : .bad
+        // Configured but never exercised is amber, not green: a pasted key is not a
+        // working key, and this chip is the one place that claim is made.
+        case .untested: return providers.isUsable(providers.activeID) ? .waiting : .bad
         }
     }
 
