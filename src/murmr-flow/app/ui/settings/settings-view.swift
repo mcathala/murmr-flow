@@ -48,7 +48,7 @@ struct SettingsPaneView: View {
         case .cleanup:
             CleanupPane(settings: services.settings, dictation: services.dictation)
         case .keys:
-            KeysPane(settings: services.settings, dictation: services.dictation)
+            KeysPane(services: services)
         case .prompts:
             PromptsPane(prompts: services.prompts)
         case .permissions:

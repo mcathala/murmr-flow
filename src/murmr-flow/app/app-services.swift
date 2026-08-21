@@ -41,6 +41,11 @@ final class AppServices {
 
     private static let log = Logger(subsystem: "app.murmr.MurmrFlow", category: "startup")
 
+    /// A second watcher, because a meeting is a *toggle* rather than a hold — one press
+    /// starts, one stops. Sharing the dictation monitor would mean one key with two
+    /// meanings depending on which handler happened to be installed.
+    private let meetingHotkey = HotkeyMonitor()
+
     private var accessibilityWatch: Task<Void, Never>?
     private var hasStarted = false
 
@@ -86,6 +91,7 @@ final class AppServices {
         }
 
         armHotkeyIfPossible()
+        armMeetingHotkey()
         Self.log.notice("hotkey armed: \(self.dictation.hotkeyActive, privacy: .public)")
 
         // Load the model now rather than during the first dictation. Otherwise the user
@@ -112,6 +118,26 @@ final class AppServices {
 
         dictation.installHotkey()
         if dictation.hotkeyActive { accessibilityWatch?.cancel() }
+    }
+
+    /// Installs the meeting key, or removes it when there isn't one.
+    ///
+    /// Called on launch and whenever the binding changes, so an unset key genuinely stops
+    /// being watched rather than lingering until the next restart.
+    func armMeetingHotkey() {
+        meetingHotkey.stop()
+        guard let key = settings.meetingHotkey, permissions.accessibility == .granted else {
+            return
+        }
+
+        meetingHotkey.onPress = { [meetings] in meetings.toggle() }
+        meetingHotkey.onRelease = nil
+        try? meetingHotkey.start(hotkey: key)
+    }
+
+    func changeMeetingHotkey(to hotkey: Hotkey?) {
+        settings.meetingHotkey = hotkey
+        armMeetingHotkey()
     }
 
     private func watchForAccessibility() {
