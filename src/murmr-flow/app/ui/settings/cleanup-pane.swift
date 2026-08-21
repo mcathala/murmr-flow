@@ -148,32 +148,6 @@ struct CleanupPane: View {
     }
 }
 
-/// Two letters, not a brand logo.
-///
-/// A wall of official marks — one orange, one black, one tan, one blue — would fight the
-/// app's own palette in a single view, and each one is a trademarked asset to ship and
-/// keep current. Monograms cost nothing and stay on-palette. Recognition is the trade.
-struct Monogram: View {
-    let name: String
-
-    var body: some View {
-        Text(initials)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .frame(width: 26, height: 26)
-            .background(.quaternary.opacity(0.7), in: .rect(cornerRadius: 7))
-            .foregroundStyle(.secondary)
-    }
-
-    private var initials: String {
-        let words = name.split(separator: " ")
-        if words.count >= 2 {
-            return words.prefix(2).compactMap { $0.first }.map(String.init)
-                .joined().lowercased()
-        }
-        return String(name.prefix(2)).lowercased()
-    }
-}
-
 /// The key, and a button that proves it.
 private struct APIKeyField: View {
 

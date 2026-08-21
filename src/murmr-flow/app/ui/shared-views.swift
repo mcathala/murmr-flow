@@ -181,3 +181,51 @@ struct EmptyPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+
+/// Two letters, not a brand logo.
+///
+/// A wall of official marks — one orange, one black, one tan, one blue — would fight the
+/// app's own palette in a single view, and each one is a trademarked asset to ship and
+/// keep current. Monograms cost nothing and stay on-palette. Recognition is the trade.
+struct Monogram: View {
+    let name: String
+
+    var body: some View {
+        Text(initials)
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .frame(width: 26, height: 26)
+            .background(.quaternary.opacity(0.7), in: .rect(cornerRadius: 7))
+            .foregroundStyle(.secondary)
+    }
+
+    private var initials: String {
+        let words = name.split(separator: " ")
+        if words.count >= 2 {
+            return words.prefix(2).compactMap { $0.first }.map(String.init)
+                .joined().lowercased()
+        }
+        return String(name.prefix(2)).lowercased()
+    }
+}
+
+/// An app's real icon where we can get it, a monogram where we can't.
+///
+/// For apps on this Mac the icon is free and always current — macOS resolves it from the
+/// bundle identifier. The monogram is the fallback for an app that has since been
+/// uninstalled, where a generic placeholder would say less than two letters do.
+struct AppBadge: View {
+    let name: String
+    let bundleID: String?
+    var size: CGFloat = 26
+
+    var body: some View {
+        if let icon = AppIconCache.icon(forBundleID: bundleID) {
+            Image(nsImage: icon)
+                .resizable()
+                .frame(width: size, height: size)
+                .help(name)
+        } else {
+            Monogram(name: name)
+        }
+    }
+}
