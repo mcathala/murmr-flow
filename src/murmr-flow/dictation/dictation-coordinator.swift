@@ -112,18 +112,9 @@ final class DictationCoordinator {
 
     private(set) var voiceTest: VoiceTest = .idle
 
-    /// Whether the cleanup provider has actually been exercised.
-    ///
-    /// A pasted key is not a working key, and the difference used to surface only as a
-    /// failed dictation — at the worst possible moment.
-    enum ProviderTest: Equatable {
-        case idle
-        case running
-        case working(TimeInterval)
-        case failed(String)
-    }
-
-    private(set) var providerTest: ProviderTest = .idle
+    /// Which provider is mid-test, if any. The *result* lives with the provider in
+    /// `ProviderStore`, so it survives switching away and relaunching.
+    private(set) var testingProviderID: String?
 
     /// Microphone loudness, 0…1, for the waveform.
     private(set) var micLevel: Float = 0
@@ -141,6 +132,7 @@ final class DictationCoordinator {
     private let transcriber: TranscriptionService
     let history: HistoryStore
     let prompts: PromptStore
+    let providers: ProviderStore
     private let cleanup = CleanupService()
     private let hotkey = HotkeyMonitor()
     private let media = MediaPlaybackController()
@@ -165,13 +157,15 @@ final class DictationCoordinator {
         models: ModelManager = ModelManager(),
         transcriber: TranscriptionService = TranscriptionService(),
         history: HistoryStore = HistoryStore(),
-        prompts: PromptStore = PromptStore()
+        prompts: PromptStore = PromptStore(),
+        providers: ProviderStore = ProviderStore()
     ) {
         self.settings = settings
         self.models = models
         self.transcriber = transcriber
         self.history = history
         self.prompts = prompts
+        self.providers = providers
         models.select(settings.speechModel)
     }
 
@@ -320,7 +314,7 @@ final class DictationCoordinator {
             stage = .cleaning
             let outcome = await cleanup.clean(
                 transcript: raw,
-                config: settings.providerConfig,
+                config: settings.cleanupEnabled ? providers.activeConfig : nil,
                 prompt: PromptLibrary(template: prompts.dictationPrompt.template),
                 context: PromptLibrary.Context(
                     transcript: raw,
@@ -430,24 +424,6 @@ final class DictationCoordinator {
         }
     }
 
-    /// Round-trips the configured provider so "why isn't it working" is one click rather
-    /// than a guess.
-    func testCleanupProvider() async -> String {
-        guard let config = settings.providerConfig else {
-            return "Cleanup is off, or no model is set."
-        }
-        let outcome = await cleanup.clean(
-            transcript: "hey so uh this is a test of the cleanup provider",
-            config: config,
-            prompt: PromptLibrary(template: settings.promptTemplate),
-            context: PromptLibrary.Context(transcript: ""),
-            timeout: 15
-        )
-        if outcome.usedRawFallback {
-            return outcome.note ?? "Failed for an unknown reason."
-        }
-        return "Connected in \(String(format: "%.2f", outcome.latency))s → \(outcome.text)"
-    }
 
     // MARK: - Elapsed timer
 
@@ -469,7 +445,7 @@ final class DictationCoordinator {
     /// Only possible because the raw transcript is kept. Before, changing a prompt and
     /// wanting the old text through it meant saying the whole thing again.
     func rerunCleanup(on record: DictationRecord) async {
-        guard let config = settings.providerConfig else { return }
+        guard settings.cleanupEnabled, let config = providers.activeConfig else { return }
 
         let outcome = await cleanup.clean(
             transcript: record.rawText,
@@ -498,16 +474,22 @@ final class DictationCoordinator {
 
     // MARK: - Provider test
 
-    /// Sends a tiny transcript through the real cleanup path and reports what came back.
-    func testProvider() {
-        guard providerTest != .running else { return }
-        providerTest = .running
+    /// Sends a tiny transcript through the real cleanup path and records the result
+    /// against **that** provider.
+    ///
+    /// Takes an id so a provider can be proved without being made active — setting up a
+    /// second endpoint used to mean switching to it first, which took the working one out
+    /// of service to try an untested one.
+    func testProvider(_ id: String) {
+        guard testingProviderID == nil else { return }
+        guard let config = providers.config(for: id) else {
+            providers.setVerification(.failed("No endpoint or model is set."), for: id)
+            return
+        }
+        testingProviderID = id
 
         Task { @MainActor in
-            guard let config = settings.providerConfig else {
-                providerTest = .failed("No provider is configured.")
-                return
-            }
+            defer { testingProviderID = nil }
 
             let clock = ContinuousClock()
             let started = clock.now
@@ -522,14 +504,22 @@ final class DictationCoordinator {
 
             // `clean` never throws by design — it falls back to the raw text and says why.
             // So the fallback flag, not an error, is what tells us the provider failed.
-            providerTest = outcome.usedRawFallback
-                ? .failed(outcome.note ?? "The provider didn't reply.")
-                : .working((clock.now - started).seconds)
+            providers.setVerification(
+                outcome.usedRawFallback
+                    ? .failed(outcome.note ?? "The provider didn't reply.")
+                    : .working(latency: (clock.now - started).seconds, at: Date()),
+                for: id
+            )
         }
     }
 
-    func resetProviderTest() {
-        providerTest = .idle
+    /// Makes a provider the one dictation uses, and proves it while we are here — this is
+    /// the moment you care whether it works.
+    func activateProvider(_ id: String) {
+        providers.activeID = id
+        if !providers.state(for: id).verification.isWorking, providers.isUsable(id) {
+            testProvider(id)
+        }
     }
 
     // MARK: - Voice test
