@@ -12,20 +12,37 @@ struct DictaphoneView: View {
     let prompts: PromptStore
 
     @State private var showingRaw = false
-    @State private var selected: UUID?
+    /// A set, so a batch can go at once. Same reasoning as Notes: one-at-a-time is fine
+    /// for a mistake and useless for a clear-out.
+    @State private var selection: Set<UUID> = []
     @State private var isRerunning = false
+    @State private var confirmingDelete = false
 
     var body: some View {
         PaneScroll {
             recordCard
 
-            if let record = current {
-                SectionLabel(title: selected == nil ? "Last dictation" : "Dictation")
+            if selection.count > 1 {
+                SectionLabel(title: "\(selection.count) selected")
+                batchCard
+            } else if let record = current {
+                SectionLabel(title: selection.isEmpty ? "Last dictation" : "Dictation")
                 transcript(record)
             }
 
             if history.dictations.count > 1 {
-                SectionLabel(title: "Earlier")
+                HStack(spacing: 8) {
+                    SectionLabel(title: "History")
+                    Spacer(minLength: 0)
+                    if selection.count < history.dictations.count {
+                        Button("Select all") { selection = Set(history.dictations.map(\.id)) }
+                            .controlSize(.small)
+                    }
+                    if !selection.isEmpty {
+                        Button("Clear") { selection = [] }
+                            .controlSize(.small)
+                    }
+                }
                 list
             }
 
@@ -39,11 +56,48 @@ struct DictaphoneView: View {
                 .frame(minHeight: 220)
             }
         }
+        .confirmationDialog(
+            "Delete \(selection.count) dictation\(selection.count == 1 ? "" : "s")?",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                history.delete(ids: selection)
+                selection = []
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone.")
+        }
     }
 
     private var current: DictationRecord? {
-        if let selected { return history.dictations.first { $0.id == selected } }
+        if let one = selection.first, selection.count == 1 {
+            return history.dictations.first { $0.id == one }
+        }
         return history.dictations.first
+    }
+
+    private var selectedRecords: [DictationRecord] {
+        history.dictations.filter { selection.contains($0.id) }
+    }
+
+    /// Shown instead of a transcript when several are picked — there is no single one to
+    /// read, and the only useful thing to offer is getting rid of them.
+    private var batchCard: some View {
+        Card(highlighted: true) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(selection.count) dictations selected")
+                        .font(.callout.weight(.medium))
+                    Text("\(selectedRecords.reduce(0) { $0 + $1.wordCount }) words in total.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Button("Delete", role: .destructive) { confirmingDelete = true }
+            }
+        }
     }
 
     // MARK: - Record
@@ -159,8 +213,8 @@ struct DictaphoneView: View {
                     .disabled(isRerunning)
                     Spacer(minLength: 0)
                     Button {
-                        history.delete(record)
-                        selected = nil
+                        selection = [record.id]
+                        confirmingDelete = true
                     } label: {
                         Image(systemName: "trash")
                     }
@@ -176,11 +230,20 @@ struct DictaphoneView: View {
     private var list: some View {
         Card {
             VStack(spacing: 0) {
-                ForEach(Array(history.dictations.dropFirst().prefix(20))) { record in
+                ForEach(rows) { record in
                     Button {
-                        selected = record.id
+                        toggle(record)
                     } label: {
                         HStack(spacing: 10) {
+                            Image(
+                                systemName: selection.contains(record.id)
+                                    ? "checkmark.circle.fill" : "circle"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(
+                                selection.contains(record.id)
+                                    ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary)
+                            )
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(record.summary(limit: 90))
                                     .font(.callout)
@@ -195,12 +258,31 @@ struct DictaphoneView: View {
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-
-                    if record.id != history.dictations.dropFirst().prefix(20).last?.id {
-                        Divider()
+                    .contextMenu {
+                        Button("Delete", role: .destructive) {
+                            selection = [record.id]
+                            confirmingDelete = true
+                        }
                     }
+
+                    if record.id != rows.last?.id { Divider() }
                 }
             }
+        }
+    }
+
+    private var rows: [DictationRecord] {
+        Array(history.dictations.prefix(50))
+    }
+
+    /// Click to select, click again to deselect. A visible circle rather than a modifier
+    /// key, because these rows are cards rather than a `List` and there is nothing to
+    /// teach you that ⌘-click would work.
+    private func toggle(_ record: DictationRecord) {
+        if selection.contains(record.id) {
+            selection.remove(record.id)
+        } else {
+            selection.insert(record.id)
         }
     }
 
