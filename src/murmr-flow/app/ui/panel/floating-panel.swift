@@ -26,6 +26,9 @@ final class FloatingPanel {
 
     init() {
         model.onPickPrompt = { [weak self] point in self?.showPromptMenu(at: point) }
+        // The phase decides the size, and hover changes the phase from inside the view.
+        // Without this the window never resized for the states the pointer triggers.
+        model.onPhaseChange = { [weak self] in self?.apply() }
     }
 
     // MARK: - Lifecycle
@@ -35,6 +38,9 @@ final class FloatingPanel {
         apply()
         panel?.orderFrontRegardless()
     }
+
+    /// The window's current size, for tests that need to check it followed the phase.
+    var windowSize: CGSize? { panel?.frame.size }
 
     func dismiss() {
         panel?.orderOut(nil)

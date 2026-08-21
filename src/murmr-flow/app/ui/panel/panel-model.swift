@@ -90,6 +90,15 @@ final class PanelModel {
 
     // MARK: - Actions, wired by the app
 
+    /// Fired whenever the phase changes, because the phase determines `size` and the
+    /// window has to follow it.
+    ///
+    /// Without this, hover changed the phase from inside the view — where nothing was
+    /// listening — so a 132×84 cluster was laid out inside a window still 62×34. The
+    /// buttons were pushed out of the bottom of it and over the Dock, which looked like a
+    /// layout bug and was a plumbing one.
+    var onPhaseChange: (@MainActor () -> Void)?
+
     var onToggleDictation: (@MainActor () -> Void)?
     var onToggleMeeting: (@MainActor () -> Void)?
     var onCancel: (@MainActor () -> Void)?
@@ -103,6 +112,7 @@ final class PanelModel {
         // with no sign of it on screen.
         if phase.isBusy { isHidden = false }
         self.phase = phase
+        onPhaseChange?()
     }
 
     /// Pointer arrived or left. Ignored while something is running — a hover is an offer,
