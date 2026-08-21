@@ -38,9 +38,10 @@ struct PanelSnapshotTests {
             model.set(phase)
             model.promptName = "Default"
             model.elapsed = 64
-            model.micLevel = 0.6
-            model.youLevel = 0.1
-            model.themLevel = 0.7
+            model.micLevel = 0.09        // speaking
+            model.youLevel = 0.003       // a quiet room: should light nothing
+            model.themLevel = 0.08       // audio actually playing
+            if phase == .meeting { model.mode = .note }
             if phase == .dictating { model.preview = "okay so I want to see that" }
 
             let renderer = ImageRenderer(content: PanelView(model: model))
@@ -125,5 +126,72 @@ struct PanelWindowTests {
 
         #expect(panel.windowSize != resting)
         #expect(panel.windowSize == panel.model.size)
+    }
+}
+
+/// The meters exist to catch a capture that started cleanly and recorded silence. If the
+/// microphone's own noise floor lights a bar, they stop being believable and lose the only
+/// job they have.
+@Suite("Audio levels")
+struct AudioLevelTests {
+
+    @Test("a quiet room lights nothing")
+    func quietRoomIsDark() {
+        // Around -50 dBFS RMS, which is what a still room measures.
+        for bar in 0..<3 {
+            #expect(!AudioLevel.isLit(0.003, bar: bar))
+        }
+    }
+
+    @Test("digital silence lights nothing")
+    func silenceIsDark() {
+        for bar in 0..<3 {
+            #expect(!AudioLevel.isLit(0, bar: bar))
+        }
+    }
+
+    @Test("conversational speech lights the meter")
+    func speechShows() {
+        // ~-21 dBFS RMS.
+        #expect(AudioLevel.isLit(0.09, bar: 0))
+        #expect(AudioLevel.isLit(0.09, bar: 1))
+    }
+
+    @Test("a room with a fan stays dark")
+    func noisyRoomIsDark() {
+        // ~-35 dBFS: the level that was lighting "You" while nobody spoke.
+        #expect(!AudioLevel.isLit(0.018, bar: 0))
+    }
+
+    @Test("quiet speech still registers")
+    func quietSpeechShows() {
+        // ~-28 dBFS. The first bar has to catch this, or the meter under-reports someone
+        // talking softly — which is the failure that would make it useless.
+        #expect(AudioLevel.isLit(0.04, bar: 0))
+        #expect(!AudioLevel.isLit(0.04, bar: 1))
+    }
+
+    @Test("the bars form a ramp rather than all lighting together")
+    func ramp() {
+        #expect((0..<3).allSatisfy { AudioLevel.isLit(0.2, bar: $0) })
+        #expect(AudioLevel.isLit(0.09, bar: 1))
+        #expect(!AudioLevel.isLit(0.09, bar: 2))
+    }
+
+    @Test("smoothing rises fast and falls slow")
+    func attackAndRelease() {
+        let rising = AudioLevel.smooth(0.0, towards: 0.5)
+        let falling = AudioLevel.smooth(0.5, towards: 0.0)
+        // A meter should reach most of the way up in one step and take several coming down.
+        #expect(rising > 0.3)
+        #expect(falling > 0.4)
+    }
+
+    @Test("the display scale is logarithmic, not linear")
+    func normalisation() {
+        // Linear amplitude would put -21 dBFS speech at 0.09 of full height — invisible.
+        #expect(AudioLevel.normalised(0.09) > 0.5)
+        #expect(AudioLevel.normalised(0.003) < 0.1)
+        #expect(AudioLevel.normalised(0) == 0)
     }
 }

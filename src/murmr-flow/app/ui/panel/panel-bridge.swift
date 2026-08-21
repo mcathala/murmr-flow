@@ -69,13 +69,25 @@ final class PanelBridge {
             self?.meetings.toggle()
         }
 
-        model.onCancel = { [weak self] in
+        // Finish properly. Which of the two is running decides what "properly" means.
+        model.onStop = { [weak self] in
+            guard let self else { return }
+            if self.meetings.stage.isRecording {
+                self.meetings.toggle()
+            } else if self.dictation.stage.isRecording {
+                Task { await self.dictation.endDictation() }
+            }
+        }
+
+        // Throw it away. From `armed` there is nothing to throw, so it just dismisses.
+        model.onDiscard = { [weak self] in
             guard let self else { return }
             switch self.panel.model.phase {
+            case .dictating:
+                self.dictation.cancelDictation()
             case .failed:
                 self.panel.model.set(.resting)
             default:
-                // Only reachable from `armed`, where nothing has started yet.
                 self.panel.model.hide()
             }
             self.panel.apply()

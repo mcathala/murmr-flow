@@ -38,15 +38,36 @@ final class PanelModel {
             }
         }
 
-        /// While something is running, there is no ✕. It would have to mean "cancel" for
-        /// a dictation and "hide, but keep recording" for a meeting — one button, two
-        /// opposite outcomes, on states that look alike. Stopping is the way out.
-        var allowsClose: Bool {
+        /// What this state offers as a way out.
+        ///
+        /// Two buttons rather than one, because a single ✕ would have to mean "cancel" for
+        /// a dictation and "hide, but keep recording" for a meeting — one control, two
+        /// opposite outcomes, on states that look alike. Removing it entirely was the
+        /// wrong correction: it left a meeting you could start from the panel but not
+        /// stop from it.
+        var controls: Controls {
             switch self {
-            case .armed, .failed: true
-            default: false
+            case .dictating:
+                // Ten seconds of audio, so throwing away a fluffed sentence is cheap.
+                Controls(stop: true, discard: true)
+            case .meeting:
+                // Stop only. Discarding forty minutes on one stray click of a floating
+                // panel is not a risk worth offering; that lives in the window, where it
+                // can ask first.
+                Controls(stop: true, discard: false)
+            case .armed, .failed:
+                // Nothing was started, or it already ended — discard just dismisses.
+                Controls(stop: false, discard: true)
+            case .resting, .hovering, .working:
+                // Mid-transcription there is nothing useful to stop *into*.
+                Controls()
             }
         }
+    }
+
+    struct Controls: Equatable {
+        var stop = false
+        var discard = false
     }
 
     /// The whole failure vocabulary. Which half broke is all you need in the moment; the
@@ -101,7 +122,10 @@ final class PanelModel {
 
     var onToggleDictation: (@MainActor () -> Void)?
     var onToggleMeeting: (@MainActor () -> Void)?
-    var onCancel: (@MainActor () -> Void)?
+    /// Finish properly: transcribe and insert, or write the note.
+    var onStop: (@MainActor () -> Void)?
+    /// Throw it away.
+    var onDiscard: (@MainActor () -> Void)?
     var onPickPrompt: (@MainActor (NSPoint) -> Void)?
 
     // MARK: - Transitions
@@ -163,12 +187,12 @@ final class PanelModel {
             CGSize(width: 272, height: 48)
         case .dictating:
             preview.isEmpty
-                ? CGSize(width: 272, height: 48)
-                : CGSize(width: 412, height: 90)
+                ? CGSize(width: 330, height: 48)
+                : CGSize(width: 452, height: 90)
         case .working:
             CGSize(width: 232, height: 48)
         case .meeting:
-            CGSize(width: 336, height: 48)
+            CGSize(width: 368, height: 48)
         case .failed:
             CGSize(width: 268, height: 48)
         }

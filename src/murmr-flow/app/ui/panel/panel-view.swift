@@ -123,7 +123,7 @@ struct PanelView: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 promptChip
-                closeButton
+                controls
             }
         }
     }
@@ -148,6 +148,7 @@ struct PanelView: View {
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     promptChip
+                    controls
                 }
             }
         }
@@ -165,6 +166,7 @@ struct PanelView: View {
                 Meter(label: "You", level: model.youLevel)
                 Meter(label: "Them", level: model.themLevel)
                 Spacer(minLength: 0)
+                controls
             }
         }
     }
@@ -190,7 +192,7 @@ struct PanelView: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.orange)
                 Spacer(minLength: 0)
-                closeButton
+                controls
             }
         }
     }
@@ -275,20 +277,33 @@ struct PanelView: View {
         }
     }
 
+    /// Stop and discard, as separate controls with separate shapes — a square for
+    /// "finish", a cross for "throw away". Sharing one glyph is how a button ends up
+    /// meaning two opposite things.
     @ViewBuilder
-    private var closeButton: some View {
-        if model.phase.allowsClose {
-            Button {
-                model.onCancel?()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .frame(width: 18, height: 18)
-                    .background(.quaternary, in: .circle)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+    private var controls: some View {
+        let available = model.phase.controls
+        if available.stop {
+            circleButton("stop.fill", size: 9, tint: .red) { model.onStop?() }
+                .help("Stop")
         }
+        if available.discard {
+            circleButton("xmark", size: 8, tint: nil) { model.onDiscard?() }
+                .help(model.phase.controls.stop ? "Discard" : "Dismiss")
+        }
+    }
+
+    private func circleButton(
+        _ symbol: String, size: CGFloat, tint: Color?, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: size, weight: .bold))
+                .frame(width: 20, height: 20)
+                .background(.quaternary, in: .circle)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(tint ?? .secondary)
     }
 }
 
@@ -313,8 +328,7 @@ private struct Waveform: View {
     private func height(_ index: Int) -> CGFloat {
         let centre = Double(Self.bars - 1) / 2
         let falloff = 1 - abs(Double(index) - centre) / (centre + 1)
-        let scaled = Double(min(max(level, 0), 1))
-        return 3 + 15 * scaled * falloff
+        return 3 + 15 * AudioLevel.normalised(level) * falloff
     }
 }
 
@@ -340,6 +354,6 @@ private struct Meter: View {
     }
 
     private func lit(_ index: Int) -> Bool {
-        Double(level) > Double(index) * 0.14 + 0.02
+        AudioLevel.isLit(level, bar: index)
     }
 }
