@@ -85,9 +85,21 @@ final class MeetingCoordinator {
 
     private static let log = Logger(subsystem: "app.murmr.MurmrFlow", category: "meetings")
 
-    private(set) var stage: Stage = .idle
+    private(set) var stage: Stage = .idle {
+        didSet {
+            guard stage != oldValue else { return }
+            onStageChange?(stage)
+        }
+    }
+
+    /// Lets the floating panel react without this class knowing what a window is.
+    var onStageChange: (@MainActor (Stage) -> Void)?
     private(set) var elapsed: TimeInterval = 0
     private(set) var lastResult: Result?
+
+    /// Live levels, republished on the same tick as the timer.
+    private(set) var youLevel: Float = 0
+    private(set) var themLevel: Float = 0
 
     /// Set while a meeting holds the microphone, so dictation can stand down rather than
     /// opening a second input stream over the top of it.
@@ -236,9 +248,11 @@ final class MeetingCoordinator {
         tickTask?.cancel()
         tickTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
+                try? await Task.sleep(for: .milliseconds(100))
                 guard let self, self.recorder.isRecording else { return }
                 self.elapsed = self.recorder.elapsed
+                self.youLevel = self.recorder.youLevel
+                self.themLevel = self.recorder.themLevel
             }
         }
     }
@@ -246,6 +260,8 @@ final class MeetingCoordinator {
     private func stopTicking() {
         tickTask?.cancel()
         tickTask = nil
+        youLevel = 0
+        themLevel = 0
     }
 
     // MARK: - Files
