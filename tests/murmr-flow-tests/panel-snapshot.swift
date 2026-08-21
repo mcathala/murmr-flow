@@ -195,3 +195,78 @@ struct AudioLevelTests {
         #expect(AudioLevel.normalised(0) == 0)
     }
 }
+
+/// Renders the insights breakdown, because "add the real logo" is a claim only a picture
+/// can settle.
+@MainActor
+@Suite("Insights snapshot")
+struct InsightsSnapshotTests {
+
+    @Test("render where your words go")
+    func render() throws {
+        guard let directory = ProcessInfo.processInfo.environment["MURMR_SNAPSHOT_DIR"] else {
+            return
+        }
+
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date(timeIntervalSince1970: 1_775_000_000)
+        let apps: [(String, String)] = [
+            ("Cursor", "com.todesktop.230313mzl4w4u92"),
+            ("Brave Browser", "com.brave.Browser"),
+            ("Mail", "com.apple.mail"),
+            ("Gone", "com.example.uninstalled"),
+        ]
+
+        var records: [DictationRecord] = []
+        for (index, app) in apps.enumerated() {
+            records.append(
+                DictationRecord(
+                    date: calendar.date(byAdding: .day, value: -index, to: now)!,
+                    audioDuration: 12,
+                    rawText: "",
+                    finalText: Array(repeating: "word", count: 40 - index * 9)
+                        .joined(separator: " "),
+                    targetAppName: app.0,
+                    targetBundleID: app.1
+                )
+            )
+        }
+
+        let insights = Insights.compute(from: records, calendar: calendar, now: now)
+        let view = InsightsGrid(insights: insights, typingSpeed: 40, windowDays: 7)
+            .frame(width: 620)
+            .padding(16)
+            .background(Color(nsColor: .windowBackgroundColor))
+
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:])
+        else { return }
+
+        try png.write(
+            to: URL(fileURLWithPath: directory).appendingPathComponent("insights.png")
+        )
+    }
+}
+
+@MainActor
+@Suite("App icons")
+struct AppIconTests {
+
+    @Test("no bundle identifier means no icon")
+    func missingIdentifier() {
+        #expect(AppIconCache.icon(forBundleID: nil) == nil)
+        #expect(AppIconCache.icon(forBundleID: "") == nil)
+    }
+
+    @Test("an app that isn't installed resolves to nothing, and stays that way")
+    func uninstalled() {
+        let id = "com.example.definitely-not-installed"
+        #expect(AppIconCache.icon(forBundleID: id) == nil)
+        // Cached as a miss rather than retried on every redraw.
+        #expect(AppIconCache.icon(forBundleID: id) == nil)
+    }
+}

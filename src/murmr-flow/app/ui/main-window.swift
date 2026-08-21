@@ -15,15 +15,17 @@ struct MainWindow: View {
         case home
         case dictaphone
         case notes
+        case insights
         case settings(SettingsPane)
 
-        static let top: [Route] = [.home, .dictaphone, .notes]
+        static let top: [Route] = [.home, .dictaphone, .notes, .insights]
 
         var label: String {
             switch self {
             case .home: "Home"
             case .dictaphone: "Dictaphone"
             case .notes: "Notes"
+            case .insights: "Insights"
             case .settings(let pane): pane.label
             }
         }
@@ -33,6 +35,7 @@ struct MainWindow: View {
             case .home: "square.grid.2x2"
             case .dictaphone: "mic"
             case .notes: "text.document"
+            case .insights: "chart.bar"
             case .settings(let pane): pane.symbol
             }
         }
@@ -92,6 +95,8 @@ struct MainWindow: View {
             )
         case .notes:
             NotesView(notes: services.notes, meetings: services.meetings)
+        case .insights:
+            InsightsView(history: services.history)
         case .settings(let pane):
             SettingsPaneView(pane: pane, services: services)
         }

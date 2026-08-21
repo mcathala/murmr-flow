@@ -10,6 +10,8 @@ struct InsightsGrid: View {
 
     let insights: Insights
     let typingSpeed: Double
+    /// Only used for the footnotes, which must not claim "last 7 days" while showing 30.
+    var windowDays: Int = 7
 
     var body: some View {
         if insights.isEmpty {
@@ -37,7 +39,7 @@ struct InsightsGrid: View {
             Figure(
                 label: "Words dictated",
                 value: "\(insights.wordsDictated)",
-                footnote: "last 7 days"
+                footnote: "last \(windowDays) days"
             )
             // The only figure here that isn't a measurement. It is a word count divided
             // by a typing speed nobody timed, so the assumption is printed next to it
@@ -74,6 +76,11 @@ struct InsightsGrid: View {
                             RoundedRectangle(cornerRadius: 3)
                                 .fill(day.words > 0 ? AnyShapeStyle(.tint)
                                                     : AnyShapeStyle(.quaternary))
+                                // Capped, and centred in an even column. Left to fill the
+                                // width, seven bars across a wide card became blocks —
+                                // wider than they were tall, which reads as a stack of
+                                // slabs rather than a chart.
+                                .frame(maxWidth: 26)
                                 .frame(height: barHeight(day.words))
                             Text(Self.weekday(day.date))
                                 .font(.system(size: 9))
@@ -113,7 +120,7 @@ struct InsightsGrid: View {
                 SectionLabel(title: "Where your words go")
                 ForEach(insights.topApps) { app in
                     HStack(spacing: 10) {
-                        Monogram(name: app.name)
+                        AppBadge(name: app.name, bundleID: app.bundleID)
                         GeometryReader { geometry in
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(.tint)

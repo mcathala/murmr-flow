@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Home, in two parts: what you made, and what that adds up to.
+/// Home: what you made, and anything that needs attention.
 ///
-/// It used to be a lobby whose only claim was a Start button. Start moved to the toolbar,
-/// where it's available from every section — which freed Home to be the two things worth
-/// opening a window for.
+/// It began as a lobby whose only claim was a Start button, which moved to the toolbar.
+/// Insights lived here too and has since moved to its own section — the two were
+/// competing for one scroll, and they are read differently: this is glanceable, that is
+/// something you go and study.
 struct HomeView: View {
 
     let services: AppServices
@@ -18,8 +19,14 @@ struct HomeView: View {
             SectionLabel(title: "Recents")
             recents
 
-            SectionLabel(title: "Insights")
-            InsightsGrid(insights: insights, typingSpeed: Insights.defaultTypingWordsPerMinute)
+            if !history.isEmpty {
+                Button {
+                    onOpen(.insights)
+                } label: {
+                    Label("See your insights", systemImage: "chart.bar")
+                }
+                .controlSize(.small)
+            }
         }
         .onAppear { services.notes.reload() }
     }
@@ -77,9 +84,7 @@ struct HomeView: View {
 
     // MARK: - Recents
 
-    private var insights: Insights {
-        Insights.compute(from: services.history.dictations)
-    }
+    private var history: [DictationRecord] { services.history.dictations }
 
     /// One merged list, not two. Dictation rows carry the app they went to, which is free
     /// now that the panel tracks it.
@@ -105,10 +110,17 @@ struct HomeView: View {
                             onOpen(item.isNote ? .notes : .dictaphone)
                         } label: {
                             HStack(spacing: 10) {
-                                Image(systemName: item.symbol)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 16)
+                                if let bundleID = item.bundleID,
+                                   let icon = AppIconCache.icon(forBundleID: bundleID) {
+                                    Image(nsImage: icon)
+                                        .resizable()
+                                        .frame(width: 16, height: 16)
+                                } else {
+                                    Image(systemName: item.symbol)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 16)
+                                }
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(item.title)
                                         .font(.callout)
@@ -140,6 +152,9 @@ struct RecentItem: Identifiable {
     let subtitle: String
     let symbol: String
     let isNote: Bool
+    /// Set for dictations that went somewhere identifiable, so the row can carry that
+    /// app's own icon instead of a generic microphone.
+    var bundleID: String?
 
     static func merge(
         dictations: [DictationRecord], notes: [NoteFile], limit: Int
@@ -155,7 +170,8 @@ struct RecentItem: Identifiable {
                     $0.targetAppName,
                 ].compactMap { $0 }.joined(separator: " · "),
                 symbol: "mic.fill",
-                isNote: false
+                isNote: false,
+                bundleID: $0.targetBundleID
             )
         }
 
