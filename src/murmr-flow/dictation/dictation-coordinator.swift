@@ -105,6 +105,8 @@ final class DictationCoordinator {
     /// Shared with meetings mode, so only one copy of the ~600 MB model is resident and
     /// the two never run inference over each other's decoder state.
     private let transcriber: TranscriptionService
+    private let history: HistoryStore
+    let prompts: PromptStore
     private let cleanup = CleanupService()
     private let hotkey = HotkeyMonitor()
     private let media = MediaPlaybackController()
@@ -126,11 +128,15 @@ final class DictationCoordinator {
     init(
         settings: SettingsStore = SettingsStore(),
         models: ModelManager = ModelManager(),
-        transcriber: TranscriptionService = TranscriptionService()
+        transcriber: TranscriptionService = TranscriptionService(),
+        history: HistoryStore = HistoryStore(),
+        prompts: PromptStore = PromptStore()
     ) {
         self.settings = settings
         self.models = models
         self.transcriber = transcriber
+        self.history = history
+        self.prompts = prompts
         models.select(settings.speechModel)
     }
 
@@ -261,7 +267,7 @@ final class DictationCoordinator {
             let outcome = await cleanup.clean(
                 transcript: raw,
                 config: settings.providerConfig,
-                prompt: PromptLibrary(template: settings.promptTemplate),
+                prompt: PromptLibrary(template: prompts.dictationPrompt.template),
                 context: PromptLibrary.Context(
                     transcript: raw,
                     customWords: settings.customWords,
@@ -292,6 +298,21 @@ final class DictationCoordinator {
                     transcribeTime: transcribeTime,
                     cleanupTime: outcome.latency,
                     endToEnd: (clock.now - releasedAt).seconds
+                )
+            )
+
+            // On the record. Both texts are kept: the raw one is what makes a later
+            // "what did the AI change?" or a re-run against a different prompt possible
+            // at all, and until now it was discarded the instant cleanup returned.
+            history.add(
+                DictationRecord(
+                    audioDuration: transcription.audioDuration,
+                    rawText: raw,
+                    finalText: outcome.text,
+                    usedRawFallback: outcome.usedRawFallback,
+                    promptName: prompts.dictationPrompt.name,
+                    targetAppName: targetApp?.localizedName,
+                    targetBundleID: targetApp?.bundleIdentifier
                 )
             )
             stage = .idle
