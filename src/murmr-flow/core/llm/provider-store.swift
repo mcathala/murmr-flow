@@ -20,19 +20,6 @@ import Observation
 @Observable
 final class ProviderStore {
 
-    /// Whether this provider has actually been exercised. A pasted key is not a working
-    /// key, and the difference used to surface only as a failed dictation.
-    enum Verification: Codable, Equatable, Sendable {
-        case untested
-        case working(latency: TimeInterval, at: Date)
-        case failed(String)
-
-        var isWorking: Bool {
-            if case .working = self { return true }
-            return false
-        }
-    }
-
     struct State: Codable, Equatable, Sendable {
         var baseURL: String
         var model: String
