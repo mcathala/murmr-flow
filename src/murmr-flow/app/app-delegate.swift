@@ -53,10 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The main window, specifically.
     ///
-    /// `canBecomeMain` alone is not enough any more: the Settings scene produces a window
-    /// that also answers yes, so picking the first match could order Settings forward and
-    /// leave the real window unshown. Matching the title we set is exact; the rest is a
-    /// fallback for a future scene we haven't thought of.
+    /// Matching the title we set is exact. `canBecomeMain` alone was never specific —
+    /// any future scene would answer yes to it too — so the fallbacks are there only for
+    /// the case where SwiftUI hasn't applied the title yet.
     @MainActor
     private static func mainWindow() -> NSWindow? {
         let windows = NSApp.windows

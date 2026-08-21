@@ -7,6 +7,7 @@ import SwiftUI
 struct MurmrFlowApp: App {
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @Environment(\.openWindow) private var openWindow
 
     private var services: AppServices { AppServices.shared }
 
@@ -23,9 +24,18 @@ struct MurmrFlowApp: App {
         // and has to be able to grow.
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1000, height: 680)
-
-        Settings {
-            SettingsView(services: services)
+        .commands {
+            // Replaces the standard Settings item so ⌘, moves the sidebar rather than
+            // opening a second window. A separate Settings scene also made
+            // `canBecomeMain` ambiguous, which is how the main window ended up competing
+            // with it for presentation.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    services.route = .settings(.voice)
+                    openWindow(id: Self.mainWindowID)
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
 
         MenuBarExtra {

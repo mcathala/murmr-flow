@@ -8,7 +8,7 @@ import SwiftUI
 struct HomeView: View {
 
     let services: AppServices
-    let onOpen: (MainWindow.Section) -> Void
+    let onOpen: (MainWindow.Route) -> Void
 
     var body: some View {
         PaneScroll {

@@ -11,7 +11,6 @@ struct MenuBarContent: View {
     let services: AppServices
 
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -56,8 +55,11 @@ struct MenuBarContent: View {
 
             Button("Open Murmr Flow") { openWindow(id: MurmrFlowApp.mainWindowID) }
                 .controlSize(.small)
-            Button("Settings…") { openSettings() }
-                .controlSize(.small)
+            Button("Settings…") {
+                services.route = .settings(.voice)
+                openWindow(id: MurmrFlowApp.mainWindowID)
+            }
+            .controlSize(.small)
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .controlSize(.small)
         }

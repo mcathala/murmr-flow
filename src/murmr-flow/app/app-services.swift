@@ -16,6 +16,10 @@ final class AppServices {
 
     let permissions = PermissionManager()
 
+    /// Which section the window is showing. Held here rather than as view state so the
+    /// menu bar and the ⌘, shortcut can move it from outside the view.
+    var route: MainWindow.Route = .home
+
     /// One settings store, one model, one transcriber — shared by both modes. Two
     /// `ModelManager`s would each load their own copy of the model, and two
     /// `SettingsStore`s would not see each other's changes.
