@@ -71,7 +71,8 @@ final class DictationCoordinator {
         }
     }
 
-    struct Run: Sendable {
+    struct Run: Sendable, Identifiable {
+        let id = UUID()
         let rawTranscript: String
         let finalText: String
         let usedRawFallback: Bool
@@ -98,6 +99,13 @@ final class DictationCoordinator {
     private(set) var elapsed: TimeInterval = 0
     private(set) var hotkeyActive = false
 
+    /// Microphone loudness, 0…1, for the waveform.
+    private(set) var micLevel: Float = 0
+
+    /// Words as they are recognised, while you are still speaking. Provisional — the
+    /// authoritative transcript is the one taken at the end.
+    private(set) var preview: String = ""
+
     let settings: SettingsStore
     let models: ModelManager
 
@@ -112,6 +120,7 @@ final class DictationCoordinator {
     private let media = MediaPlaybackController()
     private static let mediaLog = Logger(subsystem: "app.murmr.MurmrFlow", category: "media")
     private var tickTask: Task<Void, Never>?
+    private var previewTask: Task<Void, Never>?
 
     /// Started at key-down so pausing never delays the recording; awaited before
     /// resuming so we know whether we were the ones who paused.
@@ -202,8 +211,11 @@ final class DictationCoordinator {
         do {
             try recorder.start()
             elapsed = 0
+            micLevel = 0
+            preview = ""
             stage = .recording
             startTicking()
+            startPreviewing()
 
             // Runs alongside recording rather than before it. The adapter reports the
             // media app's own playback state, which our microphone cannot influence, so
@@ -218,6 +230,7 @@ final class DictationCoordinator {
 
     func cancelDictation() {
         stopTicking()
+        stopPreviewing()
         recorder.cancel()
         stage = .idle
         elapsed = 0
@@ -232,6 +245,9 @@ final class DictationCoordinator {
             return
         }
         stopTicking()
+        // Before anything awaits: the transcriber is an actor, so an in-flight preview
+        // would otherwise sit in front of the transcription that actually matters.
+        stopPreviewing()
         stage = .transcribing
 
         let clock = ContinuousClock()
@@ -403,12 +419,61 @@ final class DictationCoordinator {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard let self, let startedAt = self.recorder.startedAt else { return }
                 self.elapsed = Date().timeIntervalSince(startedAt)
+                self.micLevel = self.recorder.level
             }
         }
     }
 
+    // MARK: - Live preview
+
+    /// Re-transcribes what has been captured so far, every so often, while recording.
+    ///
+    /// Deliberately *not* the library's streaming engine: that would mean a second model
+    /// bundle to download and hold in memory. Re-running the ordinary transcription over
+    /// the audio so far costs nothing new and is imperceptible at dictation length — a
+    /// few passes over a few seconds each.
+    ///
+    /// It does not scale, and that is fine. Each pass starts from the beginning, so the
+    /// work grows with the square of the recording; past `previewCutoff` the preview
+    /// simply stops updating rather than getting slower and slower.
+    private func startPreviewing() {
+        previewTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.previewInterval)
+                guard let self, self.stage.isRecording else { return }
+                guard self.elapsed < Self.previewCutoff else { return }
+                guard let capture = self.recorder.snapshot() else { continue }
+                guard await self.transcriber.isReady else { continue }
+
+                do {
+                    let samples = try await Task.detached(priority: .utility) {
+                        try MicRecorder.resample(capture)
+                    }.value
+                    let text = try await self.transcriber.transcribe(samples).text
+                    // Recording may have ended while that was in flight; a late preview
+                    // overwriting the finished state would be a flicker of stale text.
+                    guard self.stage.isRecording else { return }
+                    self.preview = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                } catch {
+                    // A failed preview is not a failed dictation. Stay quiet.
+                }
+            }
+        }
+    }
+
+    private func stopPreviewing() {
+        previewTask?.cancel()
+        previewTask = nil
+    }
+
+    private static let previewInterval: Duration = .milliseconds(1500)
+
+    /// Past this, previewing stops. Long dictations are rare and the cost is quadratic.
+    private static let previewCutoff: TimeInterval = 60
+
     private func stopTicking() {
         tickTask?.cancel()
         tickTask = nil
+        micLevel = 0
     }
 }
