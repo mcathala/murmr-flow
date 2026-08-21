@@ -111,12 +111,28 @@ final class MeetingStore {
     /// Moves the note to the Trash rather than unlinking it, so a mis-click is recoverable
     /// by the means the user already knows.
     func delete(_ note: NoteFile) {
-        do {
-            try FileManager.default.trashItem(at: note.url, resultingItemURL: nil)
-            reload()
-        } catch {
-            Self.log.error("delete failed: \(error.localizedDescription, privacy: .public)")
+        delete([note])
+    }
+
+    /// One reload for the batch, and a failure on one note does not abandon the rest.
+    func delete(_ notes: [NoteFile]) {
+        guard !notes.isEmpty else { return }
+        for note in notes {
+            do {
+                try FileManager.default.trashItem(at: note.url, resultingItemURL: nil)
+            } catch {
+                let name = note.url.lastPathComponent
+                Self.log.error(
+                    "delete failed for \(name, privacy: .public) — \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
+        reload()
+    }
+
+    /// Every note, to the Trash. Recoverable, which is the whole reason notes are files.
+    func deleteAll() {
+        delete(notes)
     }
 
     // MARK: - Shell

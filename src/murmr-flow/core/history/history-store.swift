@@ -92,10 +92,19 @@ final class HistoryStore {
     }
 
     func delete(_ record: DictationRecord) {
-        dictations.removeAll { $0.id == record.id }
+        delete(ids: [record.id])
+    }
+
+    /// One rewrite for the whole batch. Deleting fifty rows one at a time would rewrite
+    /// the file fifty times.
+    func delete(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        dictations.removeAll { ids.contains($0.id) }
         rewrite()
     }
 
+    /// Permanent. Unlike a note, a dictation has no file of its own to send to the Trash,
+    /// so there is nowhere to recover it from — which is why the UI says so before asking.
     func deleteAll() {
         dictations = []
         try? FileManager.default.removeItem(at: url)

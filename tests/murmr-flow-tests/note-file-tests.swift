@@ -73,3 +73,69 @@ struct NoteFileTests {
         #expect(body == "# Hello\n\nWorld")
     }
 }
+
+/// Bulk deletion, because doing it one at a time was the complaint.
+@MainActor
+@Suite("Bulk delete")
+struct BulkDeleteTests {
+
+    private func store() -> HistoryStore {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("murmr-bulk-\(UUID().uuidString)")
+            .appendingPathComponent("dictations.jsonl")
+        return HistoryStore(url: url)
+    }
+
+    private func record(_ text: String) -> DictationRecord {
+        DictationRecord(audioDuration: 3, rawText: text, finalText: text)
+    }
+
+    @Test("a batch goes in one operation")
+    func batch() {
+        let history = store()
+        let all = (1...5).map { record("dictation \($0)") }
+        all.forEach { history.add($0) }
+        #expect(history.dictations.count == 5)
+
+        history.delete(ids: Set(all.prefix(3).map(\.id)))
+        #expect(history.dictations.count == 2)
+    }
+
+    @Test("deleting a batch survives a reload")
+    func batchPersists() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("murmr-bulk-\(UUID().uuidString)")
+            .appendingPathComponent("dictations.jsonl")
+
+        let first = HistoryStore(url: url)
+        let all = (1...4).map { record("row \($0)") }
+        all.forEach { first.add($0) }
+        first.delete(ids: Set(all.prefix(2).map(\.id)))
+
+        // The point of a rewrite rather than an in-memory removal: it has to be gone from
+        // the file too, or it comes back on the next launch.
+        let reopened = HistoryStore(url: url)
+        #expect(reopened.dictations.count == 2)
+    }
+
+    @Test("an empty batch changes nothing")
+    func emptyBatch() {
+        let history = store()
+        history.add(record("kept"))
+        history.delete(ids: [])
+        #expect(history.dictations.count == 1)
+    }
+
+    @Test("delete all empties the file")
+    func deleteAll() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("murmr-bulk-\(UUID().uuidString)")
+            .appendingPathComponent("dictations.jsonl")
+
+        let first = HistoryStore(url: url)
+        (1...3).forEach { first.add(record("row \($0)")) }
+        first.deleteAll()
+
+        #expect(HistoryStore(url: url).dictations.isEmpty)
+    }
+}
