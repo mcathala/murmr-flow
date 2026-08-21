@@ -19,14 +19,7 @@ struct HomeView: View {
             SectionLabel(title: "Recents")
             recents
 
-            if !history.isEmpty {
-                Button {
-                    onOpen(.insights)
-                } label: {
-                    Label("See your insights", systemImage: "chart.bar")
-                }
-                .controlSize(.small)
-            }
+            if !history.isEmpty { summary }
         }
         .onAppear { services.notes.reload() }
     }
@@ -84,6 +77,61 @@ struct HomeView: View {
             return (message, ("Retry", { Task { await services.dictation.warmUp() } }))
         }
         return nil
+    }
+
+    // MARK: - Summary
+
+    /// Three numbers, and the row itself is the way through to the rest.
+    ///
+    /// This replaced a "See your insights" button. A button pointing at content is weaker
+    /// than the content: it costs the same click and tells you nothing on the way past.
+    ///
+    /// Volume, payoff, habit — chosen because each answers a different question. Pace is
+    /// the interesting one and deliberately not here: it is a curiosity rather than
+    /// something you act on, so it belongs where you went looking for it.
+    private var summary: some View {
+        let insights = Insights.compute(from: history)
+        return Button {
+            onOpen(.insights)
+        } label: {
+            Card {
+                HStack(spacing: 0) {
+                    stat("\(insights.wordsDictated)", "words this week")
+                    statDivider
+                    stat(Insights.shortDuration(insights.timeSaved), "saved")
+                    statDivider
+                    stat(
+                        "\(insights.streakDays)",
+                        insights.streakDays == 1 ? "day streak" : "days running"
+                    )
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Open Insights")
+    }
+
+    private func stat(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(value)
+                .font(.system(size: 17, weight: .semibold))
+                .monospacedDigit()
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(minWidth: 92, alignment: .leading)
+    }
+
+    private var statDivider: some View {
+        Rectangle()
+            .fill(.separator)
+            .frame(width: 1, height: 26)
+            .padding(.trailing, 16)
     }
 
     // MARK: - Recents

@@ -274,3 +274,77 @@ struct AppIconTests {
         #expect(AppIconCache.icon(forBundleID: id) == nil)
     }
 }
+
+/// Home's summary strip, so the three-number row can be judged by eye.
+@MainActor
+@Suite("Home summary snapshot")
+struct HomeSummarySnapshotTests {
+
+    @Test("render the summary strip")
+    func render() throws {
+        guard let directory = ProcessInfo.processInfo.environment["MURMR_SNAPSHOT_DIR"] else {
+            return
+        }
+
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date(timeIntervalSince1970: 1_775_000_000)
+        let records = (0..<4).map { offset in
+            DictationRecord(
+                date: calendar.date(byAdding: .day, value: -offset, to: now)!,
+                audioDuration: 14,
+                rawText: "",
+                finalText: Array(repeating: "word", count: 60).joined(separator: " "),
+                targetAppName: "Brave Browser",
+                targetBundleID: "com.brave.Browser"
+            )
+        }
+        let insights = Insights.compute(from: records, calendar: calendar, now: now)
+
+        let view = VStack(alignment: .leading, spacing: 10) {
+            SectionLabel(title: "Recents")
+            Card {
+                Text("▤ Pricing call with Léa").font(.callout)
+            }
+            Card {
+                HStack(spacing: 0) {
+                    summaryStat("\(insights.wordsDictated)", "words this week")
+                    summaryDivider
+                    summaryStat(Insights.shortDuration(insights.timeSaved), "saved")
+                    summaryDivider
+                    summaryStat("\(insights.streakDays)", "day streak")
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .frame(width: 560)
+        .padding(16)
+        .background(Color(nsColor: .windowBackgroundColor))
+
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:])
+        else { return }
+
+        try png.write(
+            to: URL(fileURLWithPath: directory).appendingPathComponent("home-summary.png")
+        )
+    }
+
+    private func summaryStat(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(value).font(.system(size: 17, weight: .semibold)).monospacedDigit()
+            Text(label).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(minWidth: 92, alignment: .leading)
+    }
+
+    private var summaryDivider: some View {
+        Rectangle().fill(.separator).frame(width: 1, height: 26).padding(.trailing, 16)
+    }
+}
