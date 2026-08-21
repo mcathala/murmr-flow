@@ -1,65 +1,97 @@
 import SwiftUI
 
-/// The menu-bar popover: status at a glance, and a way back to the window.
+/// The menu bar: the only surface that is always there.
 ///
-/// Deliberately thin. The menu bar is unreliable as a primary surface — on a crowded
-/// bar the icon can be pushed out of sight entirely — so it summarises and hands off
-/// rather than duplicating the window.
+/// The app has no Dock icon, so when the window is closed this is the whole interface —
+/// and it is the only sign that a meeting is still recording after the panel has been
+/// hidden. So it carries live state and the one control you can't reach otherwise, then
+/// hands off.
 struct MenuBarContent: View {
 
-    let permissions: PermissionManager
-    let dictation: DictationCoordinator
+    let services: AppServices
 
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 8, height: 8)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Murmr Flow").font(.subheadline.weight(.medium))
-                    Text(statusText).font(.caption2).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
+            header
 
-            if let run = dictation.lastRun {
-                Divider()
-                Text(run.finalText)
-                    .font(.caption)
-                    .lineLimit(3)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Copy last dictation") {
-                    TextInjector.copyToClipboard(run.finalText)
+            if services.meetings.stage.isRecording {
+                Button {
+                    services.meetings.toggle()
+                } label: {
+                    Label(
+                        "Stop meeting · \(MeetingTranscript.clock(services.meetings.elapsed))",
+                        systemImage: "stop.fill"
+                    )
                 }
                 .controlSize(.small)
+            } else {
+                Button {
+                    services.meetings.toggle()
+                } label: {
+                    Label("Start meeting", systemImage: "record.circle")
+                }
+                .controlSize(.small)
+                .disabled(services.dictation.stage.isRecording)
+            }
+
+            let notes = services.notes.notes.prefix(3)
+            if !notes.isEmpty {
+                Divider()
+                SectionLabel(title: "Recent notes")
+                ForEach(notes) { note in
+                    Button {
+                        services.notes.open(note)
+                    } label: {
+                        Text(note.title).lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                }
             }
 
             Divider()
 
-            Button("Open Murmr Flow") { openWindow(id: MurmrFlowApp.panelWindowID) }
+            Button("Open Murmr Flow") { openWindow(id: MurmrFlowApp.mainWindowID) }
                 .controlSize(.small)
+            Button("Settings…") {
+                services.route = .settings(.voice)
+                openWindow(id: MurmrFlowApp.mainWindowID)
+            }
+            .controlSize(.small)
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .controlSize(.small)
         }
         .padding(12)
-        .frame(width: 240)
+        .frame(width: 250)
+        .onAppear { services.notes.reload() }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Circle().fill(statusColor).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Murmr Flow").font(.subheadline.weight(.medium))
+                Text(statusText).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     private var statusColor: Color {
-        if dictation.stage.isBusy { return .orange }
-        if !permissions.allGranted { return .red }
-        return dictation.hotkeyActive ? .green : .red
+        if services.meetings.stage.isRecording { return .red }
+        if services.dictation.stage.isBusy { return .orange }
+        if !services.permissions.allGranted { return .orange }
+        return services.dictation.hotkeyActive ? .green : .orange
     }
 
     private var statusText: String {
-        if dictation.stage.isBusy { return dictation.stage.label }
-        if !permissions.allGranted { return "Permissions needed" }
-        return dictation.hotkeyActive
-            ? "Hold \(dictation.settings.hotkey.displayName)"
+        if services.meetings.stage.isRecording { return "Recording a meeting" }
+        if services.dictation.stage.isBusy { return services.dictation.stage.label }
+        if !services.permissions.allGranted { return "Permissions needed" }
+        return services.dictation.hotkeyActive
+            ? "Hold \(services.dictation.settings.hotkey.displayName)"
             : "Hotkey not active"
     }
 }

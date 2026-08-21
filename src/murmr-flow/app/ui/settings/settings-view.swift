@@ -1,0 +1,64 @@
+import SwiftUI
+
+/// The five settings panes.
+///
+/// They are sidebar rows in the main window rather than a separate Settings scene: one
+/// window means one place to be, and listing the panes shows what is configurable instead
+/// of hiding it behind ⌘,.
+///
+/// The rule every pane follows: **a healthy install shows almost nothing.** No captions
+/// restating what a toggle does, no rows confirming that something is fine.
+enum SettingsPane: String, Hashable, CaseIterable, Identifiable {
+    case voice, cleanup, keys, prompts, permissions, data
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .voice: "Voice transcription"
+        case .cleanup: "AI clean-up"
+        case .keys: "Key binds"
+        case .prompts: "Prompts"
+        case .permissions: "Permissions"
+        case .data: "Data"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .voice: "waveform"
+        case .cleanup: "sparkles"
+        case .keys: "keyboard"
+        case .prompts: "text.quote"
+        case .permissions: "lock.shield"
+        case .data: "externaldrive"
+        }
+    }
+}
+
+struct SettingsPaneView: View {
+
+    let pane: SettingsPane
+    let services: AppServices
+
+    var body: some View {
+        switch pane {
+        case .voice:
+            VoicePane(models: services.dictation.models, dictation: services.dictation)
+        case .cleanup:
+            CleanupPane(settings: services.settings, dictation: services.dictation)
+        case .keys:
+            KeysPane(services: services)
+        case .prompts:
+            PromptsPane(prompts: services.prompts)
+        case .permissions:
+            PermissionsPane(
+                permissions: services.permissions,
+                settings: services.settings,
+                notes: services.notes
+            )
+        case .data:
+            DataPane(history: services.history, notes: services.notes)
+        }
+    }
+}

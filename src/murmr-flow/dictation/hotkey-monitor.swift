@@ -3,10 +3,9 @@ import CoreGraphics
 
 /// Watches for a push-to-talk key held anywhere in the system.
 ///
-/// A modifier key is used rather than a letter chord: holding it while speaking cannot
-/// collide with typing, and it needs no "was that a tap or a hold" heuristic. Right
-/// Option is the default because the Globe/fn key only behaves consistently on Apple
-/// keyboards.
+/// Whatever the user recorded — a modifier on its own, or a key with modifiers. Right ⌥
+/// is the default because holding a modifier while speaking cannot collide with typing and
+/// needs no "was that a tap or a hold" heuristic, but it is a default rather than a limit.
 ///
 /// The tap is **listen-only**, so the keypress still reaches the frontmost app.
 /// Swallowing it would be surprising for a key the user may want for its normal purpose.
@@ -24,33 +23,54 @@ final class HotkeyMonitor: @unchecked Sendable {
         }
     }
 
-    /// Push-to-talk keys we support. Raw values are virtual keycodes.
-    enum Trigger: Int, CaseIterable, Identifiable, Sendable {
-        case rightOption = 61
-        case rightCommand = 54
-        case rightControl = 62
+    /// Whether any enabled macOS shortcut is bound to the same combination.
+    ///
+    /// Reads the system's own symbolic-hotkey list. Scoped precisely, because over-claiming
+    /// would be worse than not checking: it cannot see shortcuts owned by other apps, and
+    /// it cannot know that a keyboard layout treats right ⌥ as AltGr. Silence means
+    /// "nothing in the system list", not "guaranteed free".
+    static func conflict(for hotkey: Hotkey) -> String? {
+        guard let defaults = UserDefaults(suiteName: "com.apple.symbolichotkeys"),
+              let hotkeys = defaults.dictionary(forKey: "AppleSymbolicHotKeys")
+        else { return nil }
 
-        var id: Int { rawValue }
+        for (_, raw) in hotkeys {
+            guard let entry = raw as? [String: Any],
+                  entry["enabled"] as? Bool == true,
+                  let value = entry["value"] as? [String: Any],
+                  let parameters = value["parameters"] as? [Any],
+                  parameters.count >= 3,
+                  let modifiers = parameters[2] as? Int,
+                  let keyCode = parameters[1] as? Int
+            else { continue }
 
-        var displayName: String {
-            switch self {
-            case .rightOption: "Right ⌥ Option"
-            case .rightCommand: "Right ⌘ Command"
-            case .rightControl: "Right ⌃ Control"
+            if hotkey.isModifierOnly {
+                // A modifier-only shortcut carries no key code of its own.
+                guard keyCode == 0xFFFF || keyCode < 0 else { continue }
+                guard let flag = Hotkey.modifierFlags[hotkey.keyCode],
+                      carbonMask(for: flag) == modifiers
+                else { continue }
+            } else {
+                guard keyCode == Int(hotkey.keyCode),
+                      carbonMask(for: hotkey.modifiers) == modifiers
+                else { continue }
             }
+            return "A macOS shortcut already uses \(hotkey.displayName)."
         }
-
-        /// The modifier bit that is set while this key is held.
-        var flag: CGEventFlags {
-            switch self {
-            case .rightOption: .maskAlternate
-            case .rightCommand: .maskCommand
-            case .rightControl: .maskControl
-            }
-        }
+        return nil
     }
 
-    private(set) var trigger: Trigger = .rightOption
+    /// The system list stores Carbon-style masks, which are not the CoreGraphics bits.
+    private static func carbonMask(for flags: CGEventFlags) -> Int {
+        var mask = 0
+        if flags.contains(.maskShift) { mask |= 131_072 }
+        if flags.contains(.maskControl) { mask |= 262_144 }
+        if flags.contains(.maskAlternate) { mask |= 524_288 }
+        if flags.contains(.maskCommand) { mask |= 1_048_576 }
+        return mask
+    }
+
+    private(set) var hotkey: Hotkey = .default
 
     /// Called on the main actor when the key goes down / comes back up.
     var onPress: (@MainActor @Sendable () -> Void)?
@@ -64,13 +84,17 @@ final class HotkeyMonitor: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
-    func start(trigger: Trigger = .rightOption) throws {
+    func start(hotkey: Hotkey = .default) throws {
         stop()
-        self.trigger = trigger
+        self.hotkey = hotkey
 
-        // flagsChanged fires for modifier press *and* release; which one it is has to be
-        // inferred from whether the flag is still set.
-        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+        // flagsChanged for a modifier-only trigger; keyDown and keyUp for a combination.
+        // Watching all three unconditionally keeps `handle` the only place that decides
+        // what counts, rather than splitting the rule across two masks.
+        let mask =
+            CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+            | CGEventMask(1 << CGEventType.keyDown.rawValue)
+            | CGEventMask(1 << CGEventType.keyUp.rawValue)
 
         let callback: CGEventTapCallBack = { _, type, event, userInfo in
             guard let userInfo else { return Unmanaged.passUnretained(event) }
@@ -118,12 +142,29 @@ final class HotkeyMonitor: @unchecked Sendable {
             return
         }
 
-        guard type == .flagsChanged else { return }
+        let code = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
 
-        guard event.getIntegerValueField(.keyboardEventKeycode) == Int64(trigger.rawValue)
-        else { return }
+        let held: Bool
+        if hotkey.isModifierOnly {
+            guard type == .flagsChanged, code == hotkey.keyCode,
+                  let flag = Hotkey.modifierFlags[hotkey.keyCode]
+            else { return }
+            // flagsChanged fires for press *and* release; which one it is has to be
+            // inferred from whether the flag is still set.
+            held = event.flags.contains(flag)
+        } else {
+            guard type == .keyDown || type == .keyUp, code == hotkey.keyCode else { return }
+            // The modifiers must be held on the way down. On the way up they often are
+            // not — releasing ⌘ before D is normal — so a keyUp for the right key ends it
+            // regardless, or the recording would never stop.
+            if type == .keyDown {
+                guard event.flags.isSuperset(of: hotkey.modifiers) else { return }
+                held = true
+            } else {
+                held = false
+            }
+        }
 
-        let held = event.flags.contains(trigger.flag)
         guard held != isHeld else { return }
         isHeld = held
 

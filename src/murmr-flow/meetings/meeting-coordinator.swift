@@ -65,7 +65,7 @@ final class MeetingCoordinator {
     /// What the last finished meeting produced.
     struct Result: Sendable {
         let transcript: MeetingTranscript
-        let file: URL
+        let note: NoteFile
         /// Time spent transcribing, not the meeting's length.
         let processingTime: TimeInterval
     }
@@ -85,9 +85,21 @@ final class MeetingCoordinator {
 
     private static let log = Logger(subsystem: "app.murmr.MurmrFlow", category: "meetings")
 
-    private(set) var stage: Stage = .idle
+    private(set) var stage: Stage = .idle {
+        didSet {
+            guard stage != oldValue else { return }
+            onStageChange?(stage)
+        }
+    }
+
+    /// Lets the floating panel react without this class knowing what a window is.
+    var onStageChange: (@MainActor (Stage) -> Void)?
     private(set) var elapsed: TimeInterval = 0
     private(set) var lastResult: Result?
+
+    /// Live levels, republished on the same tick as the timer.
+    private(set) var youLevel: Float = 0
+    private(set) var themLevel: Float = 0
 
     /// Set while a meeting holds the microphone, so dictation can stand down rather than
     /// opening a second input stream over the top of it.
@@ -95,12 +107,14 @@ final class MeetingCoordinator {
 
     private let models: ModelManager
     private let transcriber: TranscriptionService
+    private let notes: MeetingStore
     private let recorder = MeetingRecorder()
     private var tickTask: Task<Void, Never>?
 
-    init(models: ModelManager, transcriber: TranscriptionService) {
+    init(models: ModelManager, transcriber: TranscriptionService, notes: MeetingStore) {
         self.models = models
         self.transcriber = transcriber
+        self.notes = notes
     }
 
     var isRecording: Bool { recorder.isRecording }
@@ -174,11 +188,11 @@ final class MeetingCoordinator {
                 duration: recording.duration,
                 title: MeetingStore.defaultTitle(for: recording.startedAt)
             )
-            let file = try MeetingStore.save(transcript)
+            let saved = try notes.save(transcript)
 
             lastResult = Result(
                 transcript: transcript,
-                file: file,
+                note: saved,
                 processingTime: (clock.now - started).seconds
             )
             stage = .saved
@@ -234,9 +248,11 @@ final class MeetingCoordinator {
         tickTask?.cancel()
         tickTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
+                try? await Task.sleep(for: .milliseconds(100))
                 guard let self, self.recorder.isRecording else { return }
                 self.elapsed = self.recorder.elapsed
+                self.youLevel = self.recorder.youLevel
+                self.themLevel = self.recorder.themLevel
             }
         }
     }
@@ -244,25 +260,23 @@ final class MeetingCoordinator {
     private func stopTicking() {
         tickTask?.cancel()
         tickTask = nil
+        youLevel = 0
+        themLevel = 0
     }
 
     // MARK: - Files
 
     func revealLastNote() {
-        guard let file = lastResult?.file else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([file])
+        guard let note = lastResult?.note else { return }
+        notes.reveal(note)
     }
 
     func openLastNote() {
-        guard let file = lastResult?.file else { return }
-        NSWorkspace.shared.open(file)
+        guard let note = lastResult?.note else { return }
+        notes.open(note)
     }
 
-    func openNotesFolder() {
-        let folder = MeetingStore.folder
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(folder)
-    }
+    func openNotesFolder() { notes.openFolder() }
 
     /// Opens the pane holding the System Audio Recording toggle, for when the tap was
     /// refused. There is no API to grant it and no notification when it changes.

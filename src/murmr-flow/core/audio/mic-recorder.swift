@@ -45,10 +45,12 @@ final class MicRecorder: @unchecked Sendable {
     /// Nil whenever we are not recording, so no audio hardware stays claimed.
     private var engine: AVAudioEngine?
 
-    /// Guards `samples` and `inputSampleRate`, both touched from the audio thread.
+    /// Guards `samples`, `inputSampleRate` and `recentLevel`, all touched from the audio
+    /// thread.
     private let lock = NSLock()
     private var samples: [Float] = []
     private var inputSampleRate: Double = 0
+    private var recentLevel: Float = 0
 
     /// Roughly 60 s at 48 kHz, reserved up front so the audio thread does not have to
     /// reallocate mid-recording.
@@ -57,6 +59,27 @@ final class MicRecorder: @unchecked Sendable {
     private(set) var startedAt: Date?
 
     var isRecording: Bool { engine?.isRunning ?? false }
+
+    /// Loudness of the last buffer, 0…1, for the waveform. Reading it is cheap and lossy
+    /// on purpose — a meter that misses a buffer is invisible; a meter that locks the
+    /// audio thread is a glitch.
+    var level: Float {
+        lock.lock()
+        defer { lock.unlock() }
+        return recentLevel
+    }
+
+    /// Everything captured so far, without stopping. This is what makes a live preview
+    /// possible: the audio keeps accumulating while a copy goes off to be transcribed.
+    func snapshot() -> Capture? {
+        lock.lock()
+        let captured = samples
+        let rate = inputSampleRate
+        lock.unlock()
+
+        guard !captured.isEmpty, rate > 0 else { return nil }
+        return Capture(samples: captured, sampleRate: rate)
+    }
 
     // MARK: - Control
 
@@ -126,6 +149,7 @@ final class MicRecorder: @unchecked Sendable {
         startedAt = nil
         lock.lock()
         samples.removeAll(keepingCapacity: true)
+        recentLevel = 0
         lock.unlock()
     }
 
@@ -179,8 +203,19 @@ final class MicRecorder: @unchecked Sendable {
         // rather than downmixing by hand.
         let channel = channels[0]
 
+        // RMS, not peak. Noise is spiky and speech is sustained, so peak is the worst
+        // statistic available for "is someone talking": one stray sample from the mic's
+        // own noise floor was enough to light the meter and keep it lit.
+        var sum: Float = 0
+        for index in 0..<frames {
+            let sample = channel[index]
+            sum += sample * sample
+        }
+        let rms = (sum / Float(frames)).squareRoot()
+
         lock.lock()
         samples.append(contentsOf: UnsafeBufferPointer(start: channel, count: frames))
+        recentLevel = AudioLevel.smooth(recentLevel, towards: rms)
         lock.unlock()
     }
 }

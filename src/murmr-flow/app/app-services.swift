@@ -16,10 +16,19 @@ final class AppServices {
 
     let permissions = PermissionManager()
 
+    /// Which section the window is showing. Held here rather than as view state so the
+    /// menu bar and the ⌘, shortcut can move it from outside the view.
+    var route: MainWindow.Route = .home
+
     /// One settings store, one model, one transcriber — shared by both modes. Two
     /// `ModelManager`s would each load their own copy of the model, and two
     /// `SettingsStore`s would not see each other's changes.
-    private let settings = SettingsStore()
+    let settings = SettingsStore()
+    let history = HistoryStore()
+    let notes = MeetingStore()
+    let prompts = PromptStore()
+    let providers = ProviderStore()
+    let speech = SpeechModelStore()
     private let models = ModelManager()
     private let transcriber = TranscriptionService()
 
@@ -27,18 +36,28 @@ final class AppServices {
     let meetings: MeetingCoordinator
 
     /// Not observable state: it owns an NSPanel and must never be recreated.
-    let hud = DictationHUD()
+    let panel = FloatingPanel()
+    private var bridge: PanelBridge?
 
     private static let log = Logger(subsystem: "app.murmr.MurmrFlow", category: "startup")
+
+    /// A second watcher, because a meeting is a *toggle* rather than a hold — one press
+    /// starts, one stops. Sharing the dictation monitor would mean one key with two
+    /// meanings depending on which handler happened to be installed.
+    private let meetingHotkey = HotkeyMonitor()
 
     private var accessibilityWatch: Task<Void, Never>?
     private var hasStarted = false
 
     private init() {
         dictation = DictationCoordinator(
-            settings: settings, models: models, transcriber: transcriber
+            settings: settings, models: models, transcriber: transcriber,
+            history: history, prompts: prompts, providers: providers,
+            speech: speech
         )
-        meetings = MeetingCoordinator(models: models, transcriber: transcriber)
+        meetings = MeetingCoordinator(
+            models: models, transcriber: transcriber, notes: notes
+        )
     }
 
     // MARK: - Launch
@@ -58,7 +77,13 @@ final class AppServices {
         hasStarted = true
         Self.log.notice("start(\(trigger, privacy: .public)) running")
 
-        dictation.onStageChange = { [hud] stage in hud.update(stage: stage) }
+        // One bridge owns every link between the coordinators and the panel, so neither
+        // coordinator ever holds a reference to a window.
+        let bridge = PanelBridge(
+            panel: panel, dictation: dictation, meetings: meetings, prompts: prompts
+        )
+        bridge.start()
+        self.bridge = bridge
 
         // The microphone cannot serve both at once, so whichever starts first wins.
         meetings.onRecordingChange = { [dictation] isRecording in
@@ -66,6 +91,7 @@ final class AppServices {
         }
 
         armHotkeyIfPossible()
+        armMeetingHotkey()
         Self.log.notice("hotkey armed: \(self.dictation.hotkeyActive, privacy: .public)")
 
         // Load the model now rather than during the first dictation. Otherwise the user
@@ -92,6 +118,26 @@ final class AppServices {
 
         dictation.installHotkey()
         if dictation.hotkeyActive { accessibilityWatch?.cancel() }
+    }
+
+    /// Installs the meeting key, or removes it when there isn't one.
+    ///
+    /// Called on launch and whenever the binding changes, so an unset key genuinely stops
+    /// being watched rather than lingering until the next restart.
+    func armMeetingHotkey() {
+        meetingHotkey.stop()
+        guard let key = settings.meetingHotkey, permissions.accessibility == .granted else {
+            return
+        }
+
+        meetingHotkey.onPress = { [meetings] in meetings.toggle() }
+        meetingHotkey.onRelease = nil
+        try? meetingHotkey.start(hotkey: key)
+    }
+
+    func changeMeetingHotkey(to hotkey: Hotkey?) {
+        settings.meetingHotkey = hotkey
+        armMeetingHotkey()
     }
 
     private func watchForAccessibility() {

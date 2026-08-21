@@ -57,6 +57,19 @@ final class AudioFileWriter: @unchecked Sendable {
     private var framesWritten: AVAudioFramePosition = 0
     private var isFinished = false
 
+    /// Loudness of the most recent buffer, 0…1. Its own lock rather than the queue,
+    /// because the UI reads it ten times a second and must never wait behind a disk write.
+    private let levelLock = NSLock()
+    private var recentLevel: Float = 0
+
+    /// For the live meters. A flat meter is how you find out a stream is silent while
+    /// there is still time to do something about it.
+    var level: Float {
+        levelLock.lock()
+        defer { levelLock.unlock() }
+        return recentLevel
+    }
+
     init(sourceFormat: AVAudioFormat, url: URL, label: String) throws {
         guard let target = Self.fileFormat else { throw WriterError.formatUnavailable }
         guard let converter = AVAudioConverter(from: sourceFormat, to: target) else {
@@ -182,6 +195,8 @@ final class AudioFileWriter: @unchecked Sendable {
         }
         guard error == nil, output.frameLength > 0 else { return }
 
+        note(level: Self.loudness(of: output))
+
         guard let file else { return }
         do {
             try file.write(from: output)
@@ -190,6 +205,27 @@ final class AudioFileWriter: @unchecked Sendable {
             // A failed write means a full disk or a vanished file. Nothing useful can be
             // done from the writer queue, and the transcript will simply be short.
         }
+    }
+
+    private func note(level: Float) {
+        levelLock.lock()
+        recentLevel = AudioLevel.smooth(recentLevel, towards: level)
+        levelLock.unlock()
+    }
+
+    /// RMS of an Int16 buffer, normalised to 0…1. See `MicRecorder` for why not peak.
+    private static func loudness(of buffer: AVAudioPCMBuffer) -> Float {
+        guard let channel = buffer.int16ChannelData?[0] else { return 0 }
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return 0 }
+
+        let scale = Float(Int16.max)
+        var sum: Float = 0
+        for index in 0..<frames {
+            let sample = Float(channel[index]) / scale
+            sum += sample * sample
+        }
+        return (sum / Float(frames)).squareRoot()
     }
 
     /// Yields the input buffer exactly once, which is the contract `AVAudioConverter`'s

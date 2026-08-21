@@ -12,6 +12,15 @@ enum SpeechModel: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// What the choice actually is, from the user's side. The model's real name is
+    /// trivia; "multiple languages or just English" is the decision.
+    var headline: String {
+        switch self {
+        case .parakeetV3: "Multiple languages"
+        case .parakeetV2: "English only"
+        }
+    }
+
     var displayName: String {
         switch self {
         case .parakeetV3: "Parakeet TDT v3"

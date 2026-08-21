@@ -71,7 +71,8 @@ final class DictationCoordinator {
         }
     }
 
-    struct Run: Sendable {
+    struct Run: Sendable, Identifiable {
+        let id = UUID()
         let rawTranscript: String
         let finalText: String
         let usedRawFallback: Bool
@@ -98,6 +99,24 @@ final class DictationCoordinator {
     private(set) var elapsed: TimeInterval = 0
     private(set) var hotkeyActive = false
 
+    /// True while the microphone test is recording. The *result* lives with the model in
+    /// `SpeechModelStore`, so it survives switching models and relaunching.
+    private(set) var isTestingVoice = false
+
+    /// What the last test heard back, kept only for the run that produced it.
+    private(set) var lastHeard: String?
+
+    /// Which provider is mid-test, if any. The *result* lives with the provider in
+    /// `ProviderStore`, so it survives switching away and relaunching.
+    private(set) var testingProviderID: String?
+
+    /// Microphone loudness, 0…1, for the waveform.
+    private(set) var micLevel: Float = 0
+
+    /// Words as they are recognised, while you are still speaking. Provisional — the
+    /// authoritative transcript is the one taken at the end.
+    private(set) var preview: String = ""
+
     let settings: SettingsStore
     let models: ModelManager
 
@@ -105,11 +124,16 @@ final class DictationCoordinator {
     /// Shared with meetings mode, so only one copy of the ~600 MB model is resident and
     /// the two never run inference over each other's decoder state.
     private let transcriber: TranscriptionService
+    let history: HistoryStore
+    let prompts: PromptStore
+    let providers: ProviderStore
+    let speech: SpeechModelStore
     private let cleanup = CleanupService()
     private let hotkey = HotkeyMonitor()
     private let media = MediaPlaybackController()
     private static let mediaLog = Logger(subsystem: "app.murmr.MurmrFlow", category: "media")
     private var tickTask: Task<Void, Never>?
+    private var previewTask: Task<Void, Never>?
 
     /// Started at key-down so pausing never delays the recording; awaited before
     /// resuming so we know whether we were the ones who paused.
@@ -126,23 +150,43 @@ final class DictationCoordinator {
     init(
         settings: SettingsStore = SettingsStore(),
         models: ModelManager = ModelManager(),
-        transcriber: TranscriptionService = TranscriptionService()
+        transcriber: TranscriptionService = TranscriptionService(),
+        history: HistoryStore = HistoryStore(),
+        prompts: PromptStore = PromptStore(),
+        providers: ProviderStore = ProviderStore(),
+        speech: SpeechModelStore = SpeechModelStore()
     ) {
         self.settings = settings
         self.models = models
         self.transcriber = transcriber
-        models.select(settings.speechModel)
+        self.history = history
+        self.prompts = prompts
+        self.providers = providers
+        self.speech = speech
+        models.select(speech.activeModel)
     }
 
     // MARK: - Hotkey
 
     func installHotkey() {
         do {
-            hotkey.onPress = { [weak self] in self?.beginDictation() }
-            hotkey.onRelease = { [weak self] in
-                Task { @MainActor in await self?.endDictation() }
+            hotkey.onPress = { [weak self] in
+                guard let self else { return }
+                if self.settings.holdToTalk {
+                    self.beginDictation()
+                } else if self.stage.isRecording {
+                    // Toggle mode: the same key both starts and stops, so a long
+                    // dictation doesn't mean holding a key for two minutes.
+                    Task { @MainActor in await self.endDictation() }
+                } else {
+                    self.beginDictation()
+                }
             }
-            try hotkey.start(trigger: settings.hotkey)
+            hotkey.onRelease = { [weak self] in
+                guard let self, self.settings.holdToTalk else { return }
+                Task { @MainActor in await self.endDictation() }
+            }
+            try hotkey.start(hotkey: settings.hotkey)
             hotkeyActive = true
         } catch {
             hotkeyActive = false
@@ -150,8 +194,8 @@ final class DictationCoordinator {
         }
     }
 
-    func changeHotkey(to trigger: HotkeyMonitor.Trigger) {
-        settings.hotkey = trigger
+    func changeHotkey(to newHotkey: Hotkey) {
+        settings.hotkey = newHotkey
         guard hotkeyActive else { return }
         installHotkey()
     }
@@ -196,8 +240,11 @@ final class DictationCoordinator {
         do {
             try recorder.start()
             elapsed = 0
+            micLevel = 0
+            preview = ""
             stage = .recording
             startTicking()
+            startPreviewing()
 
             // Runs alongside recording rather than before it. The adapter reports the
             // media app's own playback state, which our microphone cannot influence, so
@@ -212,6 +259,7 @@ final class DictationCoordinator {
 
     func cancelDictation() {
         stopTicking()
+        stopPreviewing()
         recorder.cancel()
         stage = .idle
         elapsed = 0
@@ -226,6 +274,9 @@ final class DictationCoordinator {
             return
         }
         stopTicking()
+        // Before anything awaits: the transcriber is an actor, so an in-flight preview
+        // would otherwise sit in front of the transcription that actually matters.
+        stopPreviewing()
         stage = .transcribing
 
         let clock = ContinuousClock()
@@ -260,8 +311,8 @@ final class DictationCoordinator {
             stage = .cleaning
             let outcome = await cleanup.clean(
                 transcript: raw,
-                config: settings.providerConfig,
-                prompt: PromptLibrary(template: settings.promptTemplate),
+                config: settings.cleanupEnabled ? providers.activeConfig : nil,
+                prompt: PromptLibrary(template: prompts.dictationPrompt.template),
                 context: PromptLibrary.Context(
                     transcript: raw,
                     customWords: settings.customWords,
@@ -294,6 +345,21 @@ final class DictationCoordinator {
                     endToEnd: (clock.now - releasedAt).seconds
                 )
             )
+
+            // On the record. Both texts are kept: the raw one is what makes a later
+            // "what did the AI change?" or a re-run against a different prompt possible
+            // at all, and until now it was discarded the instant cleanup returned.
+            history.add(
+                DictationRecord(
+                    audioDuration: transcription.audioDuration,
+                    rawText: raw,
+                    finalText: outcome.text,
+                    usedRawFallback: outcome.usedRawFallback,
+                    promptName: prompts.dictationPrompt.name,
+                    targetAppName: targetApp?.localizedName,
+                    targetBundleID: targetApp?.bundleIdentifier
+                )
+            )
             stage = .idle
         } catch {
             stage = .failed(error.localizedDescription)
@@ -324,7 +390,7 @@ final class DictationCoordinator {
         try await transcriber.load(loaded)
     }
 
-    /// Switches the speech model.
+    /// Switches the speech model. The only thing that changes which one is used.
     ///
     /// Two things have to happen together, which is why this exists rather than callers
     /// setting the setting directly:
@@ -335,8 +401,8 @@ final class DictationCoordinator {
     ///  2. A model already on disk should reload immediately instead of showing a
     ///     download prompt for something the user already has.
     func changeSpeechModel(_ model: SpeechModel) {
-        guard model != settings.speechModel else { return }
-        settings.speechModel = model
+        guard model != speech.activeModel else { return }
+        speech.setActive(model)
         models.select(model)
         Task {
             await transcriber.unload()
@@ -348,31 +414,13 @@ final class DictationCoordinator {
 
     /// Download and load ahead of first use, so the first dictation isn't slow.
     func warmUp() async {
-        models.select(settings.speechModel)
+        models.select(speech.activeModel)
         await models.prepare()
         if let loaded = models.models {
             try? await transcriber.load(loaded)
         }
     }
 
-    /// Round-trips the configured provider so "why isn't it working" is one click rather
-    /// than a guess.
-    func testCleanupProvider() async -> String {
-        guard let config = settings.providerConfig else {
-            return "Cleanup is off, or no model is set."
-        }
-        let outcome = await cleanup.clean(
-            transcript: "hey so uh this is a test of the cleanup provider",
-            config: config,
-            prompt: PromptLibrary(template: settings.promptTemplate),
-            context: PromptLibrary.Context(transcript: ""),
-            timeout: 15
-        )
-        if outcome.usedRawFallback {
-            return outcome.note ?? "Failed for an unknown reason."
-        }
-        return "Connected in \(String(format: "%.2f", outcome.latency))s → \(outcome.text)"
-    }
 
     // MARK: - Elapsed timer
 
@@ -382,12 +430,218 @@ final class DictationCoordinator {
                 try? await Task.sleep(for: .milliseconds(100))
                 guard let self, let startedAt = self.recorder.startedAt else { return }
                 self.elapsed = Date().timeIntervalSince(startedAt)
+                self.micLevel = self.recorder.level
             }
         }
     }
 
+    // MARK: - Re-run
+
+    /// Cleans a past dictation again, with whatever prompt is now selected.
+    ///
+    /// Only possible because the raw transcript is kept. Before, changing a prompt and
+    /// wanting the old text through it meant saying the whole thing again.
+    func rerunCleanup(on record: DictationRecord) async {
+        guard settings.cleanupEnabled, let config = providers.activeConfig else { return }
+
+        let outcome = await cleanup.clean(
+            transcript: record.rawText,
+            config: config,
+            prompt: PromptLibrary(template: prompts.dictationPrompt.template),
+            context: PromptLibrary.Context(
+                transcript: record.rawText,
+                customWords: settings.customWords
+            )
+        )
+
+        history.replace(
+            DictationRecord(
+                id: record.id,
+                date: record.date,
+                audioDuration: record.audioDuration,
+                rawText: record.rawText,
+                finalText: outcome.text,
+                usedRawFallback: outcome.usedRawFallback,
+                promptName: prompts.dictationPrompt.name,
+                targetAppName: record.targetAppName,
+                targetBundleID: record.targetBundleID
+            )
+        )
+    }
+
+    // MARK: - Provider test
+
+    /// Sends a tiny transcript through the real cleanup path and records the result
+    /// against **that** provider.
+    ///
+    /// Takes an id so a provider can be proved without being made active — setting up a
+    /// second endpoint used to mean switching to it first, which took the working one out
+    /// of service to try an untested one.
+    func testProvider(_ id: String) {
+        guard testingProviderID == nil else { return }
+        guard let config = providers.config(for: id) else {
+            providers.setVerification(.failed("No endpoint or model is set."), for: id)
+            return
+        }
+        testingProviderID = id
+
+        Task { @MainActor in
+            defer { testingProviderID = nil }
+
+            let clock = ContinuousClock()
+            let started = clock.now
+            let probe = "this is a test of the clean up"
+
+            let outcome = await cleanup.clean(
+                transcript: probe,
+                config: config,
+                prompt: PromptLibrary(template: prompts.dictationPrompt.template),
+                context: PromptLibrary.Context(transcript: probe)
+            )
+
+            // `clean` never throws by design — it falls back to the raw text and says why.
+            // So the fallback flag, not an error, is what tells us the provider failed.
+            providers.setVerification(
+                outcome.usedRawFallback
+                    ? .failed(outcome.note ?? "The provider didn't reply.")
+                    : .working(latency: (clock.now - started).seconds, at: Date()),
+                for: id
+            )
+        }
+    }
+
+    /// Makes a provider the one dictation uses, and proves it while we are here — this is
+    /// the moment you care whether it works.
+    func activateProvider(_ id: String) {
+        providers.activeID = id
+        if !providers.state(for: id).verification.isWorking, providers.isUsable(id) {
+            testProvider(id)
+        }
+    }
+
+    // MARK: - Voice test
+
+    /// Records, transcribes, and shows the words back — without inserting anything.
+    ///
+    /// This exists because "ready" and "working" were never the same claim. The model
+    /// reported ready as soon as its files were on disk, which said nothing about whether
+    /// inference runs, which microphone is selected, or whether that microphone is muted.
+    /// The first time you found out was your first real dictation.
+    func toggleVoiceTest() {
+        if isTestingVoice {
+            Task { await finishVoiceTest() }
+            return
+        }
+
+        // Never over the top of a real dictation — they would fight for the microphone.
+        guard !stage.isBusy, !isSuspended else {
+            speech.setVerification(
+                .failed("Something else is using the microphone."), for: speech.activeModel
+            )
+            return
+        }
+
+        do {
+            try recorder.start()
+            lastHeard = nil
+            isTestingVoice = true
+        } catch {
+            speech.setVerification(
+                .failed(error.localizedDescription), for: speech.activeModel
+            )
+        }
+    }
+
+    private func finishVoiceTest() async {
+        let model = speech.activeModel
+        let clock = ContinuousClock()
+        let started = clock.now
+        defer { isTestingVoice = false }
+
+        do {
+            let capture = try recorder.finishCapture()
+            let samples = try await Task.detached(priority: .userInitiated) {
+                try MicRecorder.resample(capture)
+            }.value
+
+            try await ensureModelLoaded()
+            let text = try await transcriber.transcribe(samples).text
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if text.isEmpty {
+                // Silence is its own answer, and a more useful one than an empty string:
+                // it points at the microphone rather than at the model.
+                lastHeard = nil
+                speech.setVerification(
+                    .failed("Nothing was heard — check the microphone."), for: model
+                )
+            } else {
+                lastHeard = text
+                speech.setVerification(
+                    .working(latency: (clock.now - started).seconds, at: Date()), for: model
+                )
+            }
+        } catch MicRecorder.RecorderError.nothingRecorded {
+            lastHeard = nil
+            speech.setVerification(
+                .failed("Nothing was recorded — check the microphone."), for: model
+            )
+        } catch {
+            lastHeard = nil
+            speech.setVerification(.failed(error.localizedDescription), for: model)
+        }
+    }
+
+    // MARK: - Live preview
+
+    /// Re-transcribes what has been captured so far, every so often, while recording.
+    ///
+    /// Deliberately *not* the library's streaming engine: that would mean a second model
+    /// bundle to download and hold in memory. Re-running the ordinary transcription over
+    /// the audio so far costs nothing new and is imperceptible at dictation length — a
+    /// few passes over a few seconds each.
+    ///
+    /// It does not scale, and that is fine. Each pass starts from the beginning, so the
+    /// work grows with the square of the recording; past `previewCutoff` the preview
+    /// simply stops updating rather than getting slower and slower.
+    private func startPreviewing() {
+        previewTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.previewInterval)
+                guard let self, self.stage.isRecording else { return }
+                guard self.elapsed < Self.previewCutoff else { return }
+                guard let capture = self.recorder.snapshot() else { continue }
+                guard await self.transcriber.isReady else { continue }
+
+                do {
+                    let samples = try await Task.detached(priority: .utility) {
+                        try MicRecorder.resample(capture)
+                    }.value
+                    let text = try await self.transcriber.transcribe(samples).text
+                    // Recording may have ended while that was in flight; a late preview
+                    // overwriting the finished state would be a flicker of stale text.
+                    guard self.stage.isRecording else { return }
+                    self.preview = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                } catch {
+                    // A failed preview is not a failed dictation. Stay quiet.
+                }
+            }
+        }
+    }
+
+    private func stopPreviewing() {
+        previewTask?.cancel()
+        previewTask = nil
+    }
+
+    private static let previewInterval: Duration = .milliseconds(1500)
+
+    /// Past this, previewing stops. Long dictations are rare and the cost is quadratic.
+    private static let previewCutoff: TimeInterval = 60
+
     private func stopTicking() {
         tickTask?.cancel()
         tickTask = nil
+        micLevel = 0
     }
 }
