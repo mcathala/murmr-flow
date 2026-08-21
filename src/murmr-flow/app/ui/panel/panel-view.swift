@@ -37,6 +37,21 @@ struct PanelView: View {
         }
     }
 
+    // MARK: - The centre line
+
+    /// Distance from the window's bottom edge to the line the pill and the two round
+    /// buttons **share**.
+    ///
+    /// This is the whole geometry of the collapsed states in one number. Both are centred
+    /// on it, so hovering swaps a 5pt capsule for a 34pt button in the same place rather
+    /// than stacking one above the other. Stacking was the bug: the buttons ended up in
+    /// the strip between the pill and the Dock, and at 34pt tall they reached into it.
+    ///
+    /// 24 is the smallest value that leaves a button clear of the Dock: the window sits
+    /// 10pt above it, a button centred here spans 7…41pt from the window's bottom edge,
+    /// so its lowest point is 17pt clear.
+    static let centreLine: CGFloat = 24
+
     // MARK: - Resting
 
     /// Deliberately almost nothing. If you are not reaching for it, it should not be
@@ -45,17 +60,13 @@ struct PanelView: View {
         Capsule()
             .fill(.secondary.opacity(0.55))
             .frame(width: 44, height: 5)
-            .padding(.bottom, Self.pillInset)
+            .padding(.bottom, Self.centreLine - 2.5)
     }
 
     // MARK: - Hover
 
-    /// The buttons rise **above** the pill, and the pill stays exactly where it was.
-    ///
-    /// They used to sit level with it, which put them in the narrow strip between the pill
-    /// and the Dock — a bad place to aim at, and close enough to the Dock to lose the
-    /// hover to it. Keeping the pill in place also means nothing shifts under the pointer
-    /// at the moment the cluster appears, so the hover cannot drop out from under itself.
+    /// The buttons take the pill's place, on the pill's line. The tooltip goes above them,
+    /// which is the only direction with room.
     private var cluster: some View {
         VStack(spacing: 0) {
             Text(model.mode == .note ? "Start meeting" : "Dictate")
@@ -81,21 +92,9 @@ struct PanelView: View {
                 }
                 .onHover { if $0 { model.mode = .note } }
             }
-
-            // The gap is part of the hover target: the pointer travels through it from the
-            // pill to the buttons, so it must stay inside the window.
-            Spacer().frame(height: 10)
-
-            Capsule()
-                .fill(.secondary.opacity(0.55))
-                .frame(width: 44, height: 5)
-                .padding(.bottom, Self.pillInset)
         }
+        .padding(.bottom, Self.centreLine - 17)
     }
-
-    /// How far the resting capsule sits above the window's bottom edge. Shared by both
-    /// states so the pill does not move when the cluster opens.
-    static let pillInset: CGFloat = 5
 
     private func round(_ symbol: String, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {

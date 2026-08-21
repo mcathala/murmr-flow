@@ -139,15 +139,16 @@ final class PanelModel {
     var size: CGSize {
         switch phase {
         case .resting:
-            CGSize(width: 62, height: 18)
+            // Tall enough to hold a capsule centred on the shared centre line, plus room
+            // for its shadow.
+            CGSize(width: 62, height: 34)
         case .hovering:
             // Width fits the longest tooltip ("Start meeting"), not the two buttons alone
             // — at 116 the label was squeezed, which pulled the cluster off centre.
             //
-            // Height is the stack read bottom-up: 5 pill inset + 5 pill + 10 gap +
-            // 34 buttons + 7 gap + 24 tooltip = 85, plus a little slack. The pill's own
-            // position is unchanged, so opening the cluster only adds height upward.
-            CGSize(width: 132, height: 92)
+            // Height read bottom-up from the centre line: 24 - 17 to the buttons' base,
+            // 34 buttons, 7 gap, 24 tooltip = 72, plus slack for the shadow.
+            CGSize(width: 132, height: 84)
         case .armed:
             CGSize(width: 272, height: 48)
         case .dictating:
