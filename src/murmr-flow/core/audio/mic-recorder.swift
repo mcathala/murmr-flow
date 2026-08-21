@@ -203,18 +203,19 @@ final class MicRecorder: @unchecked Sendable {
         // rather than downmixing by hand.
         let channel = channels[0]
 
-        // Peak rather than RMS: a waveform should react to the loudest thing in the
-        // buffer, which is what the eye expects from a level meter.
-        var peak: Float = 0
+        // RMS, not peak. Noise is spiky and speech is sustained, so peak is the worst
+        // statistic available for "is someone talking": one stray sample from the mic's
+        // own noise floor was enough to light the meter and keep it lit.
+        var sum: Float = 0
         for index in 0..<frames {
-            peak = max(peak, abs(channel[index]))
+            let sample = channel[index]
+            sum += sample * sample
         }
+        let rms = (sum / Float(frames)).squareRoot()
 
         lock.lock()
         samples.append(contentsOf: UnsafeBufferPointer(start: channel, count: frames))
-        // Decay towards the new peak rather than snapping to it, so the meter reads as
-        // movement instead of flicker.
-        recentLevel = max(peak, recentLevel * 0.72)
+        recentLevel = AudioLevel.smooth(recentLevel, towards: rms)
         lock.unlock()
     }
 }

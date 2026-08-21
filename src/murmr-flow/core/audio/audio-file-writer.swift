@@ -195,7 +195,7 @@ final class AudioFileWriter: @unchecked Sendable {
         }
         guard error == nil, output.frameLength > 0 else { return }
 
-        note(level: Self.peak(of: output))
+        note(level: Self.loudness(of: output))
 
         guard let file else { return }
         do {
@@ -209,21 +209,23 @@ final class AudioFileWriter: @unchecked Sendable {
 
     private func note(level: Float) {
         levelLock.lock()
-        recentLevel = max(level, recentLevel * 0.72)
+        recentLevel = AudioLevel.smooth(recentLevel, towards: level)
         levelLock.unlock()
     }
 
-    /// Peak of an Int16 buffer, normalised to 0…1.
-    private static func peak(of buffer: AVAudioPCMBuffer) -> Float {
+    /// RMS of an Int16 buffer, normalised to 0…1. See `MicRecorder` for why not peak.
+    private static func loudness(of buffer: AVAudioPCMBuffer) -> Float {
         guard let channel = buffer.int16ChannelData?[0] else { return 0 }
         let frames = Int(buffer.frameLength)
         guard frames > 0 else { return 0 }
 
-        var loudest: Int32 = 0
+        let scale = Float(Int16.max)
+        var sum: Float = 0
         for index in 0..<frames {
-            loudest = max(loudest, Int32(abs(Int32(channel[index]))))
+            let sample = Float(channel[index]) / scale
+            sum += sample * sample
         }
-        return Float(loudest) / Float(Int16.max)
+        return (sum / Float(frames)).squareRoot()
     }
 
     /// Yields the input buffer exactly once, which is the contract `AVAudioConverter`'s
