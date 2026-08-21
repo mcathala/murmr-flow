@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The app window: three tabs at a fixed size.
+/// The app window: four tabs at a fixed size.
 ///
-/// Tabs rather than one long stack because two of the three screens are setup-time UI.
+/// Tabs rather than one long stack because half the screens are setup-time UI.
 /// Stacked, they pushed the window to 932 pt — taller than a MacBook's usable height,
 /// so the cleanup settings were simply unreachable.
 ///
@@ -13,9 +13,10 @@ struct MainWindow: View {
 
     let permissions: PermissionManager
     @Bindable var dictation: DictationCoordinator
+    @Bindable var meetings: MeetingCoordinator
 
     enum Tab: String, Hashable {
-        case dictate, cleanup, setup
+        case dictate, meetings, cleanup, setup
     }
 
     @State private var selection: Tab = .dictate
@@ -27,6 +28,10 @@ struct MainWindow: View {
             DictateTab(dictation: dictation, permissions: permissions)
                 .tabItem { Label("Dictate", systemImage: "mic") }
                 .tag(Tab.dictate)
+
+            MeetingsTab(meetings: meetings)
+                .tabItem { Label("Meetings", systemImage: "person.wave.2") }
+                .tag(Tab.meetings)
 
             CleanupTab(coordinator: dictation)
                 .tabItem { Label("Cleanup", systemImage: "sparkles") }

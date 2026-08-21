@@ -15,7 +15,16 @@ final class AppServices {
     static let shared = AppServices()
 
     let permissions = PermissionManager()
-    let dictation = DictationCoordinator()
+
+    /// One settings store, one model, one transcriber — shared by both modes. Two
+    /// `ModelManager`s would each load their own copy of the model, and two
+    /// `SettingsStore`s would not see each other's changes.
+    private let settings = SettingsStore()
+    private let models = ModelManager()
+    private let transcriber = TranscriptionService()
+
+    let dictation: DictationCoordinator
+    let meetings: MeetingCoordinator
 
     /// Not observable state: it owns an NSPanel and must never be recreated.
     let hud = DictationHUD()
@@ -25,7 +34,12 @@ final class AppServices {
     private var accessibilityWatch: Task<Void, Never>?
     private var hasStarted = false
 
-    private init() {}
+    private init() {
+        dictation = DictationCoordinator(
+            settings: settings, models: models, transcriber: transcriber
+        )
+        meetings = MeetingCoordinator(models: models, transcriber: transcriber)
+    }
 
     // MARK: - Launch
 
@@ -45,6 +59,11 @@ final class AppServices {
         Self.log.notice("start(\(trigger, privacy: .public)) running")
 
         dictation.onStageChange = { [hud] stage in hud.update(stage: stage) }
+
+        // The microphone cannot serve both at once, so whichever starts first wins.
+        meetings.onRecordingChange = { [dictation] isRecording in
+            dictation.isSuspended = isRecording
+        }
 
         armHotkeyIfPossible()
         Self.log.notice("hotkey armed: \(self.dictation.hotkeyActive, privacy: .public)")

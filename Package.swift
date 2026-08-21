@@ -16,9 +16,9 @@ import PackageDescription
 let package = Package(
     name: "MurmrFlow",
     platforms: [
-        // macOS 14 is the floor: FluidAudio requires 14.0+, and Core Audio process
-        // taps (meetings mode, v2) require 14.4+.
-        .macOS(.v14)
+        // 14.2 is the floor: FluidAudio needs 14.0+, and Core Audio process taps —
+        // which meetings mode uses to capture system audio — were introduced in 14.2.
+        .macOS("14.2")
     ],
     dependencies: [
         // Parakeet speech-to-text, Silero VAD and speaker diarization as CoreML models

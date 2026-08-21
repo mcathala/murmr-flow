@@ -99,10 +99,12 @@ final class DictationCoordinator {
     private(set) var hotkeyActive = false
 
     let settings: SettingsStore
-    let models = ModelManager()
+    let models: ModelManager
 
     private let recorder = MicRecorder()
-    private let transcriber = TranscriptionService()
+    /// Shared with meetings mode, so only one copy of the ~600 MB model is resident and
+    /// the two never run inference over each other's decoder state.
+    private let transcriber: TranscriptionService
     private let cleanup = CleanupService()
     private let hotkey = HotkeyMonitor()
     private let media = MediaPlaybackController()
@@ -117,8 +119,18 @@ final class DictationCoordinator {
     /// change under us, but the paste needs to land where the user was actually typing.
     private var targetApp: NSRunningApplication?
 
-    init(settings: SettingsStore = SettingsStore()) {
+    /// True while meetings mode holds the microphone. Dictation stands down rather than
+    /// opening a second input stream over the top of an hour-long recording.
+    var isSuspended = false
+
+    init(
+        settings: SettingsStore = SettingsStore(),
+        models: ModelManager = ModelManager(),
+        transcriber: TranscriptionService = TranscriptionService()
+    ) {
         self.settings = settings
+        self.models = models
+        self.transcriber = transcriber
         models.select(settings.speechModel)
     }
 
@@ -148,6 +160,10 @@ final class DictationCoordinator {
 
     func beginDictation() {
         guard !stage.isBusy else { return }
+        guard !isSuspended else {
+            stage = .failed("A meeting is being recorded. Stop it first.")
+            return
+        }
 
         // Refuse rather than downloading mid-dictation. Loading is kicked off at launch,
         // so this only fires if that hasn't finished — and holding the key through a

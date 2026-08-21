@@ -15,7 +15,11 @@ struct MurmrFlowApp: App {
         // new items land in the hidden overflow region and are simply invisible; with
         // external displays they only appear on whichever screen owns the menu bar.
         Window("Murmr Flow", id: Self.panelWindowID) {
-            MainWindow(permissions: services.permissions, dictation: services.dictation)
+            MainWindow(
+                permissions: services.permissions,
+                dictation: services.dictation,
+                meetings: services.meetings
+            )
                 // Backstop: see AppServices.start() for why this is not the only trigger.
                 .task { services.start(trigger: "window.task") }
         }
