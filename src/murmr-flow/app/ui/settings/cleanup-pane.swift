@@ -148,11 +148,23 @@ struct CleanupPane: View {
             .font(.caption)
 
             if !entry.suggestedModels.isEmpty {
-                WrapChips(items: entry.suggestedModels) { _ in }
-                    .opacity(0.9)
+                SuggestionChips(
+                    items: entry.suggestedModels,
+                    current: providers.state(for: entry.id).model
+                ) { providers.update(model: $0, for: entry.id) }
             }
 
-            APIKeyField(entry: entry, dictation: dictation)
+            StoredSecretRow(
+                hasKey: providers.hasKey(entry.id),
+                isOptional: !entry.requiresKey,
+                onSave: { key in
+                    try? providers.saveKey(key, for: entry.id)
+                    // A saved key says nothing about whether it works, so prove it now
+                    // rather than leaving a row that looks configured and never ran.
+                    dictation.testProvider(entry.id)
+                },
+                onRemove: { try? providers.deleteKey(for: entry.id) }
+            )
 
             if case .failed(let reason) = providers.state(for: entry.id).verification {
                 Text(reason)
@@ -196,66 +208,5 @@ struct CleanupPane: View {
                 }
             }
         )
-    }
-}
-
-/// The key for one provider, and a button that proves it.
-private struct APIKeyField: View {
-
-    let entry: ProviderCatalog.Entry
-    let dictation: DictationCoordinator
-
-    @State private var entered = ""
-    @State private var saveError: String?
-
-    private var providers: ProviderStore { dictation.providers }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                SecureField(placeholder, text: $entered)
-                    .textFieldStyle(.roundedBorder)
-
-                Button("Save") { save() }
-                    .controlSize(.small)
-                    .disabled(entered.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                if providers.hasKey(entry.id) {
-                    Button("Remove") { remove() }
-                        .controlSize(.small)
-                }
-            }
-            if let saveError {
-                Text(saveError).font(.caption).foregroundStyle(.orange)
-            }
-            if !entry.requiresKey {
-                Text("Optional — a model served on this machine doesn't need one.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var placeholder: String {
-        providers.hasKey(entry.id) ? "Stored in the Keychain" : "Paste your key"
-    }
-
-    private func save() {
-        do {
-            try providers.saveKey(
-                entered.trimmingCharacters(in: .whitespaces), for: entry.id
-            )
-            entered = ""
-            saveError = nil
-            // A saved key says nothing about whether it works, so prove it now rather
-            // than leaving a row that looks configured and has never been exercised.
-            dictation.testProvider(entry.id)
-        } catch {
-            saveError = error.localizedDescription
-        }
-    }
-
-    private func remove() {
-        try? providers.deleteKey(for: entry.id)
     }
 }

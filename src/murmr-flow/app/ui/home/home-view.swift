@@ -44,13 +44,14 @@ struct HomeView: View {
     }
 
     private var voiceLevel: StatusChip.Level {
-        switch services.dictation.voiceTest {
-        case .heard: .ok
-        case .failed, .silent: .bad
-        case .idle, .running:
-            // Loaded is not the same as proven. Until the test has run, the honest
+        let speech = services.speech
+        switch speech.verification(for: speech.activeModel) {
+        case .working: return .ok
+        case .failed: return .bad
+        case .untested:
+            // Loaded is not the same as proved. Until the test has run, the honest
             // reading is "ready to try", not "working".
-            services.dictation.models.state == .ready ? .waiting : .bad
+            return services.dictation.models.state == .ready ? .waiting : .bad
         }
     }
 

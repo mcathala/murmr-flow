@@ -105,3 +105,56 @@ struct ProviderStoreTests {
         #expect(providers.config(for: custom) == nil)
     }
 }
+
+/// The speech-model equivalent, for the same reasons.
+@MainActor
+@Suite("Speech model store")
+struct SpeechModelStoreTests {
+
+    private func store() -> (SpeechModelStore, UserDefaults) {
+        let suite = "murmr-speech-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        return (SpeechModelStore(defaults: defaults), defaults)
+    }
+
+    @Test("looking at the other model does not discard what you proved")
+    func switchingKeepsVerification() {
+        let (speech, _) = store()
+        speech.setVerification(.working(latency: 0.2, at: Date()), for: .parakeetV3)
+
+        speech.setActive(.parakeetV2)
+        speech.setActive(.parakeetV3)
+
+        // The voice test was a single transient value, so this used to be lost twice over.
+        #expect(speech.verification(for: .parakeetV3).isWorking)
+    }
+
+    @Test("each model is verified separately")
+    func perModel() {
+        let (speech, _) = store()
+        speech.setVerification(.working(latency: 0.2, at: Date()), for: .parakeetV3)
+        #expect(speech.verification(for: .parakeetV3).isWorking)
+        #expect(!speech.verification(for: .parakeetV2).isWorking)
+    }
+
+    @Test("verification and the active model survive a relaunch")
+    func persists() {
+        let suite = "murmr-speech-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+
+        let first = SpeechModelStore(defaults: defaults)
+        first.setActive(.parakeetV2)
+        first.setVerification(.working(latency: 0.2, at: Date()), for: .parakeetV2)
+
+        let reopened = SpeechModelStore(defaults: defaults)
+        #expect(reopened.activeModel == .parakeetV2)
+        #expect(reopened.verification(for: .parakeetV2).isWorking)
+    }
+
+    @Test("others excludes the active one")
+    func others() {
+        let (speech, _) = store()
+        #expect(!speech.others.contains(speech.activeModel))
+        #expect(speech.others.count == SpeechModel.allCases.count - 1)
+    }
+}

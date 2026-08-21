@@ -229,3 +229,173 @@ struct AppBadge: View {
         }
     }
 }
+
+/// Chips you can remove, for a list you own — custom words.
+struct RemovableChips: View {
+    let items: [String]
+    let onRemove: (String) -> Void
+
+    var body: some View {
+        FlowLayout(spacing: 6) {
+            ForEach(items, id: \.self) { item in
+                Button {
+                    onRemove(item)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(item).font(.caption)
+                        Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(.quaternary.opacity(0.6), in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .help("Remove")
+            }
+        }
+    }
+}
+
+/// Chips you can *apply*, for values we suggest — model names.
+///
+/// Deliberately a different shape from `RemovableChips`. Suggested models were rendered
+/// with that view, so each one came with a cross on it: an offer that looked like
+/// something you already had and could delete.
+struct SuggestionChips: View {
+    let items: [String]
+    var current: String?
+    let onPick: (String) -> Void
+
+    var body: some View {
+        FlowLayout(spacing: 6) {
+            ForEach(items, id: \.self) { item in
+                Button {
+                    onPick(item)
+                } label: {
+                    Text(item)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .overlay(
+                            Capsule().stroke(
+                                item == current
+                                    ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator),
+                                lineWidth: item == current ? 1.5 : 0.5
+                            )
+                        )
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(
+                    item == current ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary)
+                )
+                .help("Use this model")
+            }
+        }
+    }
+}
+
+/// A stored secret, shown as filled dots rather than described in placeholder text.
+///
+/// The key field used to put "Stored in the Keychain" in a `SecureField` placeholder,
+/// which renders grey and empty — so a key that existed looked exactly like one that did
+/// not. State does not belong in a placeholder.
+struct StoredSecretRow: View {
+    let hasKey: Bool
+    var isOptional = false
+    let onSave: (String) -> Void
+    let onRemove: () -> Void
+
+    @State private var entered = ""
+    @State private var isReplacing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if hasKey && !isReplacing {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                    Text(String(repeating: "\u{25CF}", count: 16))
+                        .font(.system(size: 9))
+                        .foregroundStyle(.primary)
+                    Text("in the Keychain").font(.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button("Replace") { isReplacing = true }.controlSize(.small)
+                    Button("Remove") { onRemove() }.controlSize(.small)
+                }
+            } else {
+                HStack(spacing: 8) {
+                    SecureField("Paste your key", text: $entered)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Save") {
+                        onSave(entered.trimmingCharacters(in: .whitespaces))
+                        entered = ""
+                        isReplacing = false
+                    }
+                    .controlSize(.small)
+                    .disabled(entered.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if isReplacing {
+                        Button("Cancel") {
+                            entered = ""
+                            isReplacing = false
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                if isOptional {
+                    Text("Optional — a model served on this machine doesn\u{2019}t need one.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+/// Lays children left to right, wrapping when the line runs out.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var lineWidth: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var total = CGSize.zero
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if lineWidth + size.width > width, lineWidth > 0 {
+                total.width = max(total.width, lineWidth - spacing)
+                total.height += lineHeight + spacing
+                lineWidth = 0
+                lineHeight = 0
+            }
+            lineWidth += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+        total.width = max(total.width, lineWidth - spacing)
+        total.height += lineHeight
+        return total
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var lineHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX, x > bounds.minX {
+                x = bounds.minX
+                y += lineHeight + spacing
+                lineHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+    }
+}

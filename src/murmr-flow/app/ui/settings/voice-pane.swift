@@ -1,117 +1,149 @@
 import SwiftUI
 
-/// Which model turns speech into text. Nothing else — the key binds moved out.
+/// Which model turns speech into text.
+///
+/// Same rule as the clean-up pane: the one in use stays at the top, and nothing changes it
+/// except a button that says so. What has been proved about a model is stored with that
+/// model, so looking at the alternative does not discard it — and neither does relaunching.
 struct VoicePane: View {
 
     let models: ModelManager
     let dictation: DictationCoordinator
 
+    private var speech: SpeechModelStore { dictation.speech }
+
     var body: some View {
         PaneScroll(title: "Voice transcription") {
-            SectionLabel(title: "Model")
-            HStack(alignment: .top, spacing: 10) {
-                ForEach(SpeechModel.allCases) { model in
-                    modelCard(model)
-                }
-            }
+            SectionLabel(title: "In use")
+            activeCard
 
             if case .failed(let message) = models.state {
                 WarningRow(message: message)
             }
 
-            SectionLabel(title: "Test")
-            VoiceTestCard(dictation: dictation)
+            SectionLabel(title: "Other models")
+            ForEach(speech.others) { model in
+                alternativeRow(model)
+            }
 
             SectionLabel(title: "Words to spell my way")
             CustomWordsCard(settings: dictation.settings)
         }
     }
 
-    /// Phrased as a question about *you*, not about the model. "Multiple languages" is the
-    /// choice being made; "Parakeet TDT v3" is trivia, and belongs in small text if
-    /// anywhere.
-    private func modelCard(_ model: SpeechModel) -> some View {
-        let isSelected = models.selected == model
-        return Button {
-            dictation.changeSpeechModel(model)
-        } label: {
-            Card(highlighted: isSelected) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(model.headline).font(.callout.weight(.semibold))
-                    Text(model.summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    state(for: model, isSelected: isSelected)
+    // MARK: - Active
+
+    private var activeCard: some View {
+        let model = speech.activeModel
+        return Card(highlighted: true) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(model.headline).font(.callout.weight(.semibold))
+                        Text(model.summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    badge(for: model)
+                    Spacer(minLength: 0)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if case .downloading(let fraction) = models.state {
+                    ProgressView(value: fraction).controlSize(.small)
+                }
+
+                Divider()
+                testRow
             }
         }
-        .buttonStyle(.plain)
+    }
+
+    /// Proves the whole chain rather than just the download.
+    ///
+    /// "Ready" only ever meant the files were on disk and loaded. It said nothing about
+    /// whether inference runs, which microphone is selected, or whether that microphone is
+    /// muted — so the first time you found out was your first real dictation.
+    private var testRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text(dictation.isTestingVoice
+                     ? "Listening — say anything, then press Stop."
+                     : "Say a few words and see what it hears.")
+                    .font(.callout)
+                Spacer(minLength: 0)
+                Button(dictation.isTestingVoice ? "Stop" : "Test") {
+                    dictation.toggleVoiceTest()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+
+            if dictation.isTestingVoice {
+                ProgressView().controlSize(.small)
+            } else if let heard = dictation.lastHeard {
+                Text("Heard \u{201C}\(heard)\u{201D}")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let failure = speech.verification(for: speech.activeModel).failure {
+                Text(failure).font(.caption).foregroundStyle(.orange)
+            }
+        }
+    }
+
+    // MARK: - Alternatives
+
+    /// Listed, not selected. Clicking a card used to switch models immediately, which is
+    /// the same mistake the provider pane made: looking was the same action as choosing.
+    private func alternativeRow(_ model: SpeechModel) -> some View {
+        Card {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(model.headline).font(.callout.weight(.medium))
+                    Text(model.summary).font(.caption).foregroundStyle(.secondary)
+                }
+                availability(for: model)
+                Spacer(minLength: 0)
+                Button(ModelManager.isDownloaded(model) ? "Use" : "Download and use") {
+                    dictation.changeSpeechModel(model)
+                }
+                .controlSize(.small)
+                .disabled(models.state.isBusy)
+            }
+        }
     }
 
     @ViewBuilder
-    private func state(for model: SpeechModel, isSelected: Bool) -> some View {
-        if isSelected {
-            switch models.state {
-            case .downloading(let fraction):
-                ProgressView(value: fraction).controlSize(.small)
-            case .preparing, .loading:
-                StatusChip(title: "Getting ready", level: .waiting)
-            case .ready:
-                StatusChip(title: "Active", level: .ok)
-            case .notLoaded, .failed:
-                StatusChip(title: "Not loaded", level: .waiting)
+    private func availability(for model: SpeechModel) -> some View {
+        if ModelManager.isDownloaded(model) {
+            if speech.verification(for: model).isWorking {
+                StatusChip(title: "Downloaded · tested", level: .ok)
+            } else {
+                StatusChip(title: "Downloaded", level: .waiting)
             }
-        } else if ModelManager.isDownloaded(model) {
-            StatusChip(title: "Downloaded", level: .waiting)
         } else {
-            StatusChip(title: "\(model.approximateSizeMB) MB download", level: .waiting)
+            StatusChip(title: "\(model.approximateSizeMB) MB", level: .waiting)
         }
     }
-}
 
-/// Proves the whole chain rather than just the download.
-///
-/// "Ready" only ever meant the files were on disk and loaded. It said nothing about
-/// whether inference runs, which microphone is selected, or whether that microphone is
-/// muted — so the first time you found out was your first real dictation. This records a
-/// few seconds and shows you the words back.
-private struct VoiceTestCard: View {
-
-    let dictation: DictationCoordinator
-
-    var body: some View {
-        Card(highlighted: dictation.voiceTest.isRunning) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    Text(dictation.voiceTest.isRunning
-                         ? "Listening — say anything."
-                         : "Say a few words and see what it hears.")
-                        .font(.callout)
-                    Spacer(minLength: 0)
-                    Button(dictation.voiceTest.isRunning ? "Stop" : "Test") {
-                        dictation.toggleVoiceTest()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                }
-
-                switch dictation.voiceTest {
-                case .idle:
-                    EmptyView()
-                case .running:
-                    ProgressView().controlSize(.small)
-                case .heard(let text, let seconds):
-                    StatusChip(
-                        title: "Heard \u{201C}\(text)\u{201D} · \(String(format: "%.1fs", seconds))",
-                        level: .ok
-                    )
-                case .silent:
-                    StatusChip(title: "Nothing was heard — check the microphone", level: .bad)
-                case .failed(let message):
-                    StatusChip(title: message, level: .bad)
-                }
+    /// Three states, as everywhere else: not ready, ready but unproved, proved.
+    @ViewBuilder
+    private func badge(for model: SpeechModel) -> some View {
+        if dictation.isTestingVoice {
+            StatusChip(title: "Testing", level: .waiting)
+        } else if models.state.isBusy {
+            StatusChip(title: "Getting ready", level: .waiting)
+        } else {
+            switch speech.verification(for: model) {
+            case .working(let latency, _):
+                StatusChip(title: "Working · \(String(format: "%.1fs", latency))", level: .ok)
+            case .failed:
+                StatusChip(title: "Not working", level: .bad)
+            case .untested:
+                StatusChip(
+                    title: models.models != nil ? "Not tested" : "Not loaded",
+                    level: models.models != nil ? .waiting : .bad
+                )
             }
         }
     }
@@ -119,7 +151,7 @@ private struct VoiceTestCard: View {
 
 /// Names and jargon, as a list rather than a comma-separated text field.
 ///
-/// These now go to the **speech model**, not the cleanup prompt. Biasing the transcription
+/// These go to the **speech model**, not the cleanup prompt. Biasing the transcription
 /// beats asking a language model to repair "cover a lee" into "Kovalee" afterwards — and
 /// it works with clean-up switched off entirely.
 private struct CustomWordsCard: View {
@@ -135,7 +167,7 @@ private struct CustomWordsCard: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    WrapChips(items: settings.customWords) { word in
+                    RemovableChips(items: settings.customWords) { word in
                         settings.customWords.removeAll { $0 == word }
                     }
                 }
@@ -156,80 +188,5 @@ private struct CustomWordsCard: View {
         guard !word.isEmpty, !settings.customWords.contains(word) else { return }
         settings.customWords.append(word)
         entry = ""
-    }
-}
-
-/// Chips that wrap onto as many lines as they need.
-struct WrapChips: View {
-    let items: [String]
-    let onRemove: (String) -> Void
-
-    var body: some View {
-        // A flow layout via a wrapping HStack: `Grid` would force columns of equal width,
-        // which looks wrong when the entries are "Léa" and "Anthropic".
-        FlowLayout(spacing: 6) {
-            ForEach(items, id: \.self) { item in
-                Button {
-                    onRemove(item)
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(item).font(.caption)
-                        Image(systemName: "xmark").font(.system(size: 7, weight: .bold))
-                    }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(.quaternary.opacity(0.6), in: .capsule)
-                }
-                .buttonStyle(.plain)
-                .help("Remove")
-            }
-        }
-    }
-}
-
-/// Lays children left to right, wrapping when the line runs out.
-struct FlowLayout: Layout {
-    var spacing: CGFloat = 6
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var lineWidth: CGFloat = 0
-        var lineHeight: CGFloat = 0
-        var total = CGSize.zero
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if lineWidth + size.width > width, lineWidth > 0 {
-                total.width = max(total.width, lineWidth - spacing)
-                total.height += lineHeight + spacing
-                lineWidth = 0
-                lineHeight = 0
-            }
-            lineWidth += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
-        total.width = max(total.width, lineWidth - spacing)
-        total.height += lineHeight
-        return total
-    }
-
-    func placeSubviews(
-        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-    ) {
-        var x = bounds.minX
-        var y = bounds.minY
-        var lineHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x + size.width > bounds.maxX, x > bounds.minX {
-                x = bounds.minX
-                y += lineHeight + spacing
-                lineHeight = 0
-            }
-            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
     }
 }
