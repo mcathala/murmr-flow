@@ -45,13 +45,19 @@ struct PanelView: View {
         Capsule()
             .fill(.secondary.opacity(0.55))
             .frame(width: 44, height: 5)
-            .padding(.bottom, 5)
+            .padding(.bottom, Self.pillInset)
     }
 
     // MARK: - Hover
 
+    /// The buttons rise **above** the pill, and the pill stays exactly where it was.
+    ///
+    /// They used to sit level with it, which put them in the narrow strip between the pill
+    /// and the Dock — a bad place to aim at, and close enough to the Dock to lose the
+    /// hover to it. Keeping the pill in place also means nothing shifts under the pointer
+    /// at the moment the cluster appears, so the hover cannot drop out from under itself.
     private var cluster: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 0) {
             Text(model.mode == .note ? "Start meeting" : "Dictate")
                 .font(.caption.weight(.semibold))
                 .fixedSize()
@@ -59,6 +65,8 @@ struct PanelView: View {
                 .padding(.vertical, 4)
                 .background(.regularMaterial, in: .capsule)
                 .overlay(Capsule().stroke(.separator, lineWidth: 0.5))
+
+            Spacer().frame(height: 7)
 
             HStack(spacing: 8) {
                 round("mic.fill", active: model.mode == .dictation) {
@@ -73,9 +81,21 @@ struct PanelView: View {
                 }
                 .onHover { if $0 { model.mode = .note } }
             }
+
+            // The gap is part of the hover target: the pointer travels through it from the
+            // pill to the buttons, so it must stay inside the window.
+            Spacer().frame(height: 10)
+
+            Capsule()
+                .fill(.secondary.opacity(0.55))
+                .frame(width: 44, height: 5)
+                .padding(.bottom, Self.pillInset)
         }
-        .padding(.bottom, 6)
     }
+
+    /// How far the resting capsule sits above the window's bottom edge. Shared by both
+    /// states so the pill does not move when the cluster opens.
+    static let pillInset: CGFloat = 5
 
     private func round(_ symbol: String, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {

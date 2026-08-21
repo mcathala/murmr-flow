@@ -141,10 +141,13 @@ final class PanelModel {
         case .resting:
             CGSize(width: 62, height: 18)
         case .hovering:
-            // Wide enough for the longest tooltip ("Start meeting") rather than for the
-            // two buttons alone — at 116 the label was being squeezed, which pulled the
-            // whole cluster off centre.
-            CGSize(width: 132, height: 88)
+            // Width fits the longest tooltip ("Start meeting"), not the two buttons alone
+            // — at 116 the label was squeezed, which pulled the cluster off centre.
+            //
+            // Height is the stack read bottom-up: 5 pill inset + 5 pill + 10 gap +
+            // 34 buttons + 7 gap + 24 tooltip = 85, plus a little slack. The pill's own
+            // position is unchanged, so opening the cluster only adds height upward.
+            CGSize(width: 132, height: 92)
         case .armed:
             CGSize(width: 272, height: 48)
         case .dictating:
