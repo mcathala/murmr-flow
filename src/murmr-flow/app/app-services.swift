@@ -30,7 +30,8 @@ final class AppServices {
     let meetings: MeetingCoordinator
 
     /// Not observable state: it owns an NSPanel and must never be recreated.
-    let hud = DictationHUD()
+    let panel = FloatingPanel()
+    private var bridge: PanelBridge?
 
     private static let log = Logger(subsystem: "app.murmr.MurmrFlow", category: "startup")
 
@@ -64,7 +65,13 @@ final class AppServices {
         hasStarted = true
         Self.log.notice("start(\(trigger, privacy: .public)) running")
 
-        dictation.onStageChange = { [hud] stage in hud.update(stage: stage) }
+        // One bridge owns every link between the coordinators and the panel, so neither
+        // coordinator ever holds a reference to a window.
+        let bridge = PanelBridge(
+            panel: panel, dictation: dictation, meetings: meetings, prompts: prompts
+        )
+        bridge.start()
+        self.bridge = bridge
 
         // The microphone cannot serve both at once, so whichever starts first wins.
         meetings.onRecordingChange = { [dictation] isRecording in
