@@ -18,6 +18,7 @@ final class SettingsStore {
         static let customWords = "cleanup.customWords"
         static let hotkey = "dictation.hotkey"
         static let pauseMedia = "dictation.pauseMedia"
+        static let holdToTalk = "dictation.holdToTalk"
         static let speechModel = "stt.model"
     }
 
@@ -44,6 +45,7 @@ final class SettingsStore {
             ?? .parakeetV3
         self.pauseMediaWhileDictating =
             defaults.object(forKey: Key.pauseMedia) as? Bool ?? true
+        self.holdToTalk = defaults.object(forKey: Key.holdToTalk) as? Bool ?? true
     }
 
     // MARK: - Cleanup
@@ -86,6 +88,12 @@ final class SettingsStore {
     /// Pause whatever is playing while dictating, then put it back.
     var pauseMediaWhileDictating: Bool {
         didSet { defaults.set(pauseMediaWhileDictating, forKey: Key.pauseMedia) }
+    }
+
+    /// Hold the key to talk, or press once to start and once to stop. Was a hardcoded
+    /// assumption; some people would rather not hold a key for a long dictation.
+    var holdToTalk: Bool {
+        didSet { defaults.set(holdToTalk, forKey: Key.holdToTalk) }
     }
 
     // MARK: - Derived

@@ -41,6 +41,15 @@ final class HotkeyMonitor: @unchecked Sendable {
         }
 
         /// The modifier bit that is set while this key is held.
+        /// Carbon-style mask, which is what the system hotkey list stores.
+        var carbonModifier: Int {
+            switch self {
+            case .rightOption: 524_288
+            case .rightCommand: 1_048_576
+            case .rightControl: 262_144
+            }
+        }
+
         var flag: CGEventFlags {
             switch self {
             case .rightOption: .maskAlternate
@@ -48,6 +57,36 @@ final class HotkeyMonitor: @unchecked Sendable {
             case .rightControl: .maskControl
             }
         }
+    }
+
+    /// Whether any enabled macOS shortcut uses this modifier on its own.
+    ///
+    /// Scoped precisely, because over-claiming would be worse than not checking: this
+    /// reads the system's own symbolic-hotkey list and looks for an entry bound to this
+    /// modifier alone. It cannot see shortcuts owned by other apps, and it cannot know
+    /// that a keyboard layout treats right Option as AltGr. Silence here means "nothing
+    /// in the system list", not "guaranteed free".
+    static func conflict(for trigger: Trigger) -> String? {
+        guard let defaults = UserDefaults(suiteName: "com.apple.symbolichotkeys"),
+              let hotkeys = defaults.dictionary(forKey: "AppleSymbolicHotKeys")
+        else { return nil }
+
+        for (_, raw) in hotkeys {
+            guard let entry = raw as? [String: Any],
+                  entry["enabled"] as? Bool == true,
+                  let value = entry["value"] as? [String: Any],
+                  let parameters = value["parameters"] as? [Any],
+                  parameters.count >= 3,
+                  let modifiers = parameters[2] as? Int,
+                  let keyCode = parameters[1] as? Int
+            else { continue }
+
+            // A modifier-only shortcut carries no key code of its own.
+            guard keyCode == 0xFFFF || keyCode < 0 else { continue }
+            guard modifiers == trigger.carbonModifier else { continue }
+            return "A macOS shortcut already uses \(trigger.displayName) on its own."
+        }
+        return nil
     }
 
     private(set) var trigger: Trigger = .rightOption
