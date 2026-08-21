@@ -46,6 +46,7 @@ final class PanelBridge {
         panel.present()
         sync()
         startPump()
+
     }
 
     // MARK: - Actions

@@ -15,14 +15,14 @@ final class FloatingPanel {
     private var panel: NSPanel?
     private var host: NSHostingView<PanelView>?
 
-    /// Where the user dragged it to: the **centre** of its bottom edge, not a corner.
+    /// Where the panel sits: the **centre** of its bottom edge, not a corner.
     ///
     /// Storing a corner meant every resize had to guess how to compensate, and the guess
     /// drifted a few points each time the panel grew or shrank. An anchor the panel is
     /// laid out *around* stays correct at any size.
     ///
     /// Nil means bottom-centre of whichever screen the pointer is on.
-    private var pinnedAnchor: CGPoint? {
+    private var anchor: CGPoint? {
         get {
             guard let stored = UserDefaults.standard.string(forKey: Self.anchorKey) else {
                 return nil
@@ -71,7 +71,7 @@ final class FloatingPanel {
         }
 
         let size = model.size
-        let origin = self.origin(for: size, current: panel.frame)
+        let origin = self.origin(for: size)
 
         // The flag has to wrap `setFrame` itself. It used to be set and cleared inside the
         // origin calculation, which meant it was already false by the time the window
@@ -114,15 +114,18 @@ final class FloatingPanel {
         host.autoresizingMask = [.width, .height]
         panel.contentView = host
 
-        // Remember a drag. `didMove` also fires for our own resizes, so only a move that
-        // isn't ours counts — hence the flag around setFrame.
+        // Remember a drag — but only a real one. `didMove` fires for our own resizes too,
+        // and `isMovableByWindowBackground` means the smallest twitch while a button is
+        // down counts as a move. Requiring a pressed mouse button is what separates
+        // "the user put it here" from "the window changed size".
         NotificationCenter.default.addObserver(
             forName: NSWindow.didMoveNotification, object: panel, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let panel = self.panel, !self.isAdjusting else { return }
+                guard NSEvent.pressedMouseButtons != 0 else { return }
                 let frame = panel.frame
-                self.pinnedAnchor = CGPoint(x: frame.midX, y: frame.minY)
+                self.anchor = CGPoint(x: frame.midX, y: frame.minY)
             }
         }
 
@@ -132,10 +135,49 @@ final class FloatingPanel {
 
     private var isAdjusting = false
 
-    /// Lays the panel out around its anchor, so growing is symmetrical and repeatable.
-    private func origin(for size: CGSize, current: NSRect) -> CGPoint {
-        let anchor = pinnedAnchor ?? defaultAnchor()
-        return CGPoint(x: (anchor.x - size.width / 2).rounded(), y: anchor.y.rounded())
+    /// Lays the panel out around its anchor, then clamps it fully inside the screen.
+    ///
+    /// The clamp is the important half. Without it the panel could sit partly under the
+    /// Dock — which is exactly what happened: the resting pill cleared it, and then the
+    /// hover state grew tall enough that its buttons ended up drawn over the Dock icons.
+    /// A floating window at status-bar level is happily allowed to overlap the Dock, so
+    /// nothing stops it but us.
+    private func origin(for size: CGSize) -> CGPoint {
+        let anchor = resolvedAnchor()
+        var x = anchor.x - size.width / 2
+        var y = anchor.y
+
+        if let visible = screen(for: anchor)?.visibleFrame {
+            let inset = Self.screenInset
+            // max(min:) rather than min(max:) so a panel wider than the screen still ends
+            // up flush left instead of flipping to a negative position.
+            x = max(visible.minX + inset, min(x, visible.maxX - size.width - inset))
+            y = max(visible.minY + inset, min(y, visible.maxY - size.height - inset))
+        }
+        return CGPoint(x: x.rounded(), y: y.rounded())
+    }
+
+    /// Kept clear of the screen edges — and of the Dock, since `visibleFrame` excludes it.
+    private static let screenInset: CGFloat = 10
+
+    /// The anchor, decided once and then left alone.
+    ///
+    /// It used to be recomputed from the pointer's screen on every state change, so moving
+    /// the mouse between displays moved the panel mid-interaction. Fixing it on first use
+    /// makes position stable; dragging is how you change it.
+    private func resolvedAnchor() -> CGPoint {
+        // A remembered position on a display that is no longer attached would clamp into
+        // some corner of a screen it was never meant for. Forget it and start again.
+        if let anchor, NSScreen.screens.contains(where: { $0.frame.contains(anchor) }) {
+            return anchor
+        }
+        let fresh = defaultAnchor()
+        anchor = fresh
+        return fresh
+    }
+
+    private func screen(for anchor: CGPoint) -> NSScreen? {
+        NSScreen.screens.first { $0.frame.contains(anchor) } ?? NSScreen.main
     }
 
     /// Bottom-centre of whichever screen holds the pointer, so on a multi-display setup it
