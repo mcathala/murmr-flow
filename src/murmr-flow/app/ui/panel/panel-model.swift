@@ -19,11 +19,14 @@ final class PanelModel {
 
     /// The panel's shape. Ordered roughly as you meet them.
     ///
-    /// `armed` exists only on the pointer route: pressing the key means you have already
+    /// There is no separate hover state any more. It existed to ask which mode you wanted,
+    /// and a button per mode answers that without a step — so reaching for the pill opens
+    /// the controls directly.
+    ///
+    /// `armed` is still only reached by pointer: pressing the key means you have already
     /// decided, and showing a summary at that point would just delay the recording.
     enum Phase: Equatable {
         case resting
-        case hovering
         case armed
         case dictating
         case meeting
@@ -34,7 +37,7 @@ final class PanelModel {
         var isBusy: Bool {
             switch self {
             case .dictating, .meeting, .working: true
-            case .resting, .hovering, .armed, .failed: false
+            case .resting, .armed, .failed: false
             }
         }
 
@@ -58,7 +61,7 @@ final class PanelModel {
             case .armed, .failed:
                 // Nothing was started, or it already ended — discard just dismisses.
                 Controls(stop: false, discard: true)
-            case .resting, .hovering, .working:
+            case .resting, .working:
                 // Mid-transcription there is nothing useful to stop *into*.
                 Controls()
             }
@@ -102,6 +105,10 @@ final class PanelModel {
     var targetAppName: String?
     var targetAppIcon: NSImage?
 
+    /// The key that starts a dictation, shown as a keycap. Nil when there isn't one, so
+    /// the row does not claim a shortcut that will not fire.
+    var hotkeyLabel: String?
+
     var promptName: String = "Default"
     var promptOptions: [(id: UUID, name: String)] = []
 
@@ -144,17 +151,19 @@ final class PanelModel {
     func hover(_ isInside: Bool) {
         guard !phase.isBusy else { return }
         switch (phase, isInside) {
-        case (.resting, true): set(.hovering)
-        case (.hovering, false): set(.resting)
+        case (.resting, true): set(.armed)
         case (.armed, false): set(.resting)
         default: break
         }
     }
 
-    /// Pointer moved onto the dictate button: show what is about to happen.
-    func armIfHovering() {
-        if phase == .hovering { set(.armed) }
-    }
+    /// How far the Notes satellite sits outside the row, and how big it is. The window is
+    /// widened by this on **both** sides so the row itself stays centred on the screen and
+    /// the existing centring needs no special case — the spare width on the right is
+    /// simply transparent.
+    static let satelliteSize: CGFloat = 30
+    static let satelliteGap: CGFloat = 9
+    static var satelliteReach: CGFloat { satelliteSize + satelliteGap }
 
     func hide() {
         guard !phase.isBusy else { return }
@@ -176,15 +185,9 @@ final class PanelModel {
             // Tall enough to hold a capsule centred on the shared centre line, plus room
             // for its shadow.
             CGSize(width: 62, height: 34)
-        case .hovering:
-            // Width fits the longest tooltip ("Start meeting"), not the two buttons alone
-            // — at 116 the label was squeezed, which pulled the cluster off centre.
-            //
-            // Height read bottom-up from the centre line: 24 - 17 to the buttons' base,
-            // 34 buttons, 7 gap, 24 tooltip = 72, plus slack for the shadow.
-            CGSize(width: 132, height: 84)
         case .armed:
-            CGSize(width: 272, height: 48)
+            // The row, plus the satellite's reach mirrored on both sides.
+            CGSize(width: 268 + Self.satelliteReach * 2, height: 48)
         case .dictating:
             preview.isEmpty
                 ? CGSize(width: 330, height: 48)

@@ -27,7 +27,7 @@ struct PanelSnapshotTests {
 
         let cases: [(String, PanelModel.Phase)] = [
             ("resting", .resting),
-            ("hovering", .hovering),
+
             ("armed", .armed),
             ("dictating", .dictating),
             ("meeting", .meeting),
@@ -37,6 +37,10 @@ struct PanelSnapshotTests {
             let model = PanelModel()
             model.set(phase)
             model.promptName = "Default"
+            model.hotkeyLabel = "right ⌥"
+            model.targetAppName = "Brave Browser"
+            model.targetAppIcon = AppIconCache.icon(forBundleID: "com.brave.Browser")
+                ?? NSWorkspace.shared.icon(for: .applicationBundle)
             model.elapsed = 64
             model.micLevel = 0.09        // speaking
             model.youLevel = 0.003       // a quiet room: should light nothing
@@ -104,7 +108,7 @@ struct PanelWindowTests {
         panel.present()
 
         for phase in [
-            PanelModel.Phase.resting, .hovering, .armed, .dictating, .meeting,
+            PanelModel.Phase.resting, .armed, .dictating, .meeting,
             .working("Tidying up…"), .failed(.cleanup),
         ] {
             panel.model.set(phase)

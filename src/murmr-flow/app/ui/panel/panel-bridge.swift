@@ -39,8 +39,17 @@ final class PanelBridge {
     func start() {
         wireActions()
         refreshPrompts()
+        refreshHotkey()
 
         dictation.onStageChange = { [weak self] _ in self?.sync() }
+
+        // The row's job is to say where the text will land *before* you speak, so the
+        // target has to be captured when the row opens. Capturing it only at the start of
+        // a recording meant the icon was always one beat late — and absent exactly when
+        // it was supposed to be useful.
+        panel.onPhaseChanged = { [weak self] phase in
+            if phase == .armed { self?.captureTarget() }
+        }
         meetings.onStageChange = { [weak self] _ in self?.sync() }
 
         panel.present()
@@ -99,6 +108,14 @@ final class PanelBridge {
             self.refreshPrompts()
             self.panel.apply()
         }
+    }
+
+    /// Kept in step with Settings, and nil when the watcher isn't running — the row must
+    /// not show a key that cannot fire.
+    private func refreshHotkey() {
+        panel.model.hotkeyLabel = dictation.hotkeyActive
+            ? dictation.settings.hotkey.displayName
+            : nil
     }
 
     private func refreshPrompts() {
@@ -211,6 +228,7 @@ final class PanelBridge {
         // the pointer between displays whether anything is running or not. A pill parked
         // on the other monitor is a pill you cannot reach.
         panel.followPointerIfNeeded()
+        refreshHotkey()
 
         let model = panel.model
         var changedSize = false

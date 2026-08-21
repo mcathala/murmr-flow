@@ -28,7 +28,11 @@ final class FloatingPanel {
         model.onPickPrompt = { [weak self] point in self?.showPromptMenu(at: point) }
         // The phase decides the size, and hover changes the phase from inside the view.
         // Without this the window never resized for the states the pointer triggers.
-        model.onPhaseChange = { [weak self] in self?.apply() }
+        model.onPhaseChange = { [weak self] in
+            guard let self else { return }
+            self.apply()
+            self.onPhaseChanged?(self.model.phase)
+        }
     }
 
     // MARK: - Lifecycle
@@ -191,6 +195,9 @@ final class FloatingPanel {
 
     /// Set by the app; receives the chosen preset.
     var onPromptChosen: (@MainActor (UUID) -> Void)?
+
+    /// Set by the app; fires after the window has been resized for a new phase.
+    var onPhaseChanged: (@MainActor (PanelModel.Phase) -> Void)?
 
     private var targets: [PromptTarget] = []
 }
