@@ -28,6 +28,7 @@ final class AppServices {
     let notes = MeetingStore()
     let prompts = PromptStore()
     let providers = ProviderStore()
+    let speech = SpeechModelStore()
     private let models = ModelManager()
     private let transcriber = TranscriptionService()
 
@@ -46,7 +47,8 @@ final class AppServices {
     private init() {
         dictation = DictationCoordinator(
             settings: settings, models: models, transcriber: transcriber,
-            history: history, prompts: prompts, providers: providers
+            history: history, prompts: prompts, providers: providers,
+            speech: speech
         )
         meetings = MeetingCoordinator(
             models: models, transcriber: transcriber, notes: notes

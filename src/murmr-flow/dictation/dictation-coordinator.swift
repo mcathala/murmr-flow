@@ -99,18 +99,12 @@ final class DictationCoordinator {
     private(set) var elapsed: TimeInterval = 0
     private(set) var hotkeyActive = false
 
-    /// Result of the "does this actually work" test in Settings.
-    enum VoiceTest: Equatable {
-        case idle
-        case running
-        case heard(String, TimeInterval)
-        case silent
-        case failed(String)
+    /// True while the microphone test is recording. The *result* lives with the model in
+    /// `SpeechModelStore`, so it survives switching models and relaunching.
+    private(set) var isTestingVoice = false
 
-        var isRunning: Bool { self == .running }
-    }
-
-    private(set) var voiceTest: VoiceTest = .idle
+    /// What the last test heard back, kept only for the run that produced it.
+    private(set) var lastHeard: String?
 
     /// Which provider is mid-test, if any. The *result* lives with the provider in
     /// `ProviderStore`, so it survives switching away and relaunching.
@@ -133,6 +127,7 @@ final class DictationCoordinator {
     let history: HistoryStore
     let prompts: PromptStore
     let providers: ProviderStore
+    let speech: SpeechModelStore
     private let cleanup = CleanupService()
     private let hotkey = HotkeyMonitor()
     private let media = MediaPlaybackController()
@@ -158,7 +153,8 @@ final class DictationCoordinator {
         transcriber: TranscriptionService = TranscriptionService(),
         history: HistoryStore = HistoryStore(),
         prompts: PromptStore = PromptStore(),
-        providers: ProviderStore = ProviderStore()
+        providers: ProviderStore = ProviderStore(),
+        speech: SpeechModelStore = SpeechModelStore()
     ) {
         self.settings = settings
         self.models = models
@@ -166,7 +162,8 @@ final class DictationCoordinator {
         self.history = history
         self.prompts = prompts
         self.providers = providers
-        models.select(settings.speechModel)
+        self.speech = speech
+        models.select(speech.activeModel)
     }
 
     // MARK: - Hotkey
@@ -393,7 +390,7 @@ final class DictationCoordinator {
         try await transcriber.load(loaded)
     }
 
-    /// Switches the speech model.
+    /// Switches the speech model. The only thing that changes which one is used.
     ///
     /// Two things have to happen together, which is why this exists rather than callers
     /// setting the setting directly:
@@ -405,7 +402,7 @@ final class DictationCoordinator {
     ///     download prompt for something the user already has.
     func changeSpeechModel(_ model: SpeechModel) {
         guard model != settings.speechModel else { return }
-        settings.speechModel = model
+        speech.setActive(model)
         models.select(model)
         Task {
             await transcriber.unload()
@@ -417,7 +414,7 @@ final class DictationCoordinator {
 
     /// Download and load ahead of first use, so the first dictation isn't slow.
     func warmUp() async {
-        models.select(settings.speechModel)
+        models.select(speech.activeModel)
         await models.prepare()
         if let loaded = models.models {
             try? await transcriber.load(loaded)
@@ -531,28 +528,35 @@ final class DictationCoordinator {
     /// inference runs, which microphone is selected, or whether that microphone is muted.
     /// The first time you found out was your first real dictation.
     func toggleVoiceTest() {
-        if voiceTest.isRunning {
+        if isTestingVoice {
             Task { await finishVoiceTest() }
             return
         }
 
         // Never over the top of a real dictation — they would fight for the microphone.
         guard !stage.isBusy, !isSuspended else {
-            voiceTest = .failed("Something else is using the microphone.")
+            speech.setVerification(
+                .failed("Something else is using the microphone."), for: speech.activeModel
+            )
             return
         }
 
         do {
             try recorder.start()
-            voiceTest = .running
+            lastHeard = nil
+            isTestingVoice = true
         } catch {
-            voiceTest = .failed(error.localizedDescription)
+            speech.setVerification(
+                .failed(error.localizedDescription), for: speech.activeModel
+            )
         }
     }
 
     private func finishVoiceTest() async {
+        let model = speech.activeModel
         let clock = ContinuousClock()
         let started = clock.now
+        defer { isTestingVoice = false }
 
         do {
             let capture = try recorder.finishCapture()
@@ -564,13 +568,27 @@ final class DictationCoordinator {
             let text = try await transcriber.transcribe(samples).text
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // Silence is its own answer, and a more useful one than an empty string:
-            // it points at the microphone rather than at the model.
-            voiceTest = text.isEmpty ? .silent : .heard(text, (clock.now - started).seconds)
+            if text.isEmpty {
+                // Silence is its own answer, and a more useful one than an empty string:
+                // it points at the microphone rather than at the model.
+                lastHeard = nil
+                speech.setVerification(
+                    .failed("Nothing was heard — check the microphone."), for: model
+                )
+            } else {
+                lastHeard = text
+                speech.setVerification(
+                    .working(latency: (clock.now - started).seconds, at: Date()), for: model
+                )
+            }
         } catch MicRecorder.RecorderError.nothingRecorded {
-            voiceTest = .silent
+            lastHeard = nil
+            speech.setVerification(
+                .failed("Nothing was recorded — check the microphone."), for: model
+            )
         } catch {
-            voiceTest = .failed(error.localizedDescription)
+            lastHeard = nil
+            speech.setVerification(.failed(error.localizedDescription), for: model)
         }
     }
 
