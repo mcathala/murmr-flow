@@ -195,6 +195,11 @@ final class PanelBridge {
     }
 
     private func tick() {
+        // Before the state switch, and deliberately outside it: the panel has to follow
+        // the pointer between displays whether anything is running or not. A pill parked
+        // on the other monitor is a pill you cannot reach.
+        panel.followPointerIfNeeded()
+
         let model = panel.model
         var changedSize = false
 

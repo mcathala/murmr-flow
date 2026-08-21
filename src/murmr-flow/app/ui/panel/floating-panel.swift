@@ -15,34 +15,14 @@ final class FloatingPanel {
     private var panel: NSPanel?
     private var host: NSHostingView<PanelView>?
 
-    /// Where the panel sits: the **centre** of its bottom edge, not a corner.
+    /// The display the panel is currently sitting on, so a change of screen can be
+    /// noticed without repositioning the window ten times a second.
     ///
-    /// Storing a corner meant every resize had to guess how to compensate, and the guess
-    /// drifted a few points each time the panel grew or shrank. An anchor the panel is
-    /// laid out *around* stays correct at any size.
-    ///
-    /// Nil means bottom-centre of whichever screen the pointer is on.
-    private var anchor: CGPoint? {
-        get {
-            guard let stored = UserDefaults.standard.string(forKey: Self.anchorKey) else {
-                return nil
-            }
-            let parts = stored.split(separator: ",").compactMap { Double($0) }
-            guard parts.count == 2 else { return nil }
-            return CGPoint(x: parts[0], y: parts[1])
-        }
-        set {
-            guard let newValue else {
-                UserDefaults.standard.removeObject(forKey: Self.anchorKey)
-                return
-            }
-            UserDefaults.standard.set("\(newValue.x),\(newValue.y)", forKey: Self.anchorKey)
-        }
-    }
+    /// Compared by frame rather than by identity: `NSScreen` instances are recreated when
+    /// the display arrangement changes, so holding one and testing `===` would report a
+    /// move that never happened.
+    private var currentScreenFrame: CGRect?
 
-    /// Deliberately a new key. The previous one accumulated a position saved from our own
-    /// resizes, so anything stored under it is wrong.
-    private static let anchorKey = "panel.anchor"
 
     init() {
         model.onPickPrompt = { [weak self] point in self?.showPromptMenu(at: point) }
@@ -77,9 +57,8 @@ final class FloatingPanel {
         // origin calculation, which meant it was already false by the time the window
         // moved — so every resize we performed was recorded as a user drag, and the panel
         // pinned itself on first launch and then crept off centre.
-        isAdjusting = true
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
-        isAdjusting = false
+        currentScreenFrame = pointerScreen()?.frame
 
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
@@ -103,7 +82,10 @@ final class FloatingPanel {
         // Interactive, unlike its predecessor. Safe only because the window never becomes
         // key — see NonActivatingPanel.
         panel.ignoresMouseEvents = false
-        panel.isMovableByWindowBackground = true
+        // Not movable. Position is derived from where the pointer is, so a dragged
+        // position would be overwritten the moment you crossed to another display — and
+        // a window that quietly undoes your drag is worse than one that never offered.
+        panel.isMovableByWindowBackground = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.animationBehavior = .none
 
@@ -114,84 +96,62 @@ final class FloatingPanel {
         host.autoresizingMask = [.width, .height]
         panel.contentView = host
 
-        // Remember a drag — but only a real one. `didMove` fires for our own resizes too,
-        // and `isMovableByWindowBackground` means the smallest twitch while a button is
-        // down counts as a move. Requiring a pressed mouse button is what separates
-        // "the user put it here" from "the window changed size".
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didMoveNotification, object: panel, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, let panel = self.panel, !self.isAdjusting else { return }
-                guard NSEvent.pressedMouseButtons != 0 else { return }
-                let frame = panel.frame
-                self.anchor = CGPoint(x: frame.midX, y: frame.minY)
-            }
-        }
-
         self.panel = panel
         self.host = host
     }
 
-    private var isAdjusting = false
-
-    /// Lays the panel out around its anchor, then clamps it fully inside the screen.
+    /// Bottom-centre of whichever display the pointer is on, always.
     ///
-    /// The clamp is the important half. Without it the panel could sit partly under the
-    /// Dock — which is exactly what happened: the resting pill cleared it, and then the
-    /// hover state grew tall enough that its buttons ended up drawn over the Dock icons.
-    /// A floating window at status-bar level is happily allowed to overlap the Dock, so
-    /// nothing stops it but us.
+    /// Not a remembered position. The panel is a target you throw the pointer at, so it
+    /// has to be on the screen the pointer is already on — a pill parked on the other
+    /// monitor is a pill you cannot reach. That rules out dragging it somewhere else,
+    /// which is why the window is no longer movable: "wherever you left it" and "wherever
+    /// you are" cannot both be true.
+    ///
+    /// `frame.midX` for the horizontal centre, not `visibleFrame.midX`: a Dock on the left
+    /// or right shifts the visible area sideways, and centring against that would put the
+    /// panel visibly off the middle of the screen. The bottom comes from `visibleFrame`,
+    /// which is what clears a bottom Dock.
     private func origin(for size: CGSize) -> CGPoint {
-        let anchor = resolvedAnchor()
-        var x = anchor.x - size.width / 2
-        var y = anchor.y
+        guard let screen = pointerScreen() else { return .zero }
+        let visible = screen.visibleFrame
+        let inset = Self.screenInset
 
-        if let visible = screen(for: anchor)?.visibleFrame {
-            let inset = Self.screenInset
-            // max(min:) rather than min(max:) so a panel wider than the screen still ends
-            // up flush left instead of flipping to a negative position.
-            x = max(visible.minX + inset, min(x, visible.maxX - size.width - inset))
-            y = max(visible.minY + inset, min(y, visible.maxY - size.height - inset))
-        }
+        var x = screen.frame.midX - size.width / 2
+        var y = visible.minY + inset
+
+        // Clamped fully inside the visible area. A floating window at status-bar level is
+        // entitled to overlap the Dock, so nothing stops it but this: the resting pill
+        // cleared the Dock only because it is 18 points tall, and the hover state grew
+        // tall enough to draw its buttons over the Dock icons.
+        //
+        // max(min:) rather than min(max:) so a panel wider than the screen ends up flush
+        // left instead of flipping to a negative position.
+        x = max(visible.minX + inset, min(x, visible.maxX - size.width - inset))
+        y = max(visible.minY + inset, min(y, visible.maxY - size.height - inset))
+
         return CGPoint(x: x.rounded(), y: y.rounded())
     }
 
     /// Kept clear of the screen edges — and of the Dock, since `visibleFrame` excludes it.
     private static let screenInset: CGFloat = 10
 
-    /// The anchor, decided once and then left alone.
-    ///
-    /// It used to be recomputed from the pointer's screen on every state change, so moving
-    /// the mouse between displays moved the panel mid-interaction. Fixing it on first use
-    /// makes position stable; dragging is how you change it.
-    private func resolvedAnchor() -> CGPoint {
-        // A remembered position on a display that is no longer attached would clamp into
-        // some corner of a screen it was never meant for. Forget it and start again.
-        if let anchor, NSScreen.screens.contains(where: { $0.frame.contains(anchor) }) {
-            return anchor
-        }
-        let fresh = defaultAnchor()
-        anchor = fresh
-        return fresh
-    }
-
-    private func screen(for anchor: CGPoint) -> NSScreen? {
-        NSScreen.screens.first { $0.frame.contains(anchor) } ?? NSScreen.main
-    }
-
-    /// Bottom-centre of whichever screen holds the pointer, so on a multi-display setup it
-    /// appears where you are actually working.
-    ///
-    /// `frame`, not `visibleFrame`: a Dock on the left or right shifts the visible area
-    /// sideways, and centring against that puts the panel visibly off the middle of the
-    /// screen. The bottom inset is taken from `visibleFrame` so a bottom Dock is cleared.
-    private func defaultAnchor() -> CGPoint {
+    private func pointerScreen() -> NSScreen? {
         let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouse) }
-            ?? NSScreen.main
-        guard let screen else { return .zero }
-        return CGPoint(x: screen.frame.midX, y: screen.visibleFrame.minY + 10)
+        return NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
+    }
+
+    /// Moves the panel if the pointer has crossed to another display.
+    ///
+    /// Polled rather than driven by a global mouse monitor, which would want Input
+    /// Monitoring permission for something this cosmetic. Reading the pointer position is
+    /// cheap; the window is only touched when the screen actually changes.
+    func followPointerIfNeeded() {
+        guard let panel, panel.isVisible else { return }
+        guard let screen = pointerScreen() else { return }
+        guard screen.frame != currentScreenFrame else { return }
+        currentScreenFrame = screen.frame
+        apply()
     }
 
     // MARK: - Prompt menu
