@@ -19,6 +19,10 @@ struct MurmrFlowApp: App {
             MainWindow(services: services)
                 // Backstop: see AppServices.start() for why this is not the only trigger.
                 .task { services.start(trigger: "window.task") }
+                // Ink commits. Following the system appearance would mean the palette only
+                // works for half the users, and materials resolving light against a navy
+                // ground looks like a bug rather than a choice.
+                .preferredColorScheme(.dark)
         }
         // Resizable now, not sized to its contents: Notes is a list beside a reading pane
         // and has to be able to grow.

@@ -13,7 +13,7 @@ final class FloatingPanel {
     let model = PanelModel()
 
     private var panel: NSPanel?
-    private var host: NSHostingView<PanelView>?
+    private var host: NSView?
 
     /// The display the panel is currently sitting on, so a change of screen can be
     /// noticed without repositioning the window ten times a second.
@@ -98,8 +98,15 @@ final class FloatingPanel {
         panel.isMovableByWindowBackground = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.animationBehavior = .none
+        // Ink is a dark design, and SwiftUI's `Material` resolves against the *environment's*
+        // colour scheme — so on a Mac in Light Mode every pane would come out white. This
+        // has to be set on the window as well as in SwiftUI: AppKit resolves materials at
+        // its own level, and the two must agree or the blur and the tint disagree.
+        panel.appearance = NSAppearance(named: .darkAqua)
 
-        let host = NSHostingView(rootView: PanelView(model: model))
+        let host = NSHostingView(
+            rootView: PanelView(model: model).environment(\.colorScheme, .dark)
+        )
         host.frame = NSRect(origin: .zero, size: model.size)
         // Without this the hosting view keeps its original size while the window resizes
         // around it, so the contents stop being centred the first time the panel grows.
