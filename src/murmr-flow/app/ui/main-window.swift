@@ -76,7 +76,6 @@ struct MainWindow: View {
             detail
                 .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
                 .background(InkGround())
-                .toolbar { toolbar }
         }
         .font(Theme.Text.body)
         .foregroundStyle(Theme.Palette.text)
@@ -134,28 +133,4 @@ struct MainWindow: View {
         }
     }
 
-    /// Start/stop lives here rather than being Home's reason to exist, so it is one click
-    /// away from every section.
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                services.meetings.toggle()
-            } label: {
-                if services.meetings.stage.isRecording {
-                    Label("Stop · \(MeetingTranscript.clock(services.meetings.elapsed))",
-                          systemImage: "stop.fill")
-                } else {
-                    Label("Start meeting", systemImage: "record.circle")
-                }
-            }
-            .disabled(isTranscribing)
-            .tint(services.meetings.stage.isRecording ? .red : .accentColor)
-        }
-    }
-
-    private var isTranscribing: Bool {
-        if case .transcribing = services.meetings.stage { return true }
-        return false
-    }
 }
