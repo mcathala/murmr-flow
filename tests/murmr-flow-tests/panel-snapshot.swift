@@ -270,7 +270,7 @@ struct InsightsSnapshotTests {
         let view = InsightsGrid(insights: insights, typingSpeed: 40, windowDays: 7)
             .frame(width: 620)
             .padding(16)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(InkGround())
 
         let renderer = ImageRenderer(content: view.environment(\.colorScheme, .dark))
         renderer.scale = 2
@@ -351,7 +351,7 @@ struct HomeSummarySnapshotTests {
         }
         .frame(width: 560)
         .padding(16)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(InkGround())
 
         let renderer = ImageRenderer(content: view.environment(\.colorScheme, .dark))
         renderer.scale = 2
