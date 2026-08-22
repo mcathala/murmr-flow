@@ -19,8 +19,27 @@ struct PanelSnapshotTests {
     private static let dockHeight: CGFloat = 41
     private static let windowGap: CGFloat = 10
 
+    /// Tests do not go through `Info.plist`, so the bundled fonts have to be registered
+    /// here. Without this every snapshot renders in the system fallback and quietly shows
+    /// the wrong typeface — which is the exact failure the app guards against at launch.
+    static let fontsRegistered: Bool = {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // murmr-flow-tests
+            .deletingLastPathComponent()   // tests
+            .deletingLastPathComponent()   // repo root
+            .appendingPathComponent("resources/fonts")
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil
+        ) else { return false }
+        for file in files where file.pathExtension == "ttf" {
+            CTFontManagerRegisterFontsForURL(file as CFURL, .process, nil)
+        }
+        return NSFontManager.shared.availableFontFamilies.contains(Theme.Face.ui)
+    }()
+
     @Test("render every state")
     func render() throws {
+        #expect(Self.fontsRegistered, "bundled fonts did not register — snapshots would lie")
         guard let directory = ProcessInfo.processInfo.environment["MURMR_SNAPSHOT_DIR"] else {
             return
         }
@@ -48,7 +67,9 @@ struct PanelSnapshotTests {
             if phase == .meeting { model.mode = .note }
             if phase == .dictating { model.preview = "okay so I want to see that" }
 
-            let renderer = ImageRenderer(content: PanelView(model: model))
+            let renderer = ImageRenderer(
+                content: PanelView(model: model).environment(\.colorScheme, .dark)
+            )
             renderer.scale = 2
             guard let panel = renderer.nsImage else { continue }
 
@@ -73,8 +94,17 @@ struct PanelSnapshotTests {
         canvas.lockFocus()
         defer { canvas.unlockFocus() }
 
-        NSColor(calibratedWhite: 0.10, alpha: 1).setFill()
-        NSRect(x: 0, y: 0, width: width, height: height).fill()
+        // The Ink ground, so the glass has colour to refract. Against flat grey it is
+        // only blur, which is exactly the mistake the palette exists to avoid.
+        let ground = NSGradient(
+            colors: [
+                NSColor(srgbRed: 0.039, green: 0.118, blue: 0.220, alpha: 1),
+                NSColor(srgbRed: 0.016, green: 0.063, blue: 0.122, alpha: 1),
+            ]
+        )
+        ground?.draw(in: NSRect(x: 0, y: 0, width: width, height: height), angle: 290)
+        NSColor(srgbRed: 0.180, green: 0.525, blue: 0.757, alpha: 0.30).setFill()
+        NSBezierPath(ovalIn: NSRect(x: -140, y: height - 150, width: 460, height: 340)).fill()
 
         // The Dock.
         NSColor(calibratedWhite: 0.30, alpha: 1).setFill()
@@ -242,7 +272,7 @@ struct InsightsSnapshotTests {
             .padding(16)
             .background(Color(nsColor: .windowBackgroundColor))
 
-        let renderer = ImageRenderer(content: view)
+        let renderer = ImageRenderer(content: view.environment(\.colorScheme, .dark))
         renderer.scale = 2
         guard let image = renderer.nsImage,
               let tiff = image.tiffRepresentation,
@@ -323,7 +353,7 @@ struct HomeSummarySnapshotTests {
         .padding(16)
         .background(Color(nsColor: .windowBackgroundColor))
 
-        let renderer = ImageRenderer(content: view)
+        let renderer = ImageRenderer(content: view.environment(\.colorScheme, .dark))
         renderer.scale = 2
         guard let image = renderer.nsImage,
               let tiff = image.tiffRepresentation,
