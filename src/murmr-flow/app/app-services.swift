@@ -90,6 +90,16 @@ final class AppServices {
             dictation.isSuspended = isRecording
         }
 
+        // A bundled font that failed to register is the quietest possible failure: every
+        // screen silently falls back to the system face and looks subtly wrong for the whole
+        // session with nothing to point at. Cheap to check, so check it.
+        if !Theme.Face.isAvailable {
+            let face = Theme.Face.ui
+            Self.log.error(
+                "bundled font \(face, privacy: .public) did not register; rendering in the system fallback"
+            )
+        }
+
         armHotkeyIfPossible()
         armMeetingHotkey()
         Self.log.notice("hotkey armed: \(self.dictation.hotkeyActive, privacy: .public)")
