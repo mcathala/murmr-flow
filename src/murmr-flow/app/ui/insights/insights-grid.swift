@@ -17,8 +17,8 @@ struct InsightsGrid: View {
         if insights.isEmpty {
             Card {
                 Text("Nothing to measure yet. Numbers appear after your first dictation.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Text.body)
+                    .foregroundStyle(Theme.Palette.muted)
             }
         } else {
             VStack(alignment: .leading, spacing: 12) {
@@ -47,7 +47,8 @@ struct InsightsGrid: View {
             Figure(
                 label: "Time saved",
                 value: Insights.shortDuration(insights.timeSaved),
-                footnote: "vs typing at \(Int(typingSpeed)) wpm"
+                footnote: "vs typing at \(Int(typingSpeed)) wpm",
+                highlighted: true
             )
             Figure(
                 label: "Your pace",
@@ -74,8 +75,9 @@ struct InsightsGrid: View {
                     ForEach(insights.days) { day in
                         VStack(spacing: 4) {
                             RoundedRectangle(cornerRadius: 3)
-                                .fill(day.words > 0 ? AnyShapeStyle(.tint)
-                                                    : AnyShapeStyle(.quaternary))
+                                .fill(day.words > 0
+                                      ? Theme.Palette.tide
+                                      : Theme.Palette.hairline)
                                 // Capped, and centred in an even column. Left to fill the
                                 // width, seven bars across a wide card became blocks —
                                 // wider than they were tall, which reads as a stack of
@@ -83,8 +85,8 @@ struct InsightsGrid: View {
                                 .frame(maxWidth: 26)
                                 .frame(height: barHeight(day.words))
                             Text(Self.weekday(day.date))
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
+                                .font(Theme.Text.label)
+                                .foregroundStyle(Theme.Palette.faint)
                         }
                         .frame(maxWidth: .infinity)
                         .help("\(day.words) words")
@@ -123,14 +125,14 @@ struct InsightsGrid: View {
                         AppBadge(name: app.name, bundleID: app.bundleID)
                         GeometryReader { geometry in
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(.tint)
+                                .fill(Theme.Palette.tide)
                                 .frame(width: max(4, geometry.size.width * app.share))
                                 .frame(maxHeight: .infinity, alignment: .center)
                         }
                         .frame(height: 8)
                         Text("\(app.name) · \(Int((app.share * 100).rounded()))%")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Palette.muted)
                             .frame(width: 150, alignment: .leading)
                             .lineLimit(1)
                     }
@@ -146,25 +148,31 @@ private struct Figure: View {
     let value: String
     var unit: String?
     let footnote: String
+    /// Exactly one figure per screen carries the gold. It is the accent's whole job here.
+    var highlighted = false
 
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.Text.label)
+                    .tracking(Theme.labelTracking)
+                    .foregroundStyle(Theme.Palette.faint)
                     .textCase(.uppercase)
                 HStack(alignment: .lastTextBaseline, spacing: 3) {
                     Text(value)
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(Theme.Text.figure)
+                        .foregroundStyle(highlighted ? Theme.Palette.gold : Theme.Palette.text)
                         .monospacedDigit()
                     if let unit {
-                        Text(unit).font(.caption).foregroundStyle(.secondary)
+                        Text(unit)
+                            .font(Theme.Text.small)
+                            .foregroundStyle(Theme.Palette.muted)
                     }
                 }
                 Text(footnote)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.Text.small)
+                    .foregroundStyle(Theme.Palette.faint)
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

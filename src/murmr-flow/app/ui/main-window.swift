@@ -57,12 +57,21 @@ struct MainWindow: View {
                     }
                 }
             }
+            // The sidebar's own background is hidden so the ground shows through it. Left
+            // in place, `List` paints an opaque sidebar material and the window ends up
+            // with a grey column beside a navy one.
+            .scrollContentBackground(.hidden)
+            .background(Theme.Glass.thick.material)
             .navigationSplitViewColumnWidth(min: 184, ideal: 198, max: 250)
         } detail: {
             detail
                 .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
+                .background(InkGround())
                 .toolbar { toolbar }
         }
+        .font(Theme.Text.body)
+        .foregroundStyle(Theme.Palette.text)
+        .tint(Theme.Palette.gold)
         .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
         .onAppear {
             // Land on the thing that needs attention rather than hiding a broken
