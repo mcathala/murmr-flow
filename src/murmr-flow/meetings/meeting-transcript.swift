@@ -103,8 +103,6 @@ struct MeetingTranscript: Sendable {
         lines.append("")
         lines.append("# \(title)")
         lines.append("")
-        lines.append("\(Self.dateFormatter.string(from: startedAt)) · \(Self.clock(duration))")
-        lines.append("")
 
         if utterances.isEmpty {
             lines.append("_Nothing was transcribed. Check that the meeting audio was "

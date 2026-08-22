@@ -1,0 +1,197 @@
+import AppKit
+import Foundation
+import SwiftUI
+import Testing
+
+@testable import MurmrFlow
+
+/// The reading pane showed `**Them** · `0:00`` on screen, and every row showed its date
+/// twice. Both were the same root cause: the note body was treated as opaque text when it
+/// has a structure the app itself wrote.
+@Suite("Reading a note back")
+struct NoteReadingTests {
+
+    /// A real file, copied verbatim from ~/Documents/Murmr Flow/Meetings.
+    private static let real = """
+        # Meeting — 22 August 2026 at 11:14
+
+        **Them** · `0:00`
+
+        Sur l'extérieur, sur la touche. Tamarc, la prise initiale.
+
+        **You** · `0:04`
+
+        Yes, exactly that.
+        """
+
+    @Test("speaker, time and text come back apart")
+    func parsesTurns() {
+        let turns = NoteFile.turns(in: Self.real)
+
+        #expect(turns.count == 2)
+        #expect(turns[0].speaker == "Them")
+        #expect(turns[0].time == "0:00")
+        #expect(turns[0].text == "Sur l'extérieur, sur la touche. Tamarc, la prise initiale.")
+        #expect(turns[0].isYou == false)
+        #expect(turns[1].isYou == true)
+    }
+
+    /// The bug the user saw: markup rendered as content.
+    @Test("no markup survives into a turn")
+    func stripsMarkup() {
+        for turn in NoteFile.turns(in: Self.real) {
+            #expect(!turn.text.contains("**"))
+            #expect(!turn.text.contains("`"))
+            #expect(!turn.text.hasPrefix("#"))
+        }
+    }
+
+    /// A note somebody typed themselves has no speaker lines. Files are the source of
+    /// truth, so that has to keep working — an empty result is the signal to fall back.
+    @Test("a hand-written note yields no turns rather than nonsense")
+    func handWritten() {
+        #expect(NoteFile.turns(in: "# Groceries\n\nMilk, and a new kettle.").isEmpty)
+    }
+
+    /// Multiple lines under one speaker belong to that speaker.
+    @Test("a turn spanning lines stays one turn")
+    func joinsWrappedLines() {
+        let turns = NoteFile.turns(in: "**You** · `1:20`\n\nFirst part.\nSecond part.")
+        #expect(turns.count == 1)
+        #expect(turns[0].text == "First part. Second part.")
+    }
+}
+
+/// The list rows.
+@Suite("Note list rows")
+struct NoteSnippetTests {
+
+    private func snippet(_ body: String) throws -> String {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("snippet-\(UUID().uuidString).md")
+        let file = """
+            ---
+            title: "Meeting"
+            date: 2026-08-22T09:14:44Z
+            duration: 3
+            ---
+
+            \(body)
+            """
+        try file.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+        return try #require(NoteFile.read(url)).snippet
+    }
+
+    /// What the user saw: a row reading "22 Aug 2026 at 11:14 · 0:03" and then, underneath,
+    /// "Saturday 22 August 2026 at 11:14 · 0:02" — the same date, formatted twice, once
+    /// disagreeing with the other.
+    @Test("the snippet is speech, not the note's own date line")
+    func skipsDateLine() throws {
+        let text = try snippet("""
+            # Meeting — 22 August 2026 at 11:14
+
+            Saturday 22 August 2026 at 11:14 · 0:02
+
+            **Them** · `0:00`
+
+            Sur l'extérieur, sur la touche.
+            """)
+
+        #expect(text == "Sur l'extérieur, sur la touche.")
+        #expect(!text.contains("Saturday"))
+        #expect(!text.contains("·"))
+    }
+
+    @Test("a long turn is cut with an ellipsis")
+    func truncates() throws {
+        let text = try snippet("**You** · `0:00`\n\n" + String(repeating: "word ", count: 60))
+        #expect(text.count <= 101)
+        #expect(text.hasSuffix("…"))
+    }
+}
+
+/// The file the app writes.
+@Suite("Writing a note")
+struct NoteWritingTests {
+
+    /// The pane draws the title and the date itself, so the body restating them put the
+    /// same information on screen three times over.
+    @Test("the body does not restate the date")
+    func noDuplicateDate() {
+        let transcript = MeetingTranscript(
+            title: "Meeting — 22 August 2026 at 11:14",
+            startedAt: Date(timeIntervalSince1970: 1_755_853_484),
+            duration: 182,
+            utterances: [Utterance(speaker: .them, start: 0, end: 2, text: "Hello there.")]
+        )
+        let markdown = transcript.markdown
+
+        // Once in the front matter, once as the heading — and nowhere else.
+        #expect(markdown.components(separatedBy: "2026").count - 1 <= 2)
+        #expect(!markdown.contains("· 3:02"))
+    }
+}
+
+// MARK: - Looking at it
+
+@MainActor
+@Suite("Transcript snapshot")
+struct TranscriptSnapshotTests {
+
+    @Test("render a conversation")
+    func render() throws {
+        guard let directory = ProcessInfo.processInfo.environment["MURMR_SNAPSHOT_DIR"] else {
+            return
+        }
+
+        let body = """
+            # Meeting — 22 August 2026 at 11:14
+
+            **Them** · `0:00`
+
+            Sur l'extérieur, sur la touche. Tamarc, la prise initiale, et \
+            ensuite on regarde ce que ça donne côté production.
+
+            **You** · `0:07`
+
+            Right — so the plan is to ship the reading pane first, then come back \
+            to the empty states once we know how the transcript actually reads.
+
+            **Them** · `0:14`
+
+            Exactly.
+            """
+
+        let turns = NoteFile.turns(in: body)
+        #expect(turns.count == 3)
+
+        let view = VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Meeting — 22 August 2026 at 11:14")
+                    .font(Theme.Text.title)
+                    .foregroundStyle(Theme.Palette.text)
+                Text("Saturday 22 August 2026 at 11:14 · 0:18")
+                    .font(Theme.Text.small)
+                    .foregroundStyle(Theme.Palette.faint)
+            }
+            Divider().overlay(Theme.Palette.hairline)
+            TranscriptView(turns: turns)
+        }
+        .frame(width: 560, alignment: .leading)
+        .padding(20)
+        .background(InkGround())
+
+        let renderer = ImageRenderer(content: view.environment(\.colorScheme, .dark))
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:])
+        else { return }
+
+        try png.write(
+            to: URL(fileURLWithPath: directory).appendingPathComponent("transcript.png")
+        )
+    }
+}

@@ -115,23 +115,79 @@ struct NoteFile: Identifiable, Sendable, Hashable {
             """
     }
 
+    // MARK: - Reading a note back
+
+    /// One person's turn, parsed back out of the file.
+    struct Turn: Identifiable, Sendable, Equatable {
+        let id = UUID()
+        let speaker: String
+        let time: String
+        let text: String
+
+        var isYou: Bool { speaker.caseInsensitiveCompare("You") == .orderedSame }
+    }
+
+    /// Splits a note body into turns.
+    ///
+    /// The reading pane used to render the body as one block of raw text, so it showed
+    /// `**Them** · \`0:00\`` literally — markup on the screen, in the one place the app is
+    /// supposed to be *reading* to you.
+    ///
+    /// Returns an empty array for anything that has no speaker lines at all, which is the
+    /// signal to fall back to plain paragraphs. Files are the source of truth, so a note
+    /// somebody wrote by hand has to display too.
+    static func turns(in body: String) -> [Turn] {
+        guard let pattern = try? Regex(#"^\*\*(.+?)\*\*\s+·\s+`(.+?)`\s*$"#) else {
+            return []
+        }
+
+        var turns: [Turn] = []
+        var speaker: String?
+        var time: String?
+        var said: [String] = []
+
+        func flush() {
+            defer { said.removeAll() }
+            guard let speaker, let time else { return }
+            let text = said.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else { return }
+            turns.append(Turn(speaker: speaker, time: time, text: text))
+        }
+
+        for raw in body.components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if let match = try? pattern.wholeMatch(in: line) {
+                flush()
+                speaker = String(match.output[1].substring ?? "")
+                time = String(match.output[2].substring ?? "")
+                continue
+            }
+            // The heading and the date line are already shown by the pane's own header, so
+            // they are skipped rather than repeated — the file keeps them for portability.
+            if line.hasPrefix("#") || line.isEmpty { continue }
+            if speaker != nil { said.append(line) }
+        }
+        flush()
+
+        return turns
+    }
+
     // MARK: - Helpers
 
+    /// The first thing somebody actually said.
+    ///
+    /// Taking "the first line that isn't markup" instead put the note's own date line into
+    /// every row — so each row showed its date twice, once formatted by the app and once
+    /// copied out of the file.
     private static func snippet(from body: String) -> String {
-        let interesting = body
-            .components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { line in
-                guard !line.isEmpty else { return false }
-                // Skip headings, speaker labels and the italic empty-note placeholder.
-                if line.hasPrefix("#") || line.hasPrefix("**") || line.hasPrefix("_") {
-                    return false
-                }
-                return true
-            }
-        let joined = interesting.prefix(2).joined(separator: " ")
-        guard joined.count > 100 else { return joined }
-        return String(joined.prefix(100)).trimmingCharacters(in: .whitespaces) + "…"
+        let spoken = turns(in: body).first?.text
+            ?? body.components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .first { !$0.isEmpty && !$0.hasPrefix("#") && !$0.hasPrefix("_") }
+            ?? ""
+
+        guard spoken.count > 100 else { return spoken }
+        return String(spoken.prefix(100)).trimmingCharacters(in: .whitespaces) + "…"
     }
 
     /// A colon or a leading quote would break the `key: value` shape, so quote when needed.
