@@ -68,6 +68,22 @@ final class FloatingPanel {
         // moved — so every resize we performed was recorded as a user drag, and the panel
         // pinned itself on first launch and then crept off centre.
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
+
+        // AppKit derives a borderless window's shadow from the content's alpha channel, and
+        // caches it. Nothing recomputes it when the window resizes — and the panel resizes
+        // on every phase, from a 44pt capsule at rest to a full row when armed.
+        //
+        // Left alone it showed as a hard-edged rectangle around the pill: the shadow of the
+        // whole window rather than of the shape actually drawn in it. Verified by dumping
+        // the view hierarchy at runtime — `NSNextStepFrame` has no layer, no border and no
+        // background, and the only subview is the hosting view, so nothing was *drawing*
+        // that edge.
+        //
+        // Twice, because the first call runs before SwiftUI has drawn the new phase, so on
+        // its own it would recompute the shadow from the contents that are on their way out.
+        panel.invalidateShadow()
+        DispatchQueue.main.async { panel.invalidateShadow() }
+
         currentScreenFrame = pointerScreen()?.frame
 
         if !panel.isVisible { panel.orderFrontRegardless() }
@@ -78,7 +94,12 @@ final class FloatingPanel {
     private func build() {
         let panel = NonActivatingPanel(
             contentRect: NSRect(origin: .zero, size: model.size),
-            styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
+            // No `.fullSizeContentView`: it only means anything on a window that *has* a
+            // title bar, and pairing it with `.borderless` asks AppKit to fit chrome into a
+            // window that has none. That is enough for it to install a frame view, which
+            // draws a hairline rectangle at the window's bounds — visible around the pill
+            // as an edge that belongs to no part of the design.
+            styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
         )
@@ -115,6 +136,7 @@ final class FloatingPanel {
 
         self.panel = panel
         self.host = host
+
     }
 
     /// Bottom-centre of whichever display the pointer is on, always.
