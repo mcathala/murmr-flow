@@ -170,6 +170,33 @@ extension View {
     ) -> some View {
         modifier(GlassPane(weight: weight, radius: radius, elevated: elevated))
     }
+
+    /// A full-bleed glass column — a sidebar or a list pane. No corners and no shadow,
+    /// because it runs to the window's edge.
+    ///
+    /// Separate from `glass()` so it cannot be reached for without the tint. A bare
+    /// `Material` resolves to neutral grey on a dark ground, which is how the sidebar ended
+    /// up looking slate beside a navy window.
+    func glassColumn(_ weight: Theme.Glass = .thick) -> some View {
+        modifier(GlassColumn(weight: weight))
+    }
+}
+
+private struct GlassColumn: ViewModifier {
+    let weight: Theme.Glass
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        content.background {
+            if reduceTransparency {
+                Theme.Palette.solid
+            } else {
+                Rectangle().fill(weight.material)
+                Rectangle().fill(weight.tint)
+            }
+        }
+    }
 }
 
 private struct GlassPane: ViewModifier {

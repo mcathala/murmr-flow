@@ -45,23 +45,32 @@ struct MainWindow: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: routeBinding) {
+            // Selection is drawn by `SelectableRow`, not by `List`. The system highlight
+            // is `controlAccentColor` — a system-wide setting no app can override — so a
+            // selected row arrived bright blue in the middle of a navy and gold interface.
+            List {
                 ForEach(Route.top, id: \.self) { route in
-                    Label(route.label, systemImage: route.symbol).tag(route)
+                    sidebarRow(route.label, symbol: route.symbol, route: route)
                 }
 
-                Section("Settings") {
+                Section {
                     ForEach(SettingsPane.allCases) { pane in
-                        Label(pane.label, systemImage: pane.symbol)
-                            .tag(Route.settings(pane))
+                        sidebarRow(pane.label, symbol: pane.symbol, route: .settings(pane))
                     }
+                } header: {
+                    Text("Settings")
+                        .font(Theme.Text.label)
+                        .tracking(Theme.labelTracking)
+                        .textCase(.uppercase)
+                        .foregroundStyle(Theme.Palette.faint)
                 }
             }
+            .listStyle(.sidebar)
             // The sidebar's own background is hidden so the ground shows through it. Left
             // in place, `List` paints an opaque sidebar material and the window ends up
             // with a grey column beside a navy one.
             .scrollContentBackground(.hidden)
-            .background(Theme.Glass.thick.material)
+            .glassColumn(.thick)
             .navigationSplitViewColumnWidth(min: 184, ideal: 198, max: 250)
         } detail: {
             detail
@@ -82,13 +91,27 @@ struct MainWindow: View {
         }
     }
 
-    /// `List` needs an optional binding for selection; a nil selection would otherwise
-    /// clear the detail pane and leave the window blank.
-    private var routeBinding: Binding<Route?> {
-        Binding(
-            get: { services.route },
-            set: { if let value = $0 { services.route = value } }
-        )
+    private func sidebarRow(_ label: String, symbol: String, route: Route) -> some View {
+        SelectableRow(isSelected: services.route == route) {
+            HStack(spacing: 9) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12.5))
+                    // A fixed width, so the labels line up whatever the glyph's shape.
+                    .frame(width: 17)
+                    .foregroundStyle(
+                        services.route == route ? Theme.Palette.gold : Theme.Palette.muted
+                    )
+                Text(label)
+                    .font(Theme.Text.body)
+                    .foregroundStyle(
+                        services.route == route ? Theme.Palette.text : Theme.Palette.muted
+                    )
+            }
+        }
+        .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .onTapGesture { services.route = route }
     }
 
     @ViewBuilder

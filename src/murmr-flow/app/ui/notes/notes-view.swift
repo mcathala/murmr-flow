@@ -12,6 +12,8 @@ struct NotesView: View {
     /// A set, so several notes can be cleared out in one go. Deleting one at a time is
     /// fine for a mistake and useless for a clear-out.
     @State private var selection: Set<NoteFile> = []
+    /// Where a ⇧-click extends from.
+    @State private var anchor: NoteFile?
     @State private var query = ""
     @State private var renaming: String?
     @State private var confirmingDelete = false
@@ -20,18 +22,28 @@ struct NotesView: View {
         HSplitView {
             list
                 .frame(minWidth: 220, idealWidth: 260, maxWidth: 340)
+                .glassColumn(.thin)
             detail
                 .frame(minWidth: 320, maxWidth: .infinity)
         }
+        // Gold, not the system accent. A bright blue selection was the one thing on screen
+        // that belonged to a different palette.
+        .tint(Theme.Palette.gold)
         .onAppear {
             notes.reload()
-            if selection.isEmpty, let first = notes.notes.first { selection = [first] }
+            if selection.isEmpty, let first = notes.notes.first {
+                selection = [first]
+                anchor = first
+            }
         }
         .onChange(of: meetings.stage) { _, stage in
             // A meeting that just finished should appear without being asked for.
             if stage == .saved {
                 notes.reload()
-                if let newest = notes.notes.first { selection = [newest] }
+                if let newest = notes.notes.first {
+                    selection = [newest]
+                    anchor = newest
+                }
             }
         }
         .confirmationDialog(
@@ -48,39 +60,60 @@ struct NotesView: View {
 
     private var results: [NoteFile] { notes.search(query) }
 
+    /// Read from `NSEvent` rather than a gesture modifier, because `onTapGesture` does not
+    /// report which keys were held.
+    private func select(_ note: NoteFile) {
+        var modifiers: EventModifiers = []
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.command) { modifiers.insert(.command) }
+        if flags.contains(.shift) { modifiers.insert(.shift) }
+
+        RowClick.apply(
+            note, in: results, selection: &selection, anchor: &anchor, modifiers: modifiers
+        )
+    }
+
     // MARK: - List
 
     private var list: some View {
         VStack(spacing: 0) {
             TextField("Search notes", text: $query)
                 .textFieldStyle(.roundedBorder)
+                .font(Theme.Text.body)
                 .padding(10)
 
             if results.isEmpty {
                 VStack(spacing: 6) {
                     Text(query.isEmpty ? "No notes yet" : "Nothing matches")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Palette.muted)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(results, selection: $selection) { note in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(note.title).font(.callout.weight(.medium)).lineLimit(1)
-                        Text(
-                            "\(Self.stamp(note.date)) · \(MeetingTranscript.clock(note.duration))"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        if !note.snippet.isEmpty {
-                            Text(note.snippet)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
+                // No `selection:` binding — the highlight is `SelectableRow`'s, because
+                // the system one is `controlAccentColor` and cannot be recoloured per app.
+                List(results) { note in
+                    SelectableRow(isSelected: selection.contains(note)) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(note.title)
+                                .font(Theme.Text.bodyStrong)
+                                .foregroundStyle(Theme.Palette.text)
+                                .lineLimit(1)
+                            Text("\(Self.stamp(note.date)) · \(MeetingTranscript.clock(note.duration))")
+                                .font(Theme.Text.small)
+                                .foregroundStyle(Theme.Palette.faint)
+                            if !note.snippet.isEmpty {
+                                Text(note.snippet)
+                                    .font(Theme.Text.small)
+                                    .foregroundStyle(Theme.Palette.muted)
+                                    .lineLimit(2)
+                            }
                         }
                     }
-                    .padding(.vertical, 3)
-                    .tag(note)
+                    .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .onTapGesture { select(note) }
                     .contextMenu {
                         Button("Show in Finder") { notes.reveal(note) }
                         Button("Open in editor") { notes.open(note) }
@@ -93,7 +126,14 @@ struct NotesView: View {
                         }
                     }
                 }
-                .listStyle(.sidebar)
+                .listStyle(.plain)
+                // Hidden, or `List` paints its own opaque sidebar material and this one
+                // column ends up showing the desktop through it while its neighbours do
+                // not — which reads as a rendering fault rather than a design.
+                .scrollContentBackground(.hidden)
+                .onMoveCommand { direction in
+                    RowClick.move(direction, in: results, selection: &selection, anchor: &anchor)
+                }
                 .onDeleteCommand { if !selection.isEmpty { confirmingDelete = true } }
 
                 selectionFooter
@@ -109,8 +149,8 @@ struct NotesView: View {
             Divider()
             HStack(spacing: 8) {
                 Text("\(selection.count) selected")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Text.small)
+                    .foregroundStyle(Theme.Palette.muted)
                 Spacer(minLength: 0)
                 if selection.count < results.count {
                     Button("All") { selection = Set(results) }
@@ -151,11 +191,7 @@ struct NotesView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     header(note)
                     Divider()
-                    Text(notes.body(of: note))
-                        .font(.callout)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                    transcript(of: note)
                 }
                 .padding(20)
             }
@@ -167,6 +203,30 @@ struct NotesView: View {
                     + "and everything this Mac plays becomes \u{201C}Them\u{201D}.",
                 action: ("Start meeting", { meetings.toggle() })
             )
+        }
+    }
+
+    /// You and Them as turns, which is what the file actually holds.
+    ///
+    /// This pane used to print the body verbatim, so it showed `**Them** · ` and backticks
+    /// on screen — markup in the one place the app is meant to be reading to you.
+    @ViewBuilder
+    private func transcript(of note: NoteFile) -> some View {
+        let body = notes.body(of: note)
+        let turns = NoteFile.turns(in: body)
+
+        if turns.isEmpty {
+            // A note somebody wrote by hand, or one with nothing in it. Files are the
+            // source of truth, so it still has to display.
+            Text(body)
+                .font(Theme.Text.body)
+                .foregroundStyle(Theme.Palette.muted)
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            TranscriptView(turns: turns)
         }
     }
 
@@ -185,7 +245,9 @@ struct NotesView: View {
                     Button("Save") { commitRename(note) }.controlSize(.small)
                     Button("Cancel") { renaming = nil }.controlSize(.small)
                 } else {
-                    Text(note.title).font(.title2.weight(.semibold))
+                    Text(note.title)
+                        .font(Theme.Text.title)
+                        .foregroundStyle(Theme.Palette.text)
                     Button {
                         renaming = note.title
                     } label: {
@@ -218,8 +280,8 @@ struct NotesView: View {
                 }
             }
             Text("\(Self.longStamp(note.date)) · \(MeetingTranscript.clock(note.duration))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Theme.Text.small)
+                .foregroundStyle(Theme.Palette.faint)
         }
     }
 
