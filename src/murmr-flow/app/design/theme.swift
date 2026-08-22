@@ -189,12 +189,24 @@ private struct GlassColumn: ViewModifier {
 
     func body(content: Content) -> some View {
         content.background {
-            if reduceTransparency {
-                Theme.Palette.solid
-            } else {
-                Rectangle().fill(weight.material)
-                Rectangle().fill(weight.tint)
+            // Ignores the safe area, so the fill runs up behind the title bar.
+            //
+            // `NavigationSplitView` uses a full-size content view, so the strip holding the
+            // traffic lights sits above the sidebar's content — but the safe-area inset
+            // keeps a plain background out of it. The result was a visible seam under the
+            // traffic lights with a lighter shade above it, which reads as two panels
+            // rather than one column.
+            Group {
+                if reduceTransparency {
+                    Theme.Palette.solid
+                } else {
+                    ZStack {
+                        Rectangle().fill(weight.material)
+                        Rectangle().fill(weight.tint)
+                    }
+                }
             }
+            .ignoresSafeArea()
         }
     }
 }
