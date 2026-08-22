@@ -109,30 +109,43 @@ struct SidebarSnapshotTests {
             return
         }
 
-        let rows: [(String, String, Bool)] = [
-            ("Home", "house", false),
-            ("Dictaphone", "waveform", true),
-            ("Notes", "doc.text", false),
-            ("Insights", "chart.bar", false),
-        ]
+        // The app's own labels, not stand-ins — the point is to catch a label that does not
+        // fit. "Voice transcription" truncated to "Voice transcri…" in the running app and
+        // a snapshot with invented rows would never have shown it.
+        let top: [(String, String)] = MainWindow.Route.top.map { ($0.label, $0.symbol) }
+        let settings: [(String, String)] = SettingsPane.allCases.map { ($0.label, $0.symbol) }
 
-        let view = VStack(alignment: .leading, spacing: 2) {
-            ForEach(rows, id: \.0) { row in
-                SelectableRow(isSelected: row.2) {
-                    HStack(spacing: 9) {
-                        Image(systemName: row.1)
-                            .font(.system(size: 12.5))
-                            .frame(width: 17)
-                            .foregroundStyle(row.2 ? Theme.Palette.gold : Theme.Palette.muted)
-                        Text(row.0)
-                            .font(Theme.Text.body)
-                            .foregroundStyle(row.2 ? Theme.Palette.text : Theme.Palette.muted)
-                    }
+        func row(_ label: String, _ symbol: String, selected: Bool) -> some View {
+            SelectableRow(isSelected: selected) {
+                HStack(spacing: 9) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 12.5))
+                        .frame(width: 17)
+                        .foregroundStyle(selected ? Theme.Palette.gold : Theme.Palette.muted)
+                    Text(label)
+                        .font(Theme.Text.body)
+                        .foregroundStyle(selected ? Theme.Palette.text : Theme.Palette.muted)
+                        .lineLimit(1)
                 }
             }
         }
+
+        let view = VStack(alignment: .leading, spacing: 2) {
+            ForEach(top, id: \.0) { row($0.0, $0.1, selected: $0.0 == "Dictaphone") }
+
+            Text("Settings")
+                .font(Theme.Text.label)
+                .tracking(Theme.labelTracking)
+                .textCase(.uppercase)
+                .foregroundStyle(Theme.Palette.faint)
+                .padding(.top, 12)
+                .padding(.leading, 9)
+
+            ForEach(settings, id: \.0) { row($0.0, $0.1, selected: false) }
+        }
+        // The sidebar's default width, so a label that does not fit shows here too.
         .frame(width: 198)
-        .padding(8)
+        .padding(.vertical, 8)
         .glassColumn(.thick)
         .background(InkGround())
 
