@@ -43,8 +43,16 @@ struct MainWindow: View {
 
     static let minSize = CGSize(width: 900, height: 600)
 
+    /// Ours, so it starts open every launch.
+    ///
+    /// Left to `NavigationSplitView`, the collapsed state persists — and the sidebar *is*
+    /// this app's navigation, so a remembered collapse meant opening with no way to reach
+    /// any page. Driving it from state we own means every launch starts at `.all`, whatever
+    /// the last session did.
+    @State private var columns: NavigationSplitViewVisibility = .all
+
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             // Selection is drawn by `SelectableRow`, not by `List`. The system highlight
             // is `controlAccentColor` — a system-wide setting no app can override — so a
             // selected row arrived bright blue in the middle of a navy and gold interface.
