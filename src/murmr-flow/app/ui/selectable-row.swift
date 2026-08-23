@@ -16,13 +16,16 @@ struct SelectableRow<Content: View>: View {
     /// Rounded on all four sides and inset from the column edge, the way a Mac sidebar row
     /// sits — a full-bleed rectangle reads as a table.
     var radius: CGFloat = Theme.Radius.row
+    /// Tightened for the icon rail: ten glyphs in a narrow column read as one group when
+    /// they are close together and as a scattering when they are not.
+    var verticalPadding: CGFloat = 7
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 9)
-            .padding(.vertical, 7)
+            .padding(.vertical, verticalPadding)
             .background {
                 if isSelected {
                     RoundedRectangle(cornerRadius: radius, style: .continuous)

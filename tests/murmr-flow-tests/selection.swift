@@ -183,7 +183,7 @@ struct SidebarRailSnapshotTests {
         let settings: [(String, String)] = SettingsPane.allCases.map { ($0.label, $0.symbol) }
 
         func row(_ label: String, _ symbol: String, selected: Bool, rail: Bool) -> some View {
-            SelectableRow(isSelected: selected) {
+            SelectableRow(isSelected: selected, verticalPadding: 5) {
                 HStack(spacing: 9) {
                     Image(systemName: symbol)
                         .font(.system(size: 12.5))
@@ -202,21 +202,24 @@ struct SidebarRailSnapshotTests {
 
         func column(rail: Bool) -> some View {
             VStack(spacing: 0) {
+                // The toggle is the first row, on the same centre line as the icons.
                 Image(systemName: "sidebar.left")
                     .font(.system(size: 12.5))
-                    .foregroundStyle(Theme.Palette.muted)
-                    .frame(width: 26, height: 24)
+                    .foregroundStyle(Theme.Palette.faint)
+                    .frame(width: 17)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
                     .frame(maxWidth: .infinity, alignment: rail ? .center : .trailing)
-                    .padding(.horizontal, rail ? 0 : 10)
-                    .padding(.top, 4)
-                    .padding(.bottom, 2)
+                    .padding(.horizontal, 6)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(top, id: \.0) { row($0.0, $0.1, selected: $0.0 == "Notes", rail: rail) }
 
                     if rail {
                         Rectangle().fill(Theme.Palette.hairline)
-                            .frame(height: 1).padding(.vertical, 5)
+                            .frame(height: 1)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
                     } else {
                         Text("Settings")
                             .font(Theme.Text.label)

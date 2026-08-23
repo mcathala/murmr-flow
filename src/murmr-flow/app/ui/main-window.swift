@@ -88,43 +88,42 @@ struct MainWindow: View {
     // MARK: - Sidebar
 
     private var sidebar: some View {
-        VStack(spacing: 0) {
+        // Selection is drawn by `SelectableRow`, not by `List`. The system highlight is
+        // `controlAccentColor` — a system-wide setting no app can override — so a selected
+        // row arrived bright blue in the middle of a navy and gold interface.
+        List {
             railToggle
 
-            // Selection is drawn by `SelectableRow`, not by `List`. The system highlight is
-            // `controlAccentColor` — a system-wide setting no app can override — so a
-            // selected row arrived bright blue in the middle of a navy and gold interface.
-            List {
-                ForEach(Route.top, id: \.self) { route in
+            ForEach(Route.top, id: \.self) { route in
                     sidebarRow(route.label, symbol: route.symbol, route: route)
                 }
 
-                Section {
-                    ForEach(SettingsPane.allCases) { pane in
-                        sidebarRow(pane.label, symbol: pane.symbol, route: .settings(pane))
-                    }
-                } header: {
-                    // Closed, the heading would be an ellipsis in a 64pt column. A rule
-                    // says the same thing in the space available.
-                    if isRail {
-                        Rectangle()
-                            .fill(Theme.Palette.hairline)
-                            .frame(height: 1)
-                            .padding(.vertical, 5)
-                    } else {
-                        Text("Settings")
-                            .font(Theme.Text.label)
-                            .tracking(Theme.labelTracking)
-                            .textCase(.uppercase)
-                            .foregroundStyle(Theme.Palette.faint)
-                    }
+            Section {
+                ForEach(SettingsPane.allCases) { pane in
+                    sidebarRow(pane.label, symbol: pane.symbol, route: .settings(pane))
+                }
+            } header: {
+                // Closed, the heading would be an ellipsis in a 64pt column. A rule says
+                // the same thing in the space available.
+                if isRail {
+                    Rectangle()
+                        .fill(Theme.Palette.hairline)
+                        .frame(height: 1)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                } else {
+                    Text("Settings")
+                        .font(Theme.Text.label)
+                        .tracking(Theme.labelTracking)
+                        .textCase(.uppercase)
+                        .foregroundStyle(Theme.Palette.faint)
                 }
             }
-            .listStyle(.sidebar)
-            // Hidden, or `List` paints its own opaque sidebar material and the window ends
-            // up with a grey column beside a navy one.
-            .scrollContentBackground(.hidden)
         }
+        .listStyle(.sidebar)
+        // Hidden, or `List` paints its own opaque sidebar material and the window ends up
+        // with a grey column beside a navy one.
+        .scrollContentBackground(.hidden)
     }
 
     /// Opens and closes the sidebar.
@@ -134,32 +133,36 @@ struct MainWindow: View {
     /// the top right whenever the column's width changed. This draws in the palette, sits in
     /// a place that exists in both states, and adds nothing to the toolbar.
     private var railToggle: some View {
-        Button {
-            withAnimation(.easeOut(duration: 0.18)) { isRail.toggle() }
-        } label: {
-            Image(systemName: "sidebar.left")
-                .font(.system(size: 12.5))
-                .foregroundStyle(Theme.Palette.muted)
-                .frame(width: 26, height: 24)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .help(isRail ? "Show labels" : "Hide labels")
-        // Trailing when open, centred when closed — in both cases the top of the column,
-        // which is where it can always be found.
-        .frame(
-            maxWidth: .infinity,
-            alignment: isRail ? .center : .trailing
-        )
-        .padding(.horizontal, isRail ? 0 : 10)
-        .padding(.top, 4)
-        .padding(.bottom, 2)
+        // The first row of the list rather than a header above it, so it takes the same
+        // insets as everything else and its glyph lands on the same centre line as the
+        // icons below. Free-standing, it sat off on its own with a band of dead space
+        // between it and the first item.
+        //
+        // No `withAnimation`. Animating the column's width re-laid-out the detail pane on
+        // every frame, and the settings panes visibly lurched through it. The width change
+        // snaps now.
+        Image(systemName: "sidebar.left")
+            .font(.system(size: 12.5))
+            .foregroundStyle(Theme.Palette.faint)
+            .frame(width: 17)
+            .padding(.horizontal, 9)
+            .padding(.vertical, Self.rowPadding)
+            .frame(maxWidth: .infinity, alignment: isRail ? .center : .trailing)
+            .contentShape(.rect)
+            .onTapGesture { isRail.toggle() }
+            .help(isRail ? "Show labels" : "Hide labels")
+            .listRowInsets(Self.rowInsets)
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
+
+    private static let rowPadding: CGFloat = 5
+    private static let rowInsets = EdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 6)
 
     private func sidebarRow(_ label: String, symbol: String, route: Route) -> some View {
         let selected = services.route == route
 
-        return SelectableRow(isSelected: selected) {
+        return SelectableRow(isSelected: selected, verticalPadding: Self.rowPadding) {
             HStack(spacing: 9) {
                 Image(systemName: symbol)
                     .font(.system(size: 12.5))
@@ -179,7 +182,7 @@ struct MainWindow: View {
         }
         // The label has to come back as a tooltip, or the rail is ten glyphs and a guess.
         .help(label)
-        .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
+        .listRowInsets(Self.rowInsets)
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
         .onTapGesture { services.route = route }
