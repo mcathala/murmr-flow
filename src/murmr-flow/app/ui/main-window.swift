@@ -43,20 +43,61 @@ struct MainWindow: View {
 
     static let minSize = CGSize(width: 900, height: 600)
 
-    /// Ours, so it starts open every launch.
+    /// A fixed column, not a `NavigationSplitView`.
     ///
-    /// Left to `NavigationSplitView`, the collapsed state persists — and the sidebar *is*
-    /// this app's navigation, so a remembered collapse meant opening with no way to reach
-    /// any page. Driving it from state we own means every launch starts at `.all`, whatever
-    /// the last session did.
-    @State private var columns: NavigationSplitViewVisibility = .all
+    /// The split view brought nothing this window uses and a queue of faults with it. It
+    /// synthesises a toolbar, and a toolbar with items carries a clipped-items indicator —
+    /// the round `»` that flashed at the top right whenever the column's width changed. It
+    /// draws its own sidebar toggle, which is not a toolbar item at all but SwiftUI's own
+    /// view inside the column, so emptying the toolbar never removed it. It persists a
+    /// collapsed state, so the app could open with no navigation at all. And nothing turns
+    /// any of that off: `.toolbar(removing: .sidebarToggle)`,
+    /// `.toolbar(.hidden, for: .windowToolbar)`, `CommandGroup(replacing: .sidebar) {}`, a
+    /// constant `columnVisibility` binding and `NSSplitViewItem.canCollapse = false` were
+    /// each measured against the running window and each did nothing.
+    ///
+    /// An `HStack` has no toolbar, draws no controls of its own, and remembers nothing. The
+    /// sidebar is this app's navigation and is always meant to be there, so a layout that
+    /// cannot take it away is the right shape.
+    static let sidebarWidth: CGFloat = 198
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columns) {
-            // Selection is drawn by `SelectableRow`, not by `List`. The system highlight
-            // is `controlAccentColor` — a system-wide setting no app can override — so a
-            // selected row arrived bright blue in the middle of a navy and gold interface.
-            List {
+        HStack(spacing: 0) {
+            sidebar
+                .frame(width: Self.sidebarWidth)
+                // Reaches under the title bar; the contents do not, so the column is one
+                // surface with no seam below the traffic lights.
+                .glassColumn(.thick)
+
+            // Drawn rather than a `Divider`, which resolves its own colour.
+            Rectangle()
+                .fill(Theme.Palette.hairline)
+                .frame(width: 1)
+                .ignoresSafeArea()
+
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        // One ground behind everything, so no layout state leaves a strip unpainted.
+        .background(InkGround())
+        .font(Theme.Text.body)
+        .foregroundStyle(Theme.Palette.text)
+        .tint(Theme.Palette.gold)
+        .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
+        .onAppear {
+            // Land on the thing that needs attention rather than hiding a broken
+            // permission behind a row the user has no reason to click.
+            if !services.permissions.allGranted {
+                services.route = .settings(.permissions)
+            }
+        }
+    }
+
+    /// Selection is drawn by `SelectableRow`, not by `List`. The system highlight is
+    /// `controlAccentColor` — a system-wide setting no app can override — so a selected row
+    /// arrived bright blue in the middle of a navy and gold interface.
+    private var sidebar: some View {
+        List {
                 ForEach(Route.top, id: \.self) { route in
                     sidebarRow(route.label, symbol: route.symbol, route: route)
                 }
@@ -73,29 +114,10 @@ struct MainWindow: View {
                         .foregroundStyle(Theme.Palette.faint)
                 }
             }
-            .listStyle(.sidebar)
-            // The sidebar's own background is hidden so the ground shows through it. Left
-            // in place, `List` paints an opaque sidebar material and the window ends up
-            // with a grey column beside a navy one.
-            .scrollContentBackground(.hidden)
-            .glassColumn(.thick)
-            .navigationSplitViewColumnWidth(min: 184, ideal: 198, max: 250)
-        } detail: {
-            detail
-                .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
-                .background(InkGround())
-        }
-        .font(Theme.Text.body)
-        .foregroundStyle(Theme.Palette.text)
-        .tint(Theme.Palette.gold)
-        .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
-        .onAppear {
-            // Land on the thing that needs attention rather than hiding a broken
-            // permission behind a row the user has no reason to click.
-            if !services.permissions.allGranted {
-                services.route = .settings(.permissions)
-            }
-        }
+        .listStyle(.sidebar)
+        // Hidden, or `List` paints its own opaque sidebar material and the window ends up
+        // with a grey column beside a navy one.
+        .scrollContentBackground(.hidden)
     }
 
     private func sidebarRow(_ label: String, symbol: String, route: Route) -> some View {

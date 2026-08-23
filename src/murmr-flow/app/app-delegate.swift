@@ -31,7 +31,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidBecomeActive(_ notification: Notification) {
         Task { @MainActor in
             AppServices.shared.armHotkeyIfPossible()
-            Self.stripSyntheticToolbar()
         }
     }
 
@@ -43,7 +42,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for _ in 0..<60 {
                 if let window = Self.mainWindow() {
                     Self.makeDark(window)
-                    Self.stripSyntheticToolbarWhenReady()
                     Self.moveOnScreenIfNeeded(window)
                     NSApp.activate(ignoringOtherApps: true)
                     window.makeKeyAndOrderFront(nil)
@@ -67,53 +65,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             $0.identifier?.rawValue.contains(MurmrFlowApp.mainWindowID) == true
         }) { return identified }
         return windows.first { $0.canBecomeMain && $0.title != "Settings" }
-    }
-
-    /// Empties the toolbar SwiftUI builds for us.
-    ///
-    /// `NavigationSplitView` installs three items nobody asked for — a flexible space, a
-    /// sidebar toggle and a split-view separator — and a toolbar with items has a clipped
-    /// items indicator: `NSToolbarClippedItemsIndicator`, accessibility label
-    /// "more toolbar items", the round `»` AppKit parks at the trailing edge. Collapsing the
-    /// sidebar takes its titlebar region to nothing, so the toggle no longer fits, so the
-    /// indicator appeared — and went again once the animation settled. A button flashing in
-    /// and out at the top right of the window.
-    ///
-    /// Found by logging every change in the title bar's view tree while the fault was
-    /// reproduced. Worth remembering that this is what it took: five SwiftUI APIs claim to
-    /// control this and none of them do anything —`.toolbar(removing: .sidebarToggle)`,
-    /// `.toolbar(.hidden, for: .windowToolbar)`, `CommandGroup(replacing: .sidebar) {}`,
-    /// a constant `columnVisibility` binding, and `NSSplitViewItem.canCollapse = false`.
-    /// Removing the items from the `NSToolbar` is the one thing that works, and SwiftUI does
-    /// not put them back.
-    ///
-    /// What goes with them is the toggle *button*. Collapsing still works — it is the split
-    /// view controller's behaviour, not the toolbar's — so View ▸ Toggle Sidebar and ⌃⌘S are
-    /// unaffected.
-    ///
-    /// Removes everything, because the app has no toolbar items of its own. Adding one means
-    /// sparing it here.
-    @MainActor
-    private static func stripSyntheticToolbar() {
-        guard let toolbar = mainWindow()?.toolbar, !toolbar.items.isEmpty else { return }
-        for index in toolbar.items.indices.reversed() {
-            toolbar.removeItem(at: index)
-        }
-    }
-
-    /// Waits for the items to exist before removing them.
-    ///
-    /// The window is on screen before SwiftUI has populated its toolbar, so stripping once
-    /// at that moment finds nothing and does nothing — then the items arrive. Keeps checking
-    /// for a few seconds, which also covers them being rebuilt during that window.
-    @MainActor
-    private static func stripSyntheticToolbarWhenReady() {
-        Task { @MainActor in
-            for _ in 0..<60 {
-                stripSyntheticToolbar()
-                try? await Task.sleep(for: .milliseconds(100))
-            }
-        }
     }
 
     /// Ink commits, and `.preferredColorScheme(.dark)` only reaches what SwiftUI draws.
