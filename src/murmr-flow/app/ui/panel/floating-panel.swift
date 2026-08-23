@@ -69,21 +69,6 @@ final class FloatingPanel {
         // pinned itself on first launch and then crept off centre.
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
 
-        // AppKit derives a borderless window's shadow from the content's alpha channel, and
-        // caches it. Nothing recomputes it when the window resizes — and the panel resizes
-        // on every phase, from a 44pt capsule at rest to a full row when armed.
-        //
-        // Left alone it showed as a hard-edged rectangle around the pill: the shadow of the
-        // whole window rather than of the shape actually drawn in it. Verified by dumping
-        // the view hierarchy at runtime — `NSNextStepFrame` has no layer, no border and no
-        // background, and the only subview is the hosting view, so nothing was *drawing*
-        // that edge.
-        //
-        // Twice, because the first call runs before SwiftUI has drawn the new phase, so on
-        // its own it would recompute the shadow from the contents that are on their way out.
-        panel.invalidateShadow()
-        DispatchQueue.main.async { panel.invalidateShadow() }
-
         currentScreenFrame = pointerScreen()?.frame
 
         if !panel.isVisible { panel.orderFrontRegardless() }
@@ -108,7 +93,10 @@ final class FloatingPanel {
         panel.level = .statusBar
         panel.backgroundColor = .clear
         panel.isOpaque = false
-        panel.hasShadow = true
+        // No shadow at all — not the window server's, and not one of our own drawn inside
+        // the frame. The pill separates from the desktop on its rim light and its navy base,
+        // both of which stay inside the window where nothing can clip them.
+        panel.hasShadow = false
         panel.hidesOnDeactivate = false
         // Interactive, unlike its predecessor. Safe only because the window never becomes
         // key — see NonActivatingPanel.

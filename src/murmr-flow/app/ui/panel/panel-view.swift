@@ -112,7 +112,8 @@ struct PanelView: View {
             Image(systemName: "text.document")
                 .font(.system(size: 12, weight: .medium))
                 .frame(width: PanelModel.satelliteSize, height: PanelModel.satelliteSize)
-                .glass(.thick, radius: PanelModel.satelliteSize / 2)
+                // Same reason as the row: no shadow inside a window with no room for one.
+                .glass(.floating, radius: PanelModel.satelliteSize / 2, elevated: false)
         }
         .buttonStyle(.plain)
         .help("Start recording a meeting")
@@ -217,9 +218,11 @@ struct PanelView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // Thick: this floats over other applications, so it should read as heavier
-            // than a card sitting inside a window.
-            .glass(.thick, radius: Theme.Radius.panel)
+            // `elevated: false` is load-bearing, not a preference. The window is exactly
+            // the size of its contents, so a shadow drawn *inside* it spreads into the
+            // transparent margins and is cut flat at the frame — a window's backing store
+            // ends there. That clip was the hard-edged rectangle around the pill.
+            .glass(.floating, radius: Theme.Radius.panel, elevated: false)
     }
 
     /// One icon saying which of the two is running.
