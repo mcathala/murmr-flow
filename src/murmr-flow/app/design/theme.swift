@@ -108,23 +108,28 @@ enum Theme {
 
     // MARK: - Material
 
-    /// Apple's three weights, because one blur for everything flattens the interface.
-    ///
-    /// Chrome that floats over other applications should read as heavier than a card
-    /// sitting inside a window.
+    /// Weights of glass, because one blur for everything flattens the interface.
     enum Glass {
         /// Rows and cards inside a window.
         case thin
         /// Windows and panes.
         case regular
-        /// The sidebar, and the floating panel.
+        /// The sidebar.
         case thick
+        /// The floating panel.
+        ///
+        /// Its own weight because it is the only surface in the app that sits over content
+        /// we do not control. The others rest on `InkGround`, so a light tint is enough for
+        /// the navy to read. Over a saturated desktop the same tint lost — the pill came out
+        /// brown on a red wallpaper, olive on a green one. The palette should not be
+        /// something the wallpaper decides.
+        case floating
 
         var material: Material {
             switch self {
             case .thin: .ultraThinMaterial
             case .regular: .regularMaterial
-            case .thick: .thickMaterial
+            case .thick, .floating: .thickMaterial
             }
         }
 
@@ -135,11 +140,26 @@ enum Theme {
         /// grey, and a grey pane on a navy ground looks like a pane from a different app —
         /// the tint is what keeps it inside the palette.
         var tint: LinearGradient {
+            // Navy the whole way through rather than a white wash over a faint navy, so
+            // there is no point in the gradient where the desktop behind can take over.
+            // `deep` above `abyss` keeps the light coming from the same direction as
+            // everywhere else — it is the lighter of the two.
+            if case .floating = self {
+                return LinearGradient(
+                    colors: [
+                        Theme.Palette.deep.opacity(0.70),
+                        Theme.Palette.abyss.opacity(0.88),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+
             let top: Double
             switch self {
             case .thin: top = 0.09
             case .regular: top = 0.12
-            case .thick: top = 0.15
+            default: top = 0.15
             }
             return LinearGradient(
                 colors: [
