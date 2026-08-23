@@ -162,3 +162,100 @@ struct SidebarSnapshotTests {
         )
     }
 }
+
+
+/// The sidebar's two widths.
+///
+/// Closed is a rail of icons, not an absent column — the sidebar is this app's only
+/// navigation, so taking it away strands you, and the button that brings it back has to be
+/// somewhere that exists in both states.
+@MainActor
+@Suite("Sidebar rail snapshot")
+struct SidebarRailSnapshotTests {
+
+    @Test("render open and closed")
+    func render() throws {
+        guard let directory = ProcessInfo.processInfo.environment["MURMR_SNAPSHOT_DIR"] else {
+            return
+        }
+
+        let top: [(String, String)] = MainWindow.Route.top.map { ($0.label, $0.symbol) }
+        let settings: [(String, String)] = SettingsPane.allCases.map { ($0.label, $0.symbol) }
+
+        func row(_ label: String, _ symbol: String, selected: Bool, rail: Bool) -> some View {
+            SelectableRow(isSelected: selected) {
+                HStack(spacing: 9) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 12.5))
+                        .frame(width: 17)
+                        .foregroundStyle(selected ? Theme.Palette.gold : Theme.Palette.muted)
+                    if !rail {
+                        Text(label)
+                            .font(Theme.Text.body)
+                            .lineLimit(1)
+                            .foregroundStyle(selected ? Theme.Palette.text : Theme.Palette.muted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: rail ? .center : .leading)
+            }
+        }
+
+        func column(rail: Bool) -> some View {
+            VStack(spacing: 0) {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.Palette.muted)
+                    .frame(width: 26, height: 24)
+                    .frame(maxWidth: .infinity, alignment: rail ? .center : .trailing)
+                    .padding(.horizontal, rail ? 0 : 10)
+                    .padding(.top, 4)
+                    .padding(.bottom, 2)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(top, id: \.0) { row($0.0, $0.1, selected: $0.0 == "Notes", rail: rail) }
+
+                    if rail {
+                        Rectangle().fill(Theme.Palette.hairline)
+                            .frame(height: 1).padding(.vertical, 5)
+                    } else {
+                        Text("Settings")
+                            .font(Theme.Text.label)
+                            .tracking(Theme.labelTracking)
+                            .textCase(.uppercase)
+                            .foregroundStyle(Theme.Palette.faint)
+                            .padding(.top, 12)
+                            .padding(.leading, 9)
+                    }
+
+                    ForEach(settings, id: \.0) { row($0.0, $0.1, selected: false, rail: rail) }
+                }
+                .padding(.horizontal, 6)
+                Spacer(minLength: 0)
+            }
+            .frame(width: rail ? MainWindow.railWidth : MainWindow.fullWidth, height: 400)
+            .glassColumn(.thick)
+        }
+
+        let view = HStack(spacing: 0) {
+            column(rail: false)
+            column(rail: true)
+            Text("detail")
+                .font(Theme.Text.small)
+                .foregroundStyle(Theme.Palette.faint)
+                .frame(width: 120, height: 400)
+        }
+        .background(InkGround())
+
+        let renderer = ImageRenderer(content: view.environment(\.colorScheme, .dark))
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:])
+        else { return }
+
+        try png.write(
+            to: URL(fileURLWithPath: directory).appendingPathComponent("sidebar-rail.png")
+        )
+    }
+}
