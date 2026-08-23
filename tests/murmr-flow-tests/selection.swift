@@ -202,15 +202,9 @@ struct SidebarRailSnapshotTests {
 
         func column(rail: Bool) -> some View {
             VStack(spacing: 0) {
-                // The toggle is the first row, on the same centre line as the icons.
-                Image(systemName: "sidebar.left")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Theme.Palette.faint)
-                    .frame(width: 17)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: .infinity, alignment: rail ? .center : .trailing)
-                    .padding(.horizontal, 6)
+                // Room for the traffic lights, which live over the sidebar and are not ours
+                // to move. The green one ends at x=79.
+                Color.clear.frame(height: 34)
 
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(top, id: \.0) { row($0.0, $0.1, selected: $0.0 == "Notes", rail: rail) }
@@ -233,7 +227,21 @@ struct SidebarRailSnapshotTests {
                     ForEach(settings, id: \.0) { row($0.0, $0.1, selected: false, rail: rail) }
                 }
                 .padding(.horizontal, 6)
+
                 Spacer(minLength: 0)
+
+                // The toggle lives at the foot, under a rule — the one part of the column
+                // that holds nothing else in either width.
+                Rectangle().fill(Theme.Palette.hairline).frame(height: 1)
+                Image(systemName: rail ? "sidebar.right" : "sidebar.left")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.Palette.faint)
+                    .frame(width: 17)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, alignment: rail ? .center : .trailing)
+                    .padding(.horizontal, rail ? 0 : 8)
+                    .padding(.bottom, 4)
             }
             .frame(width: rail ? MainWindow.railWidth : MainWindow.fullWidth, height: 400)
             .glassColumn(.thick)
