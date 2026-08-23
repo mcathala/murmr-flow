@@ -89,6 +89,17 @@ sed -e "s|__VERSION__|$VERSION|g" \
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 # ---------------------------------------------------------------------------
+# Fonts
+# ---------------------------------------------------------------------------
+# Bundled, not assumed installed: a font the app only hopes is present gives every
+# other machine a silent fallback to the system face, and the app then looks subtly
+# wrong in a way nobody can describe. Info.plist points ATSApplicationFontsPath here.
+mkdir -p "$APP/Contents/Resources/Fonts"
+cp resources/fonts/*.ttf "$APP/Contents/Resources/Fonts/"
+# SIL OFL requires the licence to travel with the fonts.
+cp resources/fonts/*-OFL.txt "$APP/Contents/Resources/Fonts/"
+
+# ---------------------------------------------------------------------------
 # Vendored mediaremote-adapter
 # ---------------------------------------------------------------------------
 # Built by its own script, which caches on a source hash — see that script and

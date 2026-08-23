@@ -25,6 +25,10 @@
 	<key>CFBundleVersion</key>
 	<string>__BUILD__</string>
 
+	<!-- Bundled fonts, registered for this process only. Nothing is installed into
+	     the user's font library, and nothing is assumed to be there already. -->
+	<key>ATSApplicationFontsPath</key>
+	<string>Fonts</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.2</string>
 

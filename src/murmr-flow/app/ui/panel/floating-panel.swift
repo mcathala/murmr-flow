@@ -13,7 +13,7 @@ final class FloatingPanel {
     let model = PanelModel()
 
     private var panel: NSPanel?
-    private var host: NSHostingView<PanelView>?
+    private var host: NSView?
 
     /// The display the panel is currently sitting on, so a change of screen can be
     /// noticed without repositioning the window ten times a second.
@@ -68,6 +68,7 @@ final class FloatingPanel {
         // moved — so every resize we performed was recorded as a user drag, and the panel
         // pinned itself on first launch and then crept off centre.
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
+
         currentScreenFrame = pointerScreen()?.frame
 
         if !panel.isVisible { panel.orderFrontRegardless() }
@@ -78,7 +79,12 @@ final class FloatingPanel {
     private func build() {
         let panel = NonActivatingPanel(
             contentRect: NSRect(origin: .zero, size: model.size),
-            styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
+            // No `.fullSizeContentView`: it only means anything on a window that *has* a
+            // title bar, and pairing it with `.borderless` asks AppKit to fit chrome into a
+            // window that has none. That is enough for it to install a frame view, which
+            // draws a hairline rectangle at the window's bounds — visible around the pill
+            // as an edge that belongs to no part of the design.
+            styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
         )
@@ -87,7 +93,10 @@ final class FloatingPanel {
         panel.level = .statusBar
         panel.backgroundColor = .clear
         panel.isOpaque = false
-        panel.hasShadow = true
+        // No shadow at all — not the window server's, and not one of our own drawn inside
+        // the frame. The pill separates from the desktop on its rim light and its navy base,
+        // both of which stay inside the window where nothing can clip them.
+        panel.hasShadow = false
         panel.hidesOnDeactivate = false
         // Interactive, unlike its predecessor. Safe only because the window never becomes
         // key — see NonActivatingPanel.
@@ -98,8 +107,15 @@ final class FloatingPanel {
         panel.isMovableByWindowBackground = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.animationBehavior = .none
+        // Ink is a dark design, and SwiftUI's `Material` resolves against the *environment's*
+        // colour scheme — so on a Mac in Light Mode every pane would come out white. This
+        // has to be set on the window as well as in SwiftUI: AppKit resolves materials at
+        // its own level, and the two must agree or the blur and the tint disagree.
+        panel.appearance = NSAppearance(named: .darkAqua)
 
-        let host = NSHostingView(rootView: PanelView(model: model))
+        let host = NSHostingView(
+            rootView: PanelView(model: model).environment(\.colorScheme, .dark)
+        )
         host.frame = NSRect(origin: .zero, size: model.size)
         // Without this the hosting view keeps its original size while the window resizes
         // around it, so the contents stop being centred the first time the panel grows.
@@ -108,6 +124,7 @@ final class FloatingPanel {
 
         self.panel = panel
         self.host = host
+
     }
 
     /// Bottom-centre of whichever display the pointer is on, always.

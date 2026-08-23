@@ -15,15 +15,16 @@ struct SectionLabel: View {
                 Text(title)
             }
         }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
+        .font(Theme.Text.label)
+        .tracking(Theme.labelTracking)
+        .foregroundStyle(Theme.Palette.faint)
         .textCase(.uppercase)
     }
 }
 
 struct WarningRow: View {
     let message: String
-    var tint: Color = .orange
+    var tint: Color = Theme.Palette.gold
     var action: (title: String, run: () -> Void)?
 
     var body: some View {
@@ -31,7 +32,8 @@ struct WarningRow: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(tint)
             Text(message)
-                .font(.callout)
+                .font(Theme.Text.body)
+                .foregroundStyle(Theme.Palette.text)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             if let action {
@@ -41,7 +43,11 @@ struct WarningRow: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.10), in: .rect(cornerRadius: 8))
+        .background(tint.opacity(0.12), in: .rect(cornerRadius: Theme.Radius.row))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.Radius.row)
+                .strokeBorder(tint.opacity(0.28), lineWidth: 1)
+        }
     }
 }
 
@@ -64,9 +70,9 @@ struct StatusChip: View {
 
         var color: Color {
             switch self {
-            case .ok: .green
-            case .waiting: .secondary
-            case .bad: .orange
+            case .ok: Theme.Palette.ok
+            case .waiting: Theme.Palette.faint
+            case .bad: Theme.Palette.gold
             }
         }
     }
@@ -77,11 +83,12 @@ struct StatusChip: View {
     var body: some View {
         HStack(spacing: 6) {
             Circle().fill(level.color).frame(width: 7, height: 7)
-            Text(title).font(.caption)
+            Text(title).font(Theme.Text.small)
         }
+        .foregroundStyle(Theme.Palette.muted)
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
-        .background(.quaternary.opacity(0.5), in: .capsule)
+        .glass(.thin, radius: 20, elevated: false)
     }
 }
 
@@ -94,11 +101,14 @@ struct Card<Content: View>: View {
         content
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 10))
+            .glass(.thin, radius: Theme.Radius.pane, elevated: false)
             .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(highlighted ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator),
-                            lineWidth: highlighted ? 1.5 : 0.5)
+                // Gold marks the chosen one — the only place a border is allowed to carry
+                // the accent, because "this is the one in use" is exactly what it means.
+                if highlighted {
+                    RoundedRectangle(cornerRadius: Theme.Radius.pane)
+                        .strokeBorder(Theme.Palette.gold.opacity(0.55), lineWidth: 1.5)
+                }
             }
     }
 }
@@ -117,11 +127,11 @@ struct SettingRow<Control: View>: View {
         Card {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.callout.weight(.medium))
+                    Text(title).font(Theme.Text.bodyStrong)
                     if let detail {
                         Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(Theme.Text.small)
+                            .foregroundStyle(Theme.Palette.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -142,7 +152,8 @@ struct PaneScroll<Content: View>: View {
             VStack(alignment: .leading, spacing: 14) {
                 if let title {
                     Text(title)
-                        .font(.title2.weight(.semibold))
+                        .font(Theme.Text.title)
+                        .foregroundStyle(Theme.Palette.text)
                         .padding(.bottom, 2)
                 }
                 content
@@ -165,11 +176,11 @@ struct EmptyPane: View {
         VStack(spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: 30, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text(title).font(.title3.weight(.medium))
+                .foregroundStyle(Theme.Palette.faint)
+            Text(title).font(Theme.Text.heading).foregroundStyle(Theme.Palette.text)
             Text(hint)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(Theme.Text.body)
+                .foregroundStyle(Theme.Palette.muted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
             if let action {
@@ -192,10 +203,10 @@ struct Monogram: View {
 
     var body: some View {
         Text(initials)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .font(Theme.Text.label)
             .frame(width: 26, height: 26)
-            .background(.quaternary.opacity(0.7), in: .rect(cornerRadius: 7))
-            .foregroundStyle(.secondary)
+            .glass(.thin, radius: 7, elevated: false)
+            .foregroundStyle(Theme.Palette.muted)
     }
 
     private var initials: String {
@@ -247,9 +258,10 @@ struct RemovableChips: View {
                     }
                     .padding(.horizontal, 9)
                     .padding(.vertical, 4)
-                    .background(.quaternary.opacity(0.6), in: .capsule)
+                    .glass(.thin, radius: 20, elevated: false)
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(Theme.Palette.muted)
                 .help("Remove")
             }
         }
@@ -280,14 +292,14 @@ struct SuggestionChips: View {
                         .overlay(
                             Capsule().stroke(
                                 item == current
-                                    ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator),
-                                lineWidth: item == current ? 1.5 : 0.5
+                                    ? Theme.Palette.gold.opacity(0.6) : Theme.Palette.hairline,
+                                lineWidth: item == current ? 1.5 : 1
                             )
                         )
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(
-                    item == current ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary)
+                    item == current ? Theme.Palette.text : Theme.Palette.muted
                 )
                 .help("Use this model")
             }
@@ -315,11 +327,12 @@ struct StoredSecretRow: View {
                 HStack(spacing: 10) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Theme.Palette.ok)
                     Text(String(repeating: "\u{25CF}", count: 16))
                         .font(.system(size: 9))
-                        .foregroundStyle(.primary)
-                    Text("in the Keychain").font(.caption).foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.Palette.text)
+                    Text("in the Keychain")
+                        .font(Theme.Text.small).foregroundStyle(Theme.Palette.muted)
                     Spacer(minLength: 0)
                     Button("Replace") { isReplacing = true }.controlSize(.small)
                     Button("Remove") { onRemove() }.controlSize(.small)

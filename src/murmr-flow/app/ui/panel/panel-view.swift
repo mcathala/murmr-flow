@@ -57,8 +57,9 @@ struct PanelView: View {
     /// asking for attention.
     private var resting: some View {
         Capsule()
-            .fill(.secondary.opacity(0.55))
+            .fill(Theme.Palette.muted.opacity(0.5))
             .frame(width: 44, height: 5)
+            .overlay(Capsule().fill(Theme.Palette.rim).frame(height: 1), alignment: .top)
             .padding(.bottom, Self.centreLine - 2.5)
     }
 
@@ -79,10 +80,10 @@ struct PanelView: View {
                 appIcon
                 if let key = model.hotkeyLabel {
                     Text(key)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(Theme.Text.mono)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 4))
+                        .glass(.thin, radius: Theme.Radius.inner, elevated: false)
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -111,8 +112,8 @@ struct PanelView: View {
             Image(systemName: "text.document")
                 .font(.system(size: 12, weight: .medium))
                 .frame(width: PanelModel.satelliteSize, height: PanelModel.satelliteSize)
-                .background(.regularMaterial, in: .circle)
-                .overlay(Circle().stroke(.separator, lineWidth: 0.5))
+                // Same reason as the row: no shadow inside a window with no room for one.
+                .glass(.floating, radius: PanelModel.satelliteSize / 2, elevated: false)
         }
         .buttonStyle(.plain)
         .help("Start recording a meeting")
@@ -126,9 +127,10 @@ struct PanelView: View {
             Image(systemName: "mic.fill")
                 .font(.system(size: 11, weight: .medium))
                 .frame(width: 24, height: 24)
-                .background(.quaternary, in: .circle)
+                .glass(.thin, radius: 12, elevated: false)
         }
         .buttonStyle(.plain)
+        .foregroundStyle(Theme.Palette.text)
         .help("Start dictating")
     }
 
@@ -139,7 +141,8 @@ struct PanelView: View {
             VStack(alignment: .leading, spacing: 6) {
                 if !model.preview.isEmpty {
                     Text(model.preview)
-                        .font(.callout)
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Palette.text)
                         .lineLimit(2)
                         .truncationMode(.head)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,8 +153,8 @@ struct PanelView: View {
                     appIcon
                     Waveform(level: model.micLevel)
                     Text(model.clock)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .font(Theme.Text.monoLarge)
+                        .foregroundStyle(Theme.Palette.text)
                     Spacer(minLength: 0)
                     promptChip
                     controls
@@ -166,8 +169,8 @@ struct PanelView: View {
                 indicator
                 divider
                 HStack(spacing: 5) {
-                    Circle().fill(.red).frame(width: 7, height: 7)
-                    Text(model.clock).font(.caption.monospacedDigit())
+                    Circle().fill(Theme.Palette.danger).frame(width: 7, height: 7)
+                    Text(model.clock).font(Theme.Text.monoLarge)
                 }
                 Meter(label: "You", level: model.youLevel)
                 Meter(label: "Them", level: model.themLevel)
@@ -183,7 +186,7 @@ struct PanelView: View {
                 indicator
                 divider
                 ProgressView().controlSize(.small).scaleEffect(0.7)
-                Text(label).font(.caption).foregroundStyle(.secondary)
+                Text(label).font(Theme.Text.small).foregroundStyle(Theme.Palette.muted)
                 Spacer(minLength: 0)
             }
         }
@@ -195,8 +198,8 @@ struct PanelView: View {
                 indicator
                 divider
                 Text(failure.message)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.orange)
+                    .font(Theme.Text.bodyStrong)
+                    .foregroundStyle(Theme.Palette.gold)
                 Spacer(minLength: 0)
                 controls
             }
@@ -207,12 +210,6 @@ struct PanelView: View {
 
     /// One radius, named once, used for both the fill and the hairline — so the two can
     /// never drift apart by a point and start looking wrong.
-    private static let corner: CGFloat = 22
-
-    private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: Self.corner, style: .continuous)
-    }
-
     /// The chrome every open state shares: fill the window, one set of insets, one
     /// background. States supply contents and nothing else, which is what stopped them
     /// each aligning differently.
@@ -221,8 +218,11 @@ struct PanelView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.regularMaterial, in: shape)
-            .overlay(shape.stroke(.separator, lineWidth: 0.5))
+            // `elevated: false` is load-bearing, not a preference. The window is exactly
+            // the size of its contents, so a shadow drawn *inside* it spreads into the
+            // transparent margins and is cut flat at the frame — a window's backing store
+            // ends there. That clip was the hard-edged rectangle around the pill.
+            .glass(.floating, radius: Theme.Radius.panel, elevated: false)
     }
 
     /// One icon saying which of the two is running.
@@ -239,7 +239,7 @@ struct PanelView: View {
     }
 
     private var divider: some View {
-        Rectangle().fill(.separator).frame(width: 1, height: 18)
+        Rectangle().fill(Theme.Palette.hairline).frame(width: 1, height: 18)
     }
 
     @ViewBuilder
@@ -259,14 +259,14 @@ struct PanelView: View {
                 model.onPickPrompt?(NSEvent.mouseLocation)
             } label: {
                 Text(model.promptName)
-                    .font(.caption2)
+                    .font(Theme.Text.small)
                     .fixedSize()
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 9)
                     .padding(.vertical, 3)
-                    .background(.quaternary, in: .capsule)
+                    .glass(.thin, radius: 20, elevated: false)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Theme.Palette.muted)
         }
     }
 
@@ -277,7 +277,7 @@ struct PanelView: View {
     private var controls: some View {
         let available = model.phase.controls
         if available.stop {
-            circleButton("stop.fill", size: 9, tint: .red) { model.onStop?() }
+            circleButton("stop.fill", size: 9, tint: Theme.Palette.danger) { model.onStop?() }
                 .help("Stop")
         }
         if available.discard {
@@ -293,10 +293,10 @@ struct PanelView: View {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .bold))
                 .frame(width: 20, height: 20)
-                .background(.quaternary, in: .circle)
+                .glass(.thin, radius: 10, elevated: false)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(tint ?? .secondary)
+        .foregroundStyle(tint ?? Theme.Palette.muted)
     }
 }
 
@@ -309,7 +309,7 @@ private struct Waveform: View {
         HStack(spacing: 2) {
             ForEach(0..<Self.bars, id: \.self) { index in
                 Capsule()
-                    .fill(.tint)
+                    .fill(Theme.Palette.gold)
                     .frame(width: 2.5, height: height(index))
             }
         }
@@ -334,12 +334,13 @@ private struct Meter: View {
     var body: some View {
         HStack(spacing: 3) {
             Text(label)
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(.tertiary)
+                .font(Theme.Text.label)
+                .tracking(Theme.labelTracking)
+                .foregroundStyle(Theme.Palette.faint)
                 .fixedSize()
             ForEach(0..<3, id: \.self) { index in
                 Capsule()
-                    .fill(lit(index) ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
+                    .fill(lit(index) ? Theme.Palette.gold : Theme.Palette.hairline)
                     .frame(width: 3, height: lit(index) ? 13 : 6)
             }
         }

@@ -13,9 +13,12 @@ enum SettingsPane: String, Hashable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Short enough for the sidebar at its default width. "Voice transcription" truncated
+    /// to "Voice transcri…", and under a SETTINGS heading beside "AI clean-up" the first
+    /// word was carrying nothing anyway. The pane's own heading still says it in full.
     var label: String {
         switch self {
-        case .voice: "Voice transcription"
+        case .voice: "Transcription"
         case .cleanup: "AI clean-up"
         case .keys: "Key binds"
         case .prompts: "Prompts"
