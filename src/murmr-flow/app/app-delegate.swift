@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             for _ in 0..<60 {
                 if let window = Self.mainWindow() {
+                    Self.makeDark(window)
                     Self.moveOnScreenIfNeeded(window)
                     NSApp.activate(ignoringOtherApps: true)
                     window.makeKeyAndOrderFront(nil)
@@ -64,6 +65,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             $0.identifier?.rawValue.contains(MurmrFlowApp.mainWindowID) == true
         }) { return identified }
         return windows.first { $0.canBecomeMain && $0.title != "Settings" }
+    }
+
+    /// Ink commits, and `.preferredColorScheme(.dark)` only reaches what SwiftUI draws.
+    ///
+    /// The title bar's background, the toolbar, and the rounded platter AppKit parks behind
+    /// a toolbar item are all AppKit's own, and they resolve against the *window's*
+    /// appearance. Without this they follow the system setting, so on a Mac in Light Mode
+    /// they came out pale grey against a navy window — which is what made the strip above
+    /// the sidebar read as a different panel, and the sidebar toggle as a grey pill. The
+    /// floating panel already sets this, for the same reason.
+    @MainActor
+    private static func makeDark(_ window: NSWindow) {
+        window.appearance = NSAppearance(named: .darkAqua)
+        // Nothing of ours draws up there, so let the window's own ground fill the title bar
+        // rather than having AppKit paint a second surface that then has to match it.
+        window.titlebarAppearsTransparent = true
     }
 
     /// macOS restores the last window position, which may be on a display that is no
