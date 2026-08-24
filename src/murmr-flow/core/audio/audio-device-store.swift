@@ -17,6 +17,12 @@ import OSLog
 @Observable
 final class AudioDeviceStore {
 
+    /// One device *in one direction*.
+    ///
+    /// A headset is not one entry. Core Audio reports it as a pair sharing a name and
+    /// differing only by a role suffix — `DC-D3-A2-B0-E1-60:input` alongside
+    /// `DC-D3-A2-B0-E1-60:output` — so anything asking "is the microphone the same thing
+    /// I am listening on" cannot compare UIDs and expect a match.
     struct Device: Identifiable, Sendable, Equatable {
         let id: String  // the UID
         let name: String
@@ -61,23 +67,6 @@ final class AudioDeviceStore {
     }
 
     var currentOutput: Device? { outputs.first { $0.isDefault } }
-
-    /// Whether an input and an output are two faces of one physical device.
-    ///
-    /// They are not one Core Audio object. A Bluetooth headset shows up as a *pair* —
-    /// `DC-D3-A2-B0-E1-60:input` alongside `DC-D3-A2-B0-E1-60:output` — so comparing UIDs
-    /// directly says "different device" about the thing on your head. Dropping the role
-    /// suffix compares the hardware, which is the question actually being asked.
-    nonisolated static func isSameHardware(_ one: Device, _ other: Device) -> Bool {
-        baseUID(one.id) == baseUID(other.id)
-    }
-
-    nonisolated private static func baseUID(_ uid: String) -> String {
-        for suffix in [":input", ":output"] where uid.hasSuffix(suffix) {
-            return String(uid.dropLast(suffix.count))
-        }
-        return uid
-    }
 
     init(settings: SettingsStore) {
         self.settings = settings

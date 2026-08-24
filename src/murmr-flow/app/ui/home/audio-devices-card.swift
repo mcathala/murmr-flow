@@ -7,10 +7,11 @@ import SwiftUI
 /// hear — and on a Bluetooth headset the two are entangled in a way that costs audio
 /// quality, so seeing them side by side is the point.
 ///
-/// The asymmetry is intentional and labelled. The microphone is *ours*: a preference this
-/// app keeps, that changes nothing outside it. The output is the *Mac's*: there is nothing
-/// app-local to set, because Murmr Flow never plays audio, so choosing here moves the
-/// system's own output the way the Sound menu would.
+/// The two rows are not quite the same kind of thing — the microphone is a preference
+/// this app keeps, while the output has nothing app-local to set (Murmr Flow never plays
+/// audio) and so moves the Mac's own default. That is left for the user to discover by
+/// using it. Two rows of caption explaining it were more words than the whole rest of the
+/// card, which is the usual sign the captions were wrong rather than the labels.
 struct AudioDevicesCard: View {
 
     let services: AppServices
@@ -24,7 +25,6 @@ struct AudioDevicesCard: View {
                 microphoneRow
                 Divider().overlay(Theme.Palette.hairline)
                 outputRow
-                if let warning { hint(warning) }
                 if let failure = probe.failure { hint(failure) }
             }
         }
@@ -39,12 +39,7 @@ struct AudioDevicesCard: View {
                 .foregroundStyle(Theme.Palette.muted)
                 .frame(width: 16)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Microphone").font(Theme.Text.bodyStrong)
-                Text("Records your side. Only this app.")
-                    .font(Theme.Text.small)
-                    .foregroundStyle(Theme.Palette.muted)
-            }
+            Text("Microphone").font(Theme.Text.bodyStrong)
 
             Spacer(minLength: 8)
 
@@ -109,12 +104,7 @@ struct AudioDevicesCard: View {
                 .foregroundStyle(Theme.Palette.muted)
                 .frame(width: 16)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Output").font(Theme.Text.bodyStrong)
-                Text("What gets recorded as them. Changes the Mac's output.")
-                    .font(Theme.Text.small)
-                    .foregroundStyle(Theme.Palette.muted)
-            }
+            Text("Output").font(Theme.Text.bodyStrong)
 
             Spacer(minLength: 8)
 
@@ -137,24 +127,8 @@ struct AudioDevicesCard: View {
         }
     }
 
-    // MARK: - The Bluetooth trap
-
-    /// Says the quiet part out loud, and only when it applies.
-    ///
-    /// Recording from a Bluetooth headset's microphone forces the link into hands-free
-    /// mode, which drops what the user is *listening to* to 16 kHz mono. It is a Bluetooth
-    /// constraint rather than something the app can code around, so the only honest move
-    /// is to name it at the moment the user is choosing, next to the control that fixes it.
-    private var warning: String? {
-        guard let input = devices.effectiveInput, input.isBluetooth,
-            let output = devices.currentOutput,
-            AudioDeviceStore.isSameHardware(input, output)
-        else { return nil }
-        return "Recording from \(input.name) drops its audio to phone quality while you "
-            + "record — Bluetooth can't do a microphone and full-quality sound at once. "
-            + "Pick a different microphone to keep the music clean."
-    }
-
+    /// Only ever shown when opening the microphone actually failed, which is the one
+    /// thing here worth spending a line of prose on.
     private func hint(_ text: String) -> some View {
         Text(text)
             .font(Theme.Text.small)
