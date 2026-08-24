@@ -26,7 +26,12 @@ struct CleanupPane: View {
                 Toggle("", isOn: $settings.cleanupEnabled).labelsHidden()
             }
 
-            if settings.cleanupEnabled {
+            SettingRow(title: "Clean up meeting notes") {
+                Toggle("", isOn: $settings.noteCleanupEnabled).labelsHidden()
+            }
+
+            // The provider is shared, so it is worth setting up if *either* is on.
+            if settings.cleanupEnabled || settings.noteCleanupEnabled {
                 SectionLabel(title: "In use")
                 row(providers.activeEntry, isActive: true)
 
@@ -40,14 +45,25 @@ struct CleanupPane: View {
                 if !providers.isUsable(providers.activeID) {
                     WarningRow(
                         message: "\(providers.activeEntry.displayName) isn't ready, so "
-                            + "dictation will insert the raw transcript."
+                            + "\(Self.affected(settings)) will keep the raw transcript."
                     )
                 }
             } else {
-                Text("Dictation inserts the raw transcript. No provider, no key, no network.")
+                Text("Dictation and meeting notes both keep the raw transcript. No "
+                     + "provider, no key, no network.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// Names only what is actually switched on, so the warning can't claim dictation is
+    /// affected when only notes are.
+    private static func affected(_ settings: SettingsStore) -> String {
+        switch (settings.cleanupEnabled, settings.noteCleanupEnabled) {
+        case (true, true): "dictation and meeting notes"
+        case (true, false): "dictation"
+        default: "meeting notes"
         }
     }
 

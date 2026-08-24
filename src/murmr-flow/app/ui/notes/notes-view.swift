@@ -190,6 +190,13 @@ struct NotesView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     header(note)
+                    // Only on the note it concerns, and only until another meeting
+                    // replaces it. A clean-up that didn't run is worth saying once, in
+                    // front of the note it didn't run on — not in a banner that outlives
+                    // the thing it's about.
+                    if let message = cleanupWarning(for: note) {
+                        WarningRow(message: message)
+                    }
                     Divider()
                     transcript(of: note)
                 }
@@ -228,6 +235,12 @@ struct NotesView: View {
         } else {
             TranscriptView(turns: turns)
         }
+    }
+
+    /// What clean-up couldn't do to the meeting that just finished, if anything.
+    private func cleanupWarning(for note: NoteFile) -> String? {
+        guard let result = meetings.lastResult, result.note.url == note.url else { return nil }
+        return result.cleanupNote
     }
 
     private func header(_ note: NoteFile) -> some View {

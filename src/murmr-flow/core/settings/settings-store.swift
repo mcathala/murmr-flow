@@ -11,6 +11,7 @@ final class SettingsStore {
 
     private enum Key {
         static let enabled = "cleanup.enabled"
+        static let noteEnabled = "cleanup.noteEnabled"
         static let prompt = "cleanup.prompt"
         static let customWords = "cleanup.customWords"
         static let hotkey = "dictation.hotkey"
@@ -25,6 +26,7 @@ final class SettingsStore {
         self.defaults = defaults
 
         self.cleanupEnabled = defaults.object(forKey: Key.enabled) as? Bool ?? true
+        self.noteCleanupEnabled = defaults.object(forKey: Key.noteEnabled) as? Bool ?? true
         self.promptTemplate =
             defaults.string(forKey: Key.prompt) ?? PromptLibrary.defaultCleanupPrompt
         self.customWords = defaults.stringArray(forKey: Key.customWords) ?? []
@@ -41,6 +43,16 @@ final class SettingsStore {
     /// per provider. They used to be three single values here, which is what made
     /// switching provider destroy the one you left.
     var cleanupEnabled: Bool { didSet { defaults.set(cleanupEnabled, forKey: Key.enabled) } }
+
+    /// Meeting notes are a separate switch from dictation.
+    ///
+    /// The two are not the same trade. Dictation cleanup costs six seconds before text
+    /// appears; a meeting is already finished, nobody is waiting on a cursor, and the
+    /// request is the whole conversation — so someone may reasonably want one and not the
+    /// other, in either direction.
+    var noteCleanupEnabled: Bool {
+        didSet { defaults.set(noteCleanupEnabled, forKey: Key.noteEnabled) }
+    }
 
     var promptTemplate: String {
         didSet { defaults.set(promptTemplate, forKey: Key.prompt) }

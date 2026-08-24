@@ -26,8 +26,35 @@ struct MeetingTranscript: Sendable {
     let startedAt: Date
     let duration: TimeInterval
     let utterances: [Utterance]
+    /// The prompt an LLM tidied this transcript with, or nil when nothing did. Recorded
+    /// in the note's front matter so the file says which it is.
+    var cleanedBy: String?
 
     var isEmpty: Bool { utterances.isEmpty }
+
+    /// The same conversation with tidied wording, one text per utterance in order.
+    ///
+    /// A count mismatch returns the transcript untouched. Zipping shorter would silently
+    /// drop the tail of a meeting, which is the one failure a note must not have.
+    func applying(texts: [String], cleanedBy prompt: String) -> MeetingTranscript {
+        guard texts.count == utterances.count else { return self }
+
+        let rewritten = zip(utterances, texts).map { utterance, text in
+            Utterance(
+                speaker: utterance.speaker,
+                start: utterance.start,
+                end: utterance.end,
+                text: text.isEmpty ? utterance.text : text
+            )
+        }
+        return MeetingTranscript(
+            title: title,
+            startedAt: startedAt,
+            duration: duration,
+            utterances: rewritten,
+            cleanedBy: prompt
+        )
+    }
 
     /// Weaves two independently transcribed streams into one conversation, ordered by
     /// when each phrase was actually said.
@@ -99,7 +126,11 @@ struct MeetingTranscript: Sendable {
         var lines: [String] = []
         // Front matter first: it is what lets the app read this file back as a note
         // rather than keeping a second copy of the truth in a database.
-        lines.append(NoteFile.frontMatter(title: title, date: startedAt, duration: duration))
+        lines.append(
+            NoteFile.frontMatter(
+                title: title, date: startedAt, duration: duration, cleanup: cleanedBy
+            )
+        )
         lines.append("")
         lines.append("# \(title)")
         lines.append("")

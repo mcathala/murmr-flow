@@ -26,14 +26,24 @@ struct NoteFile: Identifiable, Sendable, Hashable {
     static let fence = "---"
 
     /// Builds the header that makes a note re-readable.
-    static func frontMatter(title: String, date: Date, duration: TimeInterval) -> String {
-        """
-        \(fence)
-        title: \(escape(title))
-        date: \(iso.string(from: date))
-        duration: \(Int(duration.rounded()))
-        \(fence)
-        """
+    ///
+    /// `cleanup` names the prompt an LLM tidied this note with, and is omitted when
+    /// nothing did. Recorded because a reader six months later should be able to tell
+    /// whether they are looking at what was said or at a machine's version of it.
+    static func frontMatter(
+        title: String, date: Date, duration: TimeInterval, cleanup: String? = nil
+    ) -> String {
+        var lines = [
+            fence,
+            "title: \(escape(title))",
+            "date: \(iso.string(from: date))",
+            "duration: \(Int(duration.rounded()))",
+        ]
+        if let cleanup, !cleanup.isEmpty {
+            lines.append("cleanup: \(escape(cleanup))")
+        }
+        lines.append(fence)
+        return lines.joined(separator: "\n")
     }
 
     /// Parses a note. Returns nil only if the file can't be read at all.
@@ -98,6 +108,9 @@ struct NoteFile: Identifiable, Sendable, Hashable {
         let (fields, body) = split(text)
         let date = fields["date"].flatMap { iso.date(from: $0) } ?? fallbackDate
         let duration = fields["duration"].flatMap { TimeInterval($0) } ?? 0
+        // Carried across rather than regenerated: renaming a note says nothing about
+        // whether it was cleaned up, and dropping the field would quietly claim it wasn't.
+        let cleanup = fields["cleanup"]
 
         // The visible heading is regenerated too, so the file doesn't end up claiming two
         // different titles in two places.
@@ -107,7 +120,7 @@ struct NoteFile: Identifiable, Sendable, Hashable {
             .joined(separator: "\n")
 
         return """
-            \(frontMatter(title: title, date: date, duration: duration))
+            \(frontMatter(title: title, date: date, duration: duration, cleanup: cleanup))
 
             # \(title)
 
