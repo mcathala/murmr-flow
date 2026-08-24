@@ -121,6 +121,7 @@ final class MeetingCoordinator {
     private let settings: SettingsStore
     private let prompts: PromptStore
     private let providers: ProviderStore
+    private let devices: AudioDeviceStore
     private let recorder = MeetingRecorder()
     private let cleanup = CleanupService()
     private var tickTask: Task<Void, Never>?
@@ -131,7 +132,8 @@ final class MeetingCoordinator {
         notes: MeetingStore,
         settings: SettingsStore,
         prompts: PromptStore,
-        providers: ProviderStore
+        providers: ProviderStore,
+        devices: AudioDeviceStore
     ) {
         self.models = models
         self.transcriber = transcriber
@@ -139,6 +141,7 @@ final class MeetingCoordinator {
         self.settings = settings
         self.prompts = prompts
         self.providers = providers
+        self.devices = devices
     }
 
     var isRecording: Bool { recorder.isRecording }
@@ -165,6 +168,9 @@ final class MeetingCoordinator {
         }
 
         do {
+            // Read the choice at the moment of recording rather than holding it, so
+            // picking a different microphone takes effect on the very next take.
+            recorder.inputDeviceID = devices.selectedInputDeviceID
             try recorder.start()
             elapsed = 0
             stage = .recording

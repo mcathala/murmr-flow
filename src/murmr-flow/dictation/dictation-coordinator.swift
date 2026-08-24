@@ -121,6 +121,9 @@ final class DictationCoordinator {
     let models: ModelManager
 
     private let recorder = MicRecorder()
+
+    /// Optional so the convenience initialiser used by tests need not build one.
+    private let devices: AudioDeviceStore?
     /// Shared with meetings mode, so only one copy of the ~600 MB model is resident and
     /// the two never run inference over each other's decoder state.
     private let transcriber: TranscriptionService
@@ -154,7 +157,8 @@ final class DictationCoordinator {
         history: HistoryStore = HistoryStore(),
         prompts: PromptStore = PromptStore(),
         providers: ProviderStore = ProviderStore(),
-        speech: SpeechModelStore = SpeechModelStore()
+        speech: SpeechModelStore = SpeechModelStore(),
+        devices: AudioDeviceStore? = nil
     ) {
         self.settings = settings
         self.models = models
@@ -163,6 +167,7 @@ final class DictationCoordinator {
         self.prompts = prompts
         self.providers = providers
         self.speech = speech
+        self.devices = devices
         models.select(speech.activeModel)
     }
 
@@ -238,6 +243,7 @@ final class DictationCoordinator {
         targetApp = NSWorkspace.shared.frontmostApplication
 
         do {
+            recorder.inputDeviceID = devices?.selectedInputDeviceID
             try recorder.start()
             elapsed = 0
             micLevel = 0
@@ -542,6 +548,7 @@ final class DictationCoordinator {
         }
 
         do {
+            recorder.inputDeviceID = devices?.selectedInputDeviceID
             try recorder.start()
             lastHeard = nil
             isTestingVoice = true
