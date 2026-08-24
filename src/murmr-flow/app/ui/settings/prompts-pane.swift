@@ -24,8 +24,8 @@ struct PromptsPane: View {
             .controlSize(.small)
 
             if prompts.notePrompt == nil {
-                Text("Meetings are transcribed without clean-up for now, so Note mode has "
-                     + "no prompt assigned.")
+                Text("No prompt is assigned to Note mode, so meetings are saved exactly "
+                     + "as transcribed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -52,13 +52,12 @@ struct PromptsPane: View {
                     .controlSize(.small)
                 }
 
-                Text(preset.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                // Only the open one shows its instructions. Four expanded text blocks
-                // would be a wall, and you only ever edit one at a time.
+                // Only the open one shows its instructions — five prompts expanded at
+                // once would be a wall, and you only ever edit one at a time. So a closed
+                // row is a name and its badges. It used to carry a one-line description
+                // as well, which meant three fields to fill in to write a prompt and a
+                // second place claiming what it did; the prompt itself says that, in more
+                // detail and without going stale.
                 if isOpen { editor(preset) }
             }
         }
@@ -72,12 +71,6 @@ struct PromptsPane: View {
                 .font(.callout)
                 .frame(height: 22)
                 .scrollDisabled(true)
-                .padding(.horizontal, 4)
-                .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 6))
-
-            TextEditor(text: summaryBinding(preset))
-                .font(.caption)
-                .frame(height: 34)
                 .padding(.horizontal, 4)
                 .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 6))
 
@@ -115,13 +108,6 @@ struct PromptsPane: View {
                     .controlSize(.small)
                 }
             }
-
-            if !preset.template.contains("${transcript}") {
-                Text("No ${transcript} placeholder — the transcript will be appended at "
-                     + "the end instead.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -133,17 +119,6 @@ struct PromptsPane: View {
             set: { value in
                 var updated = preset
                 updated.name = value
-                prompts.update(updated)
-            }
-        )
-    }
-
-    private func summaryBinding(_ preset: PromptPreset) -> Binding<String> {
-        Binding(
-            get: { preset.summary },
-            set: { value in
-                var updated = preset
-                updated.summary = value
                 prompts.update(updated)
             }
         )

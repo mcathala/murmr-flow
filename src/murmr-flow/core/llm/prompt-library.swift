@@ -38,10 +38,34 @@ struct PromptLibrary {
         self.template = template
     }
 
-    /// Placeholders available in the template. `${transcript}` is the only required one.
+    /// Placeholders available in the template.
+    ///
+    /// None of them are the user's responsibility. `${transcript}` is required by the
+    /// pipeline, so `render` appends it when a template leaves it out rather than asking
+    /// the user to know that — a prompt that reads like instructions to a person should
+    /// work, and a template variable is not something anyone should have to remember.
     static let placeholders = [
         "${transcript}", "${custom_words}", "${current_app}", "${language}", "${time_local}",
     ]
+
+    /// Appended to the user's prompt when cleaning a conversation turn by turn.
+    ///
+    /// The line-per-turn shape is what lets the result be merged back into the transcript
+    /// with each speaker and timestamp intact, and a turn the model drops fall back to
+    /// its raw wording instead of vanishing. It is a requirement of the machinery, not a
+    /// preference, so the app states it — the user's prompt only has to say how to tidy
+    /// the words.
+    static let turnContract = """
+        Output format. This is required by the app and is not affected by anything above: \
+        the transcript is a numbered list of turns. Reply with exactly one line per \
+        numbered turn, in the same order, each in the form
+
+        [n] Speaker: tidied text
+
+        Keep each line's own number and speaker. Never merge, split, drop, reorder or \
+        renumber turns, and never add a line of your own. A turn that needs no change is \
+        repeated unchanged. No preamble, no blank lines, no explanation.
+        """
 
     struct Context {
         var transcript: String
@@ -53,16 +77,22 @@ struct PromptLibrary {
     func render(_ context: Context) -> String {
         var output = template
 
-        // If the template has no ${transcript}, the transcript would silently vanish
-        // and the model would be asked to clean nothing. Append instead of losing it.
-        if !output.contains("${transcript}") {
-            output += "\n\nTranscript:\n${transcript}"
-        }
-
         let vocabulary = context.customWords.isEmpty
             ? ""
             : "Spell these correctly if you hear them: "
                 + context.customWords.joined(separator: ", ")
+
+        // A prompt written as instructions to a person, with no template syntax in it at
+        // all, has to work — so anything the request cannot go without is added here
+        // rather than being a rule the user was expected to have read. Without the
+        // transcript the model is asked to clean nothing; without the vocabulary line the
+        // custom words the user typed in Settings quietly do nothing.
+        if !vocabulary.isEmpty, !output.contains("${custom_words}") {
+            output += "\n\n${custom_words}"
+        }
+        if !output.contains("${transcript}") {
+            output += "\n\nTranscript:\n${transcript}"
+        }
 
         let replacements: [String: String] = [
             "${transcript}": context.transcript,
