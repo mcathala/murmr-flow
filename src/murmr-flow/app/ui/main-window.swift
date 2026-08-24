@@ -155,7 +155,12 @@ struct MainWindow: View {
                 prompts: services.prompts
             )
         case .notes:
-            NotesView(notes: services.notes, meetings: services.meetings)
+            NotesView(
+                notes: services.notes,
+                meetings: services.meetings,
+                settings: services.settings,
+                prompts: services.prompts
+            )
         case .insights:
             InsightsView(history: services.history)
         case .settings(let pane):

@@ -8,6 +8,8 @@ struct NotesView: View {
 
     let notes: MeetingStore
     let meetings: MeetingCoordinator
+    let settings: SettingsStore
+    let prompts: PromptStore
 
     /// A set, so several notes can be cleared out in one go. Deleting one at a time is
     /// fine for a mistake and useless for a clear-out.
@@ -17,14 +19,21 @@ struct NotesView: View {
     @State private var query = ""
     @State private var renaming: String?
     @State private var confirmingDelete = false
+    @State private var confirmingDiscard = false
 
     var body: some View {
-        HSplitView {
-            list
-                .frame(minWidth: 220, idealWidth: 260, maxWidth: 340)
-                .glassColumn(.thin)
-            detail
-                .frame(minWidth: 320, maxWidth: .infinity)
+        VStack(spacing: 0) {
+            recordBar
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+            Divider()
+            HSplitView {
+                list
+                    .frame(minWidth: 220, idealWidth: 260, maxWidth: 340)
+                    .glassColumn(.thin)
+                detail
+                    .frame(minWidth: 320, maxWidth: .infinity)
+            }
         }
         // Gold, not the system accent. A bright blue selection was the one thing on screen
         // that belonged to a different palette.
@@ -56,9 +65,108 @@ struct NotesView: View {
         } message: {
             Text("They go to the Trash and can be put back from there.")
         }
+        // The panel deliberately offers no discard for a meeting — one stray click on a
+        // floating window should not be able to throw away forty minutes. This is the
+        // place that can ask first, so this is where discarding lives.
+        .confirmationDialog(
+            "Discard this recording?",
+            isPresented: $confirmingDiscard,
+            titleVisibility: .visible
+        ) {
+            Button("Discard", role: .destructive) { meetings.discard() }
+            Button("Keep recording", role: .cancel) {}
+        } message: {
+            Text("Nothing is transcribed and no note is written. This cannot be undone.")
+        }
     }
 
     private var results: [NoteFile] { notes.search(query) }
+
+    // MARK: - Record
+
+    /// Starting a meeting from the tab that holds meetings.
+    ///
+    /// There was a "Start meeting" button, but only inside the empty state — so the way to
+    /// record your second meeting was to already know about the menu bar or the panel.
+    /// Deliberately the same shape as the Dictaphone's record card: one primary button,
+    /// state in words next to it, and the prompt this mode will use on the right.
+    private var recordBar: some View {
+        Card(highlighted: meetings.stage.isRecording) {
+            HStack(spacing: 12) {
+                Button {
+                    meetings.toggle()
+                } label: {
+                    Label(
+                        meetings.stage.isRecording ? "Stop" : "Record meeting",
+                        systemImage: meetings.stage.isRecording
+                            ? "stop.fill" : "record.circle.fill"
+                    )
+                    .frame(minWidth: 120)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(meetings.stage.isRecording ? .red : Theme.Palette.gold)
+                // Busy but not recording means transcribing: there is nothing useful to
+                // stop into, and starting a second meeting over the top of it is worse.
+                .disabled(meetings.stage.isBusy && !meetings.stage.isRecording)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recordHeadline)
+                        .font(Theme.Text.bodyStrong)
+                        .foregroundStyle(Theme.Palette.text)
+                    Text(recordSubhead)
+                        .font(Theme.Text.small)
+                        .foregroundStyle(Theme.Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+
+                if meetings.stage.isRecording {
+                    // Both levels, because a tap that started cleanly and is recording
+                    // silence looks exactly like a working meeting until you read the note.
+                    LevelMeter(label: "You", level: meetings.youLevel)
+                    LevelMeter(label: "Them", level: meetings.themLevel)
+                    Button("Discard") { confirmingDiscard = true }
+                        .controlSize(.small)
+                } else if meetings.stage.isBusy {
+                    ProgressView().controlSize(.small)
+                } else if let note = prompts.notePrompt, settings.noteCleanupEnabled {
+                    Menu(note.name) {
+                        ForEach(prompts.presets) { preset in
+                            Button(preset.name) { prompts.notePromptID = preset.id }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+            }
+        }
+    }
+
+    private var recordHeadline: String {
+        switch meetings.stage {
+        case .recording:
+            "Recording — \(MeetingTranscript.clock(meetings.elapsed))"
+        case .transcribing(let step):
+            step.label
+        case .failed:
+            "Couldn't record that"
+        case .idle, .saved:
+            settings.meetingHotkey.map { "Press \($0.displayName) anywhere" }
+                ?? "Record a meeting"
+        }
+    }
+
+    private var recordSubhead: String {
+        switch meetings.stage {
+        case .failed(let message):
+            message
+        case .transcribing:
+            "This runs faster than the meeting did — a moment for a long one."
+        default:
+            "Your microphone is \u{201C}You\u{201D}; everything this Mac plays is \u{201C}Them\u{201D}."
+        }
+    }
 
     /// Read from `NSEvent` rather than a gesture modifier, because `onTapGesture` does not
     /// report which keys were held.
@@ -203,12 +311,15 @@ struct NotesView: View {
                 .padding(20)
             }
         } else {
+            // No "Start meeting" button here any more, and no explanation of You and
+            // Them: the record bar directly above says both, permanently, and repeating
+            // it inside the empty state put two start buttons a few points apart.
             EmptyPane(
                 symbol: "text.document",
-                title: "No note selected",
-                hint: "Start a meeting from the toolbar. Your microphone becomes \u{201C}You\u{201D} "
-                    + "and everything this Mac plays becomes \u{201C}Them\u{201D}.",
-                action: ("Start meeting", { meetings.toggle() })
+                title: notes.notes.isEmpty ? "No notes yet" : "No note selected",
+                hint: notes.notes.isEmpty
+                    ? "Record a meeting and it lands here as a Markdown file you own."
+                    : "Pick one from the list to read it."
             )
         }
     }

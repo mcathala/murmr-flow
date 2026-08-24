@@ -142,6 +142,37 @@ struct SettingRow<Control: View>: View {
     }
 }
 
+/// One stream's live level, labelled.
+///
+/// Two of these side by side is how you catch a tap that started cleanly and is capturing
+/// silence — which looks exactly like a working recording until you read the note. Shared
+/// with the floating panel rather than drawn twice: the two places showing the same signal
+/// differently would be its own bug.
+struct LevelMeter: View {
+    let label: String
+    let level: Float
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(label)
+                .font(Theme.Text.label)
+                .tracking(Theme.labelTracking)
+                .foregroundStyle(Theme.Palette.faint)
+                .fixedSize()
+            ForEach(0..<3, id: \.self) { index in
+                Capsule()
+                    .fill(lit(index) ? Theme.Palette.gold : Theme.Palette.hairline)
+                    .frame(width: 3, height: lit(index) ? 13 : 6)
+            }
+        }
+        .animation(.easeOut(duration: 0.1), value: level)
+    }
+
+    private func lit(_ index: Int) -> Bool {
+        AudioLevel.isLit(level, bar: index)
+    }
+}
+
 /// Standard padding and rhythm for a scrolling pane.
 struct PaneScroll<Content: View>: View {
     var title: String?
