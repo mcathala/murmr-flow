@@ -18,6 +18,7 @@ final class SettingsStore {
         static let meetingHotkey = "meeting.hotkey"
         static let pauseMedia = "dictation.pauseMedia"
         static let holdToTalk = "dictation.holdToTalk"
+        static let inputDevice = "audio.inputDeviceUID"
     }
 
     private let defaults: UserDefaults
@@ -35,6 +36,7 @@ final class SettingsStore {
         self.pauseMediaWhileDictating =
             defaults.object(forKey: Key.pauseMedia) as? Bool ?? true
         self.holdToTalk = defaults.object(forKey: Key.holdToTalk) as? Bool ?? true
+        self.inputDeviceUID = defaults.string(forKey: Key.inputDevice)
     }
 
     // MARK: - Cleanup
@@ -94,6 +96,23 @@ final class SettingsStore {
     /// assumption; some people would rather not hold a key for a long dictation.
     var holdToTalk: Bool {
         didSet { defaults.set(holdToTalk, forKey: Key.holdToTalk) }
+    }
+
+    // MARK: - Audio
+
+    /// UID of the microphone to record from, or nil to follow the system default.
+    ///
+    /// A UID rather than the numeric `AudioDeviceID`, which Core Audio reassigns on every
+    /// connect and reuses across different hardware — saving one would eventually point
+    /// the preference at whatever device happened to inherit the number.
+    var inputDeviceUID: String? {
+        didSet {
+            if let inputDeviceUID {
+                defaults.set(inputDeviceUID, forKey: Key.inputDevice)
+            } else {
+                defaults.removeObject(forKey: Key.inputDevice)
+            }
+        }
     }
 
     // MARK: - Derived

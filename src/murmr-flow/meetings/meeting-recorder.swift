@@ -26,6 +26,11 @@ final class MeetingRecorder {
         let duration: TimeInterval
         /// The folder holding both files, so the caller can delete it wholesale.
         let folder: URL
+        /// IOProc invocations on the system tap. Zero means the tap never ran, which is a
+        /// capture failure and not a quiet meeting — the two are indistinguishable from
+        /// the audio alone, and telling the user the wrong one sends them hunting in the
+        /// wrong place.
+        let systemCallbacks: Int
     }
 
     enum RecorderError: LocalizedError {
@@ -44,11 +49,13 @@ final class MeetingRecorder {
 
     private static let log = Logger(subsystem: "app.murmr.MurmrFlow", category: "meeting-recorder")
 
-    /// Nil whenever we are not recording. Holding an `AVAudioEngine` past `stop()` keeps
-    /// the input device configured, which on a Bluetooth headset pins the link to
-    /// hands-free mode until the app quits — the same trap dictation hit.
-    private var micEngine: AVAudioEngine?
+    /// Nil whenever we are not recording, so no audio hardware stays claimed.
+    private var micUnit: MicInputUnit?
     private var micWriter: AudioFileWriter?
+
+    /// Microphone to record from, or nil to follow the system default. Set by the caller
+    /// from whatever the user picked, and read once per recording.
+    var inputDeviceID: AudioDeviceID?
 
     private let system = SystemAudioRecorder()
 
@@ -128,7 +135,8 @@ final class MeetingRecorder {
             them: systemResult.url,
             startedAt: startedAt,
             duration: duration,
-            folder: folder
+            folder: folder,
+            systemCallbacks: systemResult.callbacks
         )
     }
 
@@ -146,50 +154,39 @@ final class MeetingRecorder {
     // MARK: - Microphone
 
     private func startMicrophone(writingTo url: URL) throws {
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        let format = input.inputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw RecorderError.noInputDevice
+        // `AudioFileWriter` needs the format up front, and the unit only knows it once
+        // the device is open — hence the two-step: build the unit, read what it gives,
+        // then hand the writer in through the box the callback already captured.
+        let sink = BufferSink()
+        let unit = try MicInputUnit(device: inputDeviceID) { [sink] list in
+            sink.writer?.append(bufferList: list)
         }
 
-        let writer = try AudioFileWriter(sourceFormat: format, url: url, label: "mic")
+        let writer = try AudioFileWriter(sourceFormat: unit.format, url: url, label: "mic")
+        sink.writer = writer
         micWriter = writer
 
-        // Installed from a nonisolated helper on purpose. A closure written inline here
-        // would inherit this method's @MainActor isolation, and AVFoundation invokes the
-        // tap on the audio thread — which traps the first time a buffer arrives.
-        Self.installTap(on: input, format: format, writer: writer)
-
-        engine.prepare()
         do {
-            try engine.start()
+            try unit.start()
         } catch {
-            input.removeTap(onBus: 0)
+            sink.writer = nil
             micWriter = nil
             throw error
         }
-        micEngine = engine
+        micUnit = unit
     }
 
-    nonisolated private static func installTap(
-        on input: AVAudioInputNode,
-        format: AVAudioFormat,
-        writer: AudioFileWriter
-    ) {
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-            writer.append(buffer)
-        }
-    }
-
-    /// Every step matters: the tap holds a reference, `stop()` ends the stream, `reset()`
-    /// tears down the node graph, and dropping the reference is what actually lets Core
-    /// Audio hand the device back.
+    /// Dropping the unit is what lets Core Audio hand the device back. Holding one past
+    /// `stop()` keeps the input device configured, and on a Bluetooth headset that pins
+    /// the link to hands-free mode until the app quits.
     private func releaseMicrophone() {
-        guard let micEngine else { return }
-        micEngine.inputNode.removeTap(onBus: 0)
-        micEngine.stop()
-        micEngine.reset()
-        self.micEngine = nil
+        micUnit?.stop()
+        micUnit = nil
+    }
+
+    /// Lets the real-time callback reach a writer that does not exist yet when the
+    /// callback is created. A class so the callback captures the box, not a snapshot.
+    private final class BufferSink: @unchecked Sendable {
+        var writer: AudioFileWriter?
     }
 }

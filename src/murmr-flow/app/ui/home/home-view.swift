@@ -16,6 +16,9 @@ struct HomeView: View {
             status
             if let trouble { WarningRow(message: trouble.message, action: trouble.action) }
 
+            SectionLabel(title: "Audio")
+            AudioDevicesCard(services: services)
+
             SectionLabel(title: "Recents")
             recents
 
