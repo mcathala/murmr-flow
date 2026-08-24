@@ -378,3 +378,77 @@ struct HomeSummarySnapshotTests {
         Rectangle().fill(.separator).frame(width: 1, height: 26).padding(.trailing, 16)
     }
 }
+
+/// Renders the two record cards one above the other.
+///
+/// The Notes card was added as a copy of the Dictaphone's and drifted immediately — wrong
+/// button colour, wrong fonts, wrong width — and none of that showed up in a diff. They
+/// share `RecordCard` now, and this is what makes "the same" checkable by eye rather than
+/// by reading two files.
+@MainActor
+@Suite("Record card snapshot")
+struct RecordCardSnapshotTests {
+
+    @Test("render both modes' record cards together")
+    func render() throws {
+        #expect(
+            PanelSnapshotTests.fontsRegistered,
+            "bundled fonts did not register — snapshots would lie"
+        )
+        guard let directory = ProcessInfo.processInfo.environment["MURMR_SNAPSHOT_DIR"] else {
+            return
+        }
+
+        let view = VStack(spacing: 14) {
+            RecordCard(
+                title: "Hold right ⌥ anywhere",
+                subtitle: "Hold the key while you speak.",
+                buttonTitle: "Dictate",
+                buttonSymbol: "mic.fill",
+                action: {}
+            ) {
+                Text("Default").font(.body).foregroundStyle(Theme.Palette.gold)
+            }
+
+            RecordCard(
+                title: "Ready to record",
+                subtitle: "Your microphone is \u{201C}You\u{201D}; everything this Mac "
+                    + "plays is \u{201C}Them\u{201D}.",
+                buttonTitle: "Record",
+                buttonSymbol: "record.circle.fill",
+                action: {}
+            ) {
+                Text("Meeting").font(.body).foregroundStyle(Theme.Palette.gold)
+            }
+
+            RecordCard(
+                title: "Recording — 4:12",
+                subtitle: "Your microphone is \u{201C}You\u{201D}; everything this Mac "
+                    + "plays is \u{201C}Them\u{201D}.",
+                buttonTitle: "Stop",
+                buttonSymbol: "stop.fill",
+                isActive: true,
+                action: {}
+            ) {
+                LevelMeter(label: "You", level: 0.6)
+                LevelMeter(label: "Them", level: 0.1)
+                Button("Discard") {}.controlSize(.small)
+            }
+        }
+        .frame(width: 680)
+        .padding(20)
+        .background(InkGround())
+
+        let renderer = ImageRenderer(content: view.environment(\.colorScheme, .dark))
+        renderer.scale = 2
+        guard let image = renderer.nsImage,
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:])
+        else { return }
+
+        try png.write(
+            to: URL(fileURLWithPath: directory).appendingPathComponent("record-cards.png")
+        )
+    }
+}

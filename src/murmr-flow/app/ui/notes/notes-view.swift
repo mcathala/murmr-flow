@@ -23,9 +23,12 @@ struct NotesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Matches `PaneScroll`'s inset exactly, so the card lands in the same place
+            // as the Dictaphone's — 20 all round, 14 of rhythm before what follows.
             recordBar
                 .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+                .padding(.top, 20)
+                .padding(.bottom, 14)
             Divider()
             HSplitView {
                 list
@@ -91,54 +94,34 @@ struct NotesView: View {
     /// Deliberately the same shape as the Dictaphone's record card: one primary button,
     /// state in words next to it, and the prompt this mode will use on the right.
     private var recordBar: some View {
-        Card(highlighted: meetings.stage.isRecording) {
-            HStack(spacing: 12) {
-                Button {
-                    meetings.toggle()
-                } label: {
-                    Label(
-                        meetings.stage.isRecording ? "Stop" : "Record meeting",
-                        systemImage: meetings.stage.isRecording
-                            ? "stop.fill" : "record.circle.fill"
-                    )
-                    .frame(minWidth: 120)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(meetings.stage.isRecording ? .red : Theme.Palette.gold)
-                // Busy but not recording means transcribing: there is nothing useful to
-                // stop into, and starting a second meeting over the top of it is worse.
-                .disabled(meetings.stage.isBusy && !meetings.stage.isRecording)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(recordHeadline)
-                        .font(Theme.Text.bodyStrong)
-                        .foregroundStyle(Theme.Palette.text)
-                    Text(recordSubhead)
-                        .font(Theme.Text.small)
-                        .foregroundStyle(Theme.Palette.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 0)
-
-                if meetings.stage.isRecording {
-                    // Both levels, because a tap that started cleanly and is recording
-                    // silence looks exactly like a working meeting until you read the note.
-                    LevelMeter(label: "You", level: meetings.youLevel)
-                    LevelMeter(label: "Them", level: meetings.themLevel)
-                    Button("Discard") { confirmingDiscard = true }
-                        .controlSize(.small)
-                } else if meetings.stage.isBusy {
-                    ProgressView().controlSize(.small)
-                } else if let note = prompts.notePrompt, settings.noteCleanupEnabled {
-                    Menu(note.name) {
-                        ForEach(prompts.presets) { preset in
-                            Button(preset.name) { prompts.notePromptID = preset.id }
-                        }
+        RecordCard(
+            title: recordHeadline,
+            subtitle: recordSubhead,
+            buttonTitle: meetings.stage.isRecording ? "Stop" : "Record",
+            buttonSymbol: meetings.stage.isRecording ? "stop.fill" : "record.circle.fill",
+            isActive: meetings.stage.isRecording,
+            // Busy but not recording means transcribing: there is nothing useful to stop
+            // into, and starting a second meeting over the top of it is worse.
+            isDisabled: meetings.stage.isBusy && !meetings.stage.isRecording,
+            action: { meetings.toggle() }
+        ) {
+            if meetings.stage.isRecording {
+                // Both levels, because a tap that started cleanly and is recording
+                // silence looks exactly like a working meeting until you read the note.
+                LevelMeter(label: "You", level: meetings.youLevel)
+                LevelMeter(label: "Them", level: meetings.themLevel)
+                Button("Discard") { confirmingDiscard = true }
+                    .controlSize(.small)
+            } else if meetings.stage.isBusy {
+                ProgressView().controlSize(.small)
+            } else if let note = prompts.notePrompt, settings.noteCleanupEnabled {
+                Menu(note.name) {
+                    ForEach(prompts.presets) { preset in
+                        Button(preset.name) { prompts.notePromptID = preset.id }
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
                 }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
         }
     }
@@ -152,8 +135,11 @@ struct NotesView: View {
         case .failed:
             "Couldn't record that"
         case .idle, .saved:
+            // The Dictaphone's headline names the key you'd hold. A meeting key is
+            // optional, so when there isn't one this says where things stand instead —
+            // repeating the button's own word back at it tells you nothing.
             settings.meetingHotkey.map { "Press \($0.displayName) anywhere" }
-                ?? "Record a meeting"
+                ?? "Ready to record"
         }
     }
 

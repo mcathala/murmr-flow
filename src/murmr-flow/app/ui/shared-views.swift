@@ -142,6 +142,50 @@ struct SettingRow<Control: View>: View {
     }
 }
 
+/// The card each mode puts at the top of its tab: start the thing, and what it's doing.
+///
+/// One component rather than two similar cards. Notes got its own copy first and drifted
+/// immediately — gold button instead of the accent, the Theme fonts instead of the system
+/// ones, a wider button — because "the same as the other one" is not something two files
+/// can keep true. The trailing slot is the only part that differs on purpose: Dictaphone
+/// puts its prompt there, Notes swaps in live levels while a meeting is running.
+struct RecordCard<Trailing: View>: View {
+    let title: String
+    let subtitle: String
+    let buttonTitle: String
+    let buttonSymbol: String
+    /// Recording. Turns the button red and marks the card, in both modes.
+    var isActive = false
+    var isDisabled = false
+    let action: () -> Void
+    @ViewBuilder let trailing: Trailing
+
+    var body: some View {
+        Card(highlighted: isActive) {
+            HStack(spacing: 12) {
+                Button(action: action) {
+                    Label(buttonTitle, systemImage: buttonSymbol)
+                        .frame(minWidth: 96)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(isActive ? .red : .accentColor)
+                .disabled(isDisabled)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.callout.weight(.medium))
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+                trailing
+            }
+        }
+    }
+}
+
 /// One stream's live level, labelled.
 ///
 /// Two of these side by side is how you catch a tap that started cleanly and is capturing
