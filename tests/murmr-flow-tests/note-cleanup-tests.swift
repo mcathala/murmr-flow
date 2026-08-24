@@ -186,6 +186,30 @@ struct LegacyFolderTests {
         #expect(!FileManager.default.fileExists(atPath: legacy.path))
     }
 
+    @Test("Finder's .DS_Store doesn't keep the old folder alive, nor its empty parent")
+    func pruneIgnoresFinderLeftovers() throws {
+        let root = scratch()
+        let legacy = root.appendingPathComponent("Murmr Flow/Meetings", isDirectory: true)
+        let destination = root.appendingPathComponent("MurmurNotes", isDirectory: true)
+        try write("# One", to: legacy.appendingPathComponent("one.md"))
+        try write("", to: legacy.appendingPathComponent(".DS_Store"))
+        try write("", to: root.appendingPathComponent("Murmr Flow/.DS_Store"))
+
+        MeetingStore.adoptLegacyFolder(from: legacy, to: destination)
+
+        #expect(FileManager.default.fileExists(
+            atPath: destination.appendingPathComponent("one.md").path
+        ))
+        // Both levels go: requiring a truly empty directory left an empty "Murmr Flow"
+        // next to the new folder for anyone who had opened it in Finder.
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+        #expect(!FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Murmr Flow").path
+        ))
+        // And it stops there rather than walking up.
+        #expect(FileManager.default.fileExists(atPath: root.path))
+    }
+
     @Test("a name already taken is left where it is rather than overwritten")
     func doesNotOverwrite() throws {
         let root = scratch()
@@ -314,6 +338,40 @@ struct PromptPresetTests {
         let prompts = PromptStore(defaults: store)
         #expect(prompts.preset(id: PromptStore.defaultPreset.id)?.name == "My default")
         #expect(prompts.preset(id: PromptStore.meetingPreset.id) != nil)
+    }
+
+    @Test("no shipped prompt shows template syntax")
+    func builtInsAreReadable() {
+        for preset in PromptStore.builtIns {
+            #expect(!preset.template.contains("${"), "\(preset.name) still has a placeholder")
+        }
+    }
+
+    @Test("the boilerplate is taken off prompts that were already saved")
+    func stripsStoredPlaceholders() {
+        let store = defaults()
+        let old = """
+            [{"id":"8B1F0C4A-0000-4000-A000-000000000001","name":"Default",
+              "template":"Tidy this.\\n\\n${custom_words}\\n\\nTranscript:\\n${transcript}",
+              "isBuiltIn":true}]
+            """
+        store.set(Data(old.utf8), forKey: "prompts.presets")
+
+        let prompts = PromptStore(defaults: store)
+        #expect(prompts.dictationPrompt.template == "Tidy this.")
+
+        // And a placeholder typed on purpose afterwards is left alone — the strip runs
+        // once, not on every load.
+        var edited = prompts.dictationPrompt
+        edited.template = "Tidy this.\n\n${transcript}"
+        prompts.update(edited)
+        #expect(PromptStore(defaults: store).dictationPrompt.template.contains("${transcript}"))
+    }
+
+    @Test("a placeholder in the middle of a sentence is not touched")
+    func keepsDeliberatePlaceholders() {
+        let template = "Clean up ${transcript} and stop."
+        #expect(PromptStore.stripTrailingPlaceholders(template) == template)
     }
 
     @Test("a new prompt starts as plain instructions, with no template syntax to keep")

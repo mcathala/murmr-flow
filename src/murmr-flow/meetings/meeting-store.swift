@@ -77,9 +77,30 @@ final class MeetingStore {
             }
         }
 
-        // Removed only if we emptied it. A folder the user put something else in is theirs.
-        if let left = try? manager.contentsOfDirectory(atPath: legacy.path), left.isEmpty {
-            try? manager.removeItem(at: legacy)
+        prune(legacy, notBeyond: destination.deletingLastPathComponent())
+    }
+
+    /// Removes a folder we emptied, and any parent that emptying it left empty.
+    ///
+    /// Stops at `boundary` — the folder the notes live in, so it can never walk up into
+    /// Documents itself — and stops the moment it meets a folder with anything in it: one
+    /// the user put something else in is theirs.
+    ///
+    /// `.DS_Store` does not count as something. Requiring a genuinely empty directory
+    /// left `Murmr Flow/Meetings` behind for anyone who had ever opened it in Finder,
+    /// which is everyone — an empty folder with the old name sitting next to the new one,
+    /// for good.
+    private static func prune(_ folder: URL, notBeyond boundary: URL) {
+        let manager = FileManager.default
+        var current = folder.standardizedFileURL
+        let stop = boundary.standardizedFileURL
+
+        while current.path.hasPrefix(stop.path + "/") {
+            guard let left = try? manager.contentsOfDirectory(atPath: current.path),
+                  left.allSatisfy({ $0.hasPrefix(".") })
+            else { return }
+            guard (try? manager.removeItem(at: current)) != nil else { return }
+            current = current.deletingLastPathComponent()
         }
     }
 

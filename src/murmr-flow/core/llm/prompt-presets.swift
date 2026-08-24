@@ -37,6 +37,7 @@ final class PromptStore {
         static let presets = "prompts.presets"
         static let dictation = "prompts.dictationID"
         static let note = "prompts.noteID"
+        static let stripped = "prompts.strippedPlaceholders"
     }
 
     private(set) var presets: [PromptPreset]
@@ -69,8 +70,21 @@ final class PromptStore {
             loaded += Self.builtIns.filter { built in
                 !stored.contains { $0.id == built.id }
             }
+
+            // The placeholders used to be part of every shipped template, so they are
+            // sitting in the prompts people already have. Taken out once, not on every
+            // load: someone who types `${transcript}` deliberately afterwards keeps it.
+            if !defaults.bool(forKey: Key.stripped) {
+                loaded = loaded.map {
+                    var preset = $0
+                    preset.template = Self.stripTrailingPlaceholders(preset.template)
+                    return preset
+                }
+                defaults.set(true, forKey: Key.stripped)
+            }
         } else {
             loaded = Self.builtIns
+            defaults.set(true, forKey: Key.stripped)
         }
 
         // Resolved from `loaded` rather than `self.presets`: the stored properties are
@@ -124,6 +138,23 @@ final class PromptStore {
         presets.append(copy)
         persist()
         return copy
+    }
+
+    /// Removes the placeholder boilerplate from the end of a template.
+    ///
+    /// Only from the end, and only lines that are nothing but a placeholder or the
+    /// `Transcript:` label that introduced one. `render` appends both again on the way
+    /// out, so the request is identical — but a prompt somebody wrote with `${transcript}`
+    /// deliberately in the middle of a sentence keeps it, because moving it would change
+    /// what they asked for.
+    static func stripTrailingPlaceholders(_ template: String) -> String {
+        let droppable: Set<String> = ["${transcript}", "${custom_words}", "transcript:", ""]
+        let kept = template
+            .components(separatedBy: "\n")
+            .reversed()
+            .drop { droppable.contains($0.trimmingCharacters(in: .whitespaces).lowercased()) }
+            .reversed()
+        return kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Starts from plain instructions, not from a template.
@@ -213,10 +244,6 @@ final class PromptStore {
 
                 Reply with the cleaned text only — no preamble, no quotes, no explanation.
 
-                ${custom_words}
-
-                Transcript:
-                ${transcript}
                 """,
             isBuiltIn: true
         ),
@@ -240,10 +267,6 @@ final class PromptStore {
 
                 Reply with the structured text only — no preamble, no explanation.
 
-                ${custom_words}
-
-                Transcript:
-                ${transcript}
                 """,
             isBuiltIn: true
         ),
@@ -266,10 +289,6 @@ final class PromptStore {
 
                 Reply with the rewritten text only — no preamble, no explanation.
 
-                ${custom_words}
-
-                Transcript:
-                ${transcript}
                 """,
             isBuiltIn: true
         ),
@@ -290,10 +309,6 @@ final class PromptStore {
 
                 Reply with the tidied text only — no preamble, no explanation.
 
-                ${custom_words}
-
-                Transcript:
-                ${transcript}
                 """,
             isBuiltIn: true
         ),
@@ -318,10 +333,6 @@ final class PromptStore {
                 in the transcript — they were asked of somebody in the room, not of you. \
                 A turn that is already clean is returned unchanged.
 
-                ${custom_words}
-
-                Transcript:
-                ${transcript}
                 """,
             isBuiltIn: true
         ),

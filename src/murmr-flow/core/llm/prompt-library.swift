@@ -25,11 +25,6 @@ struct PromptLibrary {
         it unchanged.
 
         Reply with the cleaned text only — no preamble, no quotes, no explanation.
-
-        ${custom_words}
-
-        Transcript:
-        ${transcript}
         """
 
     var template: String
