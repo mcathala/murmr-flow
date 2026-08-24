@@ -142,6 +142,81 @@ struct SettingRow<Control: View>: View {
     }
 }
 
+/// The card each mode puts at the top of its tab: start the thing, and what it's doing.
+///
+/// One component rather than two similar cards. Notes got its own copy first and drifted
+/// immediately — gold button instead of the accent, the Theme fonts instead of the system
+/// ones, a wider button — because "the same as the other one" is not something two files
+/// can keep true. The trailing slot is the only part that differs on purpose: Dictaphone
+/// puts its prompt there, Notes swaps in live levels while a meeting is running.
+struct RecordCard<Trailing: View>: View {
+    let title: String
+    let subtitle: String
+    let buttonTitle: String
+    let buttonSymbol: String
+    /// Recording. Turns the button red and marks the card, in both modes.
+    var isActive = false
+    var isDisabled = false
+    let action: () -> Void
+    @ViewBuilder let trailing: Trailing
+
+    var body: some View {
+        Card(highlighted: isActive) {
+            HStack(spacing: 12) {
+                Button(action: action) {
+                    Label(buttonTitle, systemImage: buttonSymbol)
+                        .frame(minWidth: 96)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(isActive ? .red : .accentColor)
+                .disabled(isDisabled)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.callout.weight(.medium))
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+                trailing
+            }
+        }
+    }
+}
+
+/// One stream's live level, labelled.
+///
+/// Two of these side by side is how you catch a tap that started cleanly and is capturing
+/// silence — which looks exactly like a working recording until you read the note. Shared
+/// with the floating panel rather than drawn twice: the two places showing the same signal
+/// differently would be its own bug.
+struct LevelMeter: View {
+    let label: String
+    let level: Float
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(label)
+                .font(Theme.Text.label)
+                .tracking(Theme.labelTracking)
+                .foregroundStyle(Theme.Palette.faint)
+                .fixedSize()
+            ForEach(0..<3, id: \.self) { index in
+                Capsule()
+                    .fill(lit(index) ? Theme.Palette.gold : Theme.Palette.hairline)
+                    .frame(width: 3, height: lit(index) ? 13 : 6)
+            }
+        }
+        .animation(.easeOut(duration: 0.1), value: level)
+    }
+
+    private func lit(_ index: Int) -> Bool {
+        AudioLevel.isLit(level, bar: index)
+    }
+}
+
 /// Standard padding and rhythm for a scrolling pane.
 struct PaneScroll<Content: View>: View {
     var title: String?

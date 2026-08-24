@@ -22,19 +22,86 @@ final class MeetingStore {
     private(set) var notes: [NoteFile] = []
 
     init() {
+        Self.adoptLegacyFolder()
         reload()
     }
 
-    /// `~/Documents/Murmr Flow/Meetings`. Documents rather than Application Support,
-    /// because these are the user's own notes and not our state.
+    /// `~/Documents/MurmurNotes`. Documents rather than Application Support, because
+    /// these are the user's own notes and not our state.
+    ///
+    /// One flat folder rather than `MurmurNotes/Meetings`: the folder is already named
+    /// for what it holds, so a nested folder with one thing in it is a level to click
+    /// through for nothing.
     static var folder: URL {
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
-            .first
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Documents", isDirectory: true)
-        return documents
+        documentsFolder.appendingPathComponent("MurmurNotes", isDirectory: true)
+    }
+
+    /// Where notes were written before the rename. Read only — nothing new goes here.
+    static var legacyFolder: URL {
+        documentsFolder
             .appendingPathComponent("Murmr Flow", isDirectory: true)
             .appendingPathComponent("Meetings", isDirectory: true)
+    }
+
+    private static var documentsFolder: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Documents", isDirectory: true)
+    }
+
+    /// Moves notes written under the old folder name into the new one.
+    ///
+    /// Renaming the folder in code would otherwise make every existing note vanish from
+    /// the app — the files would still be on disk, but nothing would be looking there.
+    /// Moved rather than copied, so there is one copy of each note and no question about
+    /// which one an edit lands in. A name already taken at the destination is left alone
+    /// rather than overwritten.
+    static func adoptLegacyFolder(
+        from legacy: URL? = nil, to destination: URL? = nil
+    ) {
+        let manager = FileManager.default
+        let legacy = legacy ?? legacyFolder
+        let destination = destination ?? folder
+        guard let names = try? manager.contentsOfDirectory(atPath: legacy.path) else { return }
+
+        for name in names where name.hasSuffix(".md") {
+            let target = destination.appendingPathComponent(name)
+            guard !manager.fileExists(atPath: target.path) else { continue }
+            do {
+                try manager.createDirectory(at: destination, withIntermediateDirectories: true)
+                try manager.moveItem(at: legacy.appendingPathComponent(name), to: target)
+            } catch {
+                log.error(
+                    "could not move \(name, privacy: .public) out of the old folder — \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+
+        prune(legacy, notBeyond: destination.deletingLastPathComponent())
+    }
+
+    /// Removes a folder we emptied, and any parent that emptying it left empty.
+    ///
+    /// Stops at `boundary` — the folder the notes live in, so it can never walk up into
+    /// Documents itself — and stops the moment it meets a folder with anything in it: one
+    /// the user put something else in is theirs.
+    ///
+    /// `.DS_Store` does not count as something. Requiring a genuinely empty directory
+    /// left `Murmr Flow/Meetings` behind for anyone who had ever opened it in Finder,
+    /// which is everyone — an empty folder with the old name sitting next to the new one,
+    /// for good.
+    private static func prune(_ folder: URL, notBeyond boundary: URL) {
+        let manager = FileManager.default
+        var current = folder.standardizedFileURL
+        let stop = boundary.standardizedFileURL
+
+        while current.path.hasPrefix(stop.path + "/") {
+            guard let left = try? manager.contentsOfDirectory(atPath: current.path),
+                  left.allSatisfy({ $0.hasPrefix(".") })
+            else { return }
+            guard (try? manager.removeItem(at: current)) != nil else { return }
+            current = current.deletingLastPathComponent()
+        }
     }
 
     // MARK: - Reading

@@ -3,23 +3,21 @@ import Observation
 
 /// A named way of tidying text.
 ///
-/// The `summary` is not decoration — it is the whole reason presets are usable. "Casual"
-/// tells you nothing; "For Slack, texts, quick notes" tells you when to reach for it.
+/// A name and the instructions, and nothing between them. There used to be a one-line
+/// description as well, which meant three fields to fill in to write a prompt and a
+/// second place saying what it did — the prompt itself already says that, in more detail
+/// and without going stale. Decoding tolerates the old field being present in stored
+/// JSON; it is simply ignored.
 struct PromptPreset: Codable, Identifiable, Sendable, Equatable {
     let id: UUID
     var name: String
-    /// One line: what it does, and when you'd want it.
-    var summary: String
     var template: String
     /// Built-ins can be edited, but not deleted — you'd have no way back.
     var isBuiltIn: Bool
 
-    init(
-        id: UUID, name: String, summary: String, template: String, isBuiltIn: Bool = false
-    ) {
+    init(id: UUID, name: String, template: String, isBuiltIn: Bool = false) {
         self.id = id
         self.name = name
-        self.summary = summary
         self.template = template
         self.isBuiltIn = isBuiltIn
     }
@@ -39,6 +37,7 @@ final class PromptStore {
         static let presets = "prompts.presets"
         static let dictation = "prompts.dictationID"
         static let note = "prompts.noteID"
+        static let stripped = "prompts.strippedPlaceholders"
     }
 
     private(set) var presets: [PromptPreset]
@@ -49,8 +48,8 @@ final class PromptStore {
         didSet { defaults.set(dictationPromptID.uuidString, forKey: Key.dictation) }
     }
 
-    /// Note mode's preset. Optional because meeting clean-up isn't built yet, and an
-    /// assignment pointing at nothing would be a promise the app can't keep.
+    /// Note mode's preset. Still optional: a preset can be deleted, and pointing at a
+    /// prompt that no longer exists would be worse than pointing at nothing.
     var notePromptID: UUID? {
         didSet { defaults.set(notePromptID?.uuidString, forKey: Key.note) }
     }
@@ -60,13 +59,32 @@ final class PromptStore {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
-        let loaded: [PromptPreset]
+        var loaded: [PromptPreset]
         if let data = defaults.data(forKey: Key.presets),
            let stored = try? JSONDecoder().decode([PromptPreset].self, from: data),
            !stored.isEmpty {
             loaded = stored
+            // A built-in shipped in a later version is added rather than waiting for a
+            // reset. Only ones the stored list has never seen — an edit to a prompt
+            // already there is the user's and stays.
+            loaded += Self.builtIns.filter { built in
+                !stored.contains { $0.id == built.id }
+            }
+
+            // The placeholders used to be part of every shipped template, so they are
+            // sitting in the prompts people already have. Taken out once, not on every
+            // load: someone who types `${transcript}` deliberately afterwards keeps it.
+            if !defaults.bool(forKey: Key.stripped) {
+                loaded = loaded.map {
+                    var preset = $0
+                    preset.template = Self.stripTrailingPlaceholders(preset.template)
+                    return preset
+                }
+                defaults.set(true, forKey: Key.stripped)
+            }
         } else {
             loaded = Self.builtIns
+            defaults.set(true, forKey: Key.stripped)
         }
 
         // Resolved from `loaded` rather than `self.presets`: the stored properties are
@@ -77,7 +95,16 @@ final class PromptStore {
         self.presets = loaded
         self.dictationPromptID = loaded.first { $0.id == storedDictation }?.id
             ?? Self.defaultPreset.id
+
+        // Falls back to Meeting the same way dictation falls back to Default. Note mode
+        // having *a* prompt is not the same question as whether clean-up runs — that is
+        // `SettingsStore.noteCleanupEnabled`, one switch in one place.
         self.notePromptID = loaded.first { $0.id == storedNote }?.id
+            ?? loaded.first { $0.id == ID.meeting }?.id
+
+        // Writes back the merged list, so a newly shipped built-in is stored once rather
+        // than re-merged on every launch.
+        persist()
     }
 
     // MARK: - Lookup
@@ -105,7 +132,6 @@ final class PromptStore {
         let copy = PromptPreset(
             id: UUID(),
             name: "\(preset.name) copy",
-            summary: preset.summary,
             template: preset.template,
             isBuiltIn: false
         )
@@ -114,13 +140,45 @@ final class PromptStore {
         return copy
     }
 
+    /// Removes the placeholder boilerplate from the end of a template.
+    ///
+    /// Only from the end, and only lines that are nothing but a placeholder or the
+    /// `Transcript:` label that introduced one. `render` appends both again on the way
+    /// out, so the request is identical — but a prompt somebody wrote with `${transcript}`
+    /// deliberately in the middle of a sentence keeps it, because moving it would change
+    /// what they asked for.
+    static func stripTrailingPlaceholders(_ template: String) -> String {
+        let droppable: Set<String> = ["${transcript}", "${custom_words}", "transcript:", ""]
+        let kept = template
+            .components(separatedBy: "\n")
+            .reversed()
+            .drop { droppable.contains($0.trimmingCharacters(in: .whitespaces).lowercased()) }
+            .reversed()
+        return kept.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Starts from plain instructions, not from a template.
+    ///
+    /// It used to seed a copy of Default, which meant the first thing you saw on writing
+    /// your own prompt was `${custom_words}` and `${transcript}` — syntax you then had to
+    /// keep in the right place for the thing to work at all. Whatever the request cannot
+    /// go without is appended when it is sent, so a prompt can be written the way you'd
+    /// write it to a person.
+    static let starterTemplate = """
+        You clean up dictated speech.
+
+        Fix the punctuation and capitalization, take out the filler words and false
+        starts, and leave everything else exactly as it was said.
+
+        Reply with the cleaned text only.
+        """
+
     @discardableResult
     func addNew() -> PromptPreset {
         let preset = PromptPreset(
             id: UUID(),
             name: "New prompt",
-            summary: "Say what this one is for.",
-            template: Self.defaultPreset.template,
+            template: Self.starterTemplate,
             isBuiltIn: false
         )
         presets.append(preset)
@@ -134,7 +192,7 @@ final class PromptStore {
         // An assignment pointing at a deleted preset would silently fall back to Default
         // on the next dictation; move it now so the UI shows the truth.
         if dictationPromptID == preset.id { dictationPromptID = Self.defaultPreset.id }
-        if notePromptID == preset.id { notePromptID = nil }
+        if notePromptID == preset.id { notePromptID = Self.meetingPreset.id }
         persist()
     }
 
@@ -153,20 +211,25 @@ final class PromptStore {
 
     static var defaultPreset: PromptPreset { builtIns[0] }
 
+    /// Note mode's default. Looked up by id rather than position, so reordering the
+    /// built-ins can't quietly change which prompt meetings use.
+    static var meetingPreset: PromptPreset {
+        builtIns.first { $0.id == ID.meeting } ?? defaultPreset
+    }
+
     /// Fixed identifiers, so an assignment survives a rebuild.
     private enum ID {
         static let standard = UUID(uuidString: "8B1F0C4A-0000-4000-A000-000000000001")!
         static let structure = UUID(uuidString: "8B1F0C4A-0000-4000-A000-000000000002")!
         static let formal = UUID(uuidString: "8B1F0C4A-0000-4000-A000-000000000003")!
         static let casual = UUID(uuidString: "8B1F0C4A-0000-4000-A000-000000000004")!
+        static let meeting = UUID(uuidString: "8B1F0C4A-0000-4000-A000-000000000005")!
     }
 
     static let builtIns: [PromptPreset] = [
         PromptPreset(
             id: ID.standard,
             name: "Default",
-            summary: "Light cleanup. Removes fillers, fixes grammar, keeps your words. "
-                + "For everyday dictation.",
             template: """
                 You clean up dictated speech. Rewrite the transcript below applying only \
                 these changes:
@@ -181,10 +244,6 @@ final class PromptStore {
 
                 Reply with the cleaned text only — no preamble, no quotes, no explanation.
 
-                ${custom_words}
-
-                Transcript:
-                ${transcript}
                 """,
             isBuiltIn: true
         ),
@@ -192,8 +251,6 @@ final class PromptStore {
         PromptPreset(
             id: ID.structure,
             name: "Structure",
-            summary: "Reorganizes into sections/bullets, governed by RULE ZERO: no content "
-                + "dropped. For dumping thoughts that need shape.",
             template: """
                 You give shape to dictated thinking. Reorganise the transcript below into \
                 headings and bullet points.
@@ -210,10 +267,6 @@ final class PromptStore {
 
                 Reply with the structured text only — no preamble, no explanation.
 
-                ${custom_words}
-
-                Transcript:
-                ${transcript}
                 """,
             isBuiltIn: true
         ),
@@ -221,7 +274,6 @@ final class PromptStore {
         PromptPreset(
             id: ID.formal,
             name: "Formal",
-            summary: "Professional register, tightened phrasing. For emails and work messages.",
             template: """
                 You rewrite dictated speech for professional correspondence. Take the \
                 transcript below and:
@@ -237,10 +289,6 @@ final class PromptStore {
 
                 Reply with the rewritten text only — no preamble, no explanation.
 
-                ${custom_words}
-
-                Transcript:
-                ${transcript}
                 """,
             isBuiltIn: true
         ),
@@ -248,7 +296,6 @@ final class PromptStore {
         PromptPreset(
             id: ID.casual,
             name: "Casual",
-            summary: "Natural, conversational tone. For Slack, texts, quick notes.",
             template: """
                 You tidy dictated speech for casual messages. Take the transcript below and:
 
@@ -262,10 +309,30 @@ final class PromptStore {
 
                 Reply with the tidied text only — no preamble, no explanation.
 
-                ${custom_words}
+                """,
+            isBuiltIn: true
+        ),
 
-                Transcript:
-                ${transcript}
+        // Note mode's default. Written for a conversation rather than one person talking:
+        // the turns belong to two people, and merging or summarising them would put words
+        // in someone's mouth. The line-per-turn format is appended by the app, so this
+        // prompt only has to say how to tidy the words.
+        PromptPreset(
+            id: ID.meeting,
+            name: "Meeting",
+            template: """
+                You tidy the transcript of a spoken conversation, turn by turn.
+
+                - Fix punctuation, capitalization and obvious mis-transcriptions.
+                - Remove filler words (um, uh, like, you know), false starts and repeated \
+                words.
+                - Leave every substantive point in place, in the speaker's own words.
+
+                Do not summarise, rephrase, translate, or add anything. Do not move what \
+                one person said onto another speaker's turn, and do not answer questions \
+                in the transcript — they were asked of somebody in the room, not of you. \
+                A turn that is already clean is returned unchanged.
+
                 """,
             isBuiltIn: true
         ),

@@ -104,41 +104,31 @@ struct DictaphoneView: View {
 
     /// A button as well as the key — discoverable, and it still works if Accessibility
     /// isn't granted, when the global hotkey can't fire at all.
+    ///
+    /// Shape and styling live in `RecordCard`, which Notes uses too.
     private var recordCard: some View {
-        Card(highlighted: dictation.stage.isRecording) {
-            HStack(spacing: 12) {
-                Button {
-                    if dictation.stage.isRecording {
-                        Task { await dictation.endDictation() }
-                    } else {
-                        dictation.beginDictation()
-                    }
-                } label: {
-                    Label(
-                        dictation.stage.isRecording ? "Stop" : "Dictate",
-                        systemImage: dictation.stage.isRecording ? "stop.fill" : "mic.fill"
-                    )
-                    .frame(minWidth: 96)
+        RecordCard(
+            title: headline,
+            subtitle: subhead,
+            buttonTitle: dictation.stage.isRecording ? "Stop" : "Dictate",
+            buttonSymbol: dictation.stage.isRecording ? "stop.fill" : "mic.fill",
+            isActive: dictation.stage.isRecording,
+            isDisabled: dictation.stage.isBusy && !dictation.stage.isRecording,
+            action: {
+                if dictation.stage.isRecording {
+                    Task { await dictation.endDictation() }
+                } else {
+                    dictation.beginDictation()
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(dictation.stage.isRecording ? .red : .accentColor)
-                .disabled(dictation.stage.isBusy && !dictation.stage.isRecording)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(headline).font(.callout.weight(.medium))
-                    Text(subhead).font(.caption).foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 0)
-
-                Menu(prompts.dictationPrompt.name) {
-                    ForEach(prompts.presets) { preset in
-                        Button(preset.name) { prompts.dictationPromptID = preset.id }
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
             }
+        ) {
+            Menu(prompts.dictationPrompt.name) {
+                ForEach(prompts.presets) { preset in
+                    Button(preset.name) { prompts.dictationPromptID = preset.id }
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
         }
     }
 

@@ -172,8 +172,8 @@ struct PanelView: View {
                     Circle().fill(Theme.Palette.danger).frame(width: 7, height: 7)
                     Text(model.clock).font(Theme.Text.monoLarge)
                 }
-                Meter(label: "You", level: model.youLevel)
-                Meter(label: "Them", level: model.themLevel)
+                LevelMeter(label: "You", level: model.youLevel)
+                LevelMeter(label: "Them", level: model.themLevel)
                 Spacer(minLength: 0)
                 controls
             }
@@ -325,29 +325,6 @@ private struct Waveform: View {
     }
 }
 
-/// One stream's level, labelled. Two of these side by side is how you catch a tap that
-/// started cleanly and is capturing silence.
-private struct Meter: View {
-    let label: String
-    let level: Float
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Text(label)
-                .font(Theme.Text.label)
-                .tracking(Theme.labelTracking)
-                .foregroundStyle(Theme.Palette.faint)
-                .fixedSize()
-            ForEach(0..<3, id: \.self) { index in
-                Capsule()
-                    .fill(lit(index) ? Theme.Palette.gold : Theme.Palette.hairline)
-                    .frame(width: 3, height: lit(index) ? 13 : 6)
-            }
-        }
-        .animation(.easeOut(duration: 0.1), value: level)
-    }
-
-    private func lit(_ index: Int) -> Bool {
-        AudioLevel.isLit(level, bar: index)
-    }
-}
+// The level meter used to live here as a private `Meter`. It moved to `LevelMeter` in
+// shared-views when the Notes tab grew a record bar, so both places draw the same signal
+// the same way.

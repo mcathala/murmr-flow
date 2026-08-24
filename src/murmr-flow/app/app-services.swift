@@ -56,7 +56,8 @@ final class AppServices {
             speech: speech
         )
         meetings = MeetingCoordinator(
-            models: models, transcriber: transcriber, notes: notes
+            models: models, transcriber: transcriber, notes: notes,
+            settings: settings, prompts: prompts, providers: providers
         )
     }
 

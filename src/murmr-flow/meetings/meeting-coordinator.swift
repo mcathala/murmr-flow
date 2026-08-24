@@ -50,6 +50,7 @@ final class MeetingCoordinator {
         case reading
         case you
         case them
+        case cleaning
         case writing
 
         var label: String {
@@ -57,6 +58,7 @@ final class MeetingCoordinator {
             case .reading: "Reading the recording"
             case .you: "Transcribing your side"
             case .them: "Transcribing their side"
+            case .cleaning: "Cleaning up the notes"
             case .writing: "Writing the note"
             }
         }
@@ -68,6 +70,9 @@ final class MeetingCoordinator {
         let note: NoteFile
         /// Time spent transcribing, not the meeting's length.
         let processingTime: TimeInterval
+        /// Why clean-up was skipped, or what it couldn't finish. Non-blocking: the note
+        /// is already saved either way, and this is what stops that being silent.
+        let cleanupNote: String?
     }
 
     enum RecordingError: LocalizedError {
@@ -108,13 +113,27 @@ final class MeetingCoordinator {
     private let models: ModelManager
     private let transcriber: TranscriptionService
     private let notes: MeetingStore
+    private let settings: SettingsStore
+    private let prompts: PromptStore
+    private let providers: ProviderStore
     private let recorder = MeetingRecorder()
+    private let cleanup = CleanupService()
     private var tickTask: Task<Void, Never>?
 
-    init(models: ModelManager, transcriber: TranscriptionService, notes: MeetingStore) {
+    init(
+        models: ModelManager,
+        transcriber: TranscriptionService,
+        notes: MeetingStore,
+        settings: SettingsStore,
+        prompts: PromptStore,
+        providers: ProviderStore
+    ) {
         self.models = models
         self.transcriber = transcriber
         self.notes = notes
+        self.settings = settings
+        self.prompts = prompts
+        self.providers = providers
     }
 
     var isRecording: Bool { recorder.isRecording }
@@ -180,20 +199,24 @@ final class MeetingCoordinator {
             stage = .transcribing(.them)
             let theirs = try await segments(from: theirSamples)
 
-            stage = .transcribing(.writing)
-            let transcript = MeetingTranscript.weave(
+            let woven = MeetingTranscript.weave(
                 you: yours,
                 them: theirs,
                 startedAt: recording.startedAt,
                 duration: recording.duration,
                 title: MeetingStore.defaultTitle(for: recording.startedAt)
             )
+
+            let (transcript, cleanupNote) = await cleaned(woven)
+
+            stage = .transcribing(.writing)
             let saved = try notes.save(transcript)
 
             lastResult = Result(
                 transcript: transcript,
                 note: saved,
-                processingTime: (clock.now - started).seconds
+                processingTime: (clock.now - started).seconds,
+                cleanupNote: cleanupNote
             )
             stage = .saved
             Self.log.notice(
@@ -216,6 +239,46 @@ final class MeetingCoordinator {
         onRecordingChange?(false)
         stage = .idle
         elapsed = 0
+    }
+
+    // MARK: - Clean-up
+
+    /// Runs the note prompt over the conversation, turn by turn.
+    ///
+    /// Returns the transcript to save and, when relevant, something to tell the user.
+    /// Never throws and never returns fewer turns than it was given: the recording is
+    /// deleted the moment this finishes, so the note is the only copy of the meeting and
+    /// a failed request must cost wording at most, never content.
+    private func cleaned(
+        _ transcript: MeetingTranscript
+    ) async -> (MeetingTranscript, String?) {
+        guard settings.noteCleanupEnabled else { return (transcript, nil) }
+        guard !transcript.isEmpty else { return (transcript, nil) }
+        guard let preset = prompts.notePrompt else {
+            return (transcript, "No clean-up prompt is set for Note mode.")
+        }
+
+        stage = .transcribing(.cleaning)
+        let outcome = await cleanup.cleanTurns(
+            transcript.utterances.map {
+                CleanupService.Turn(speaker: $0.speaker.rawValue, text: $0.text)
+            },
+            config: providers.activeConfig,
+            prompt: PromptLibrary(template: preset.template),
+            context: PromptLibrary.Context(
+                transcript: "",  // filled in per batch
+                customWords: settings.customWords
+            )
+        )
+
+        guard !outcome.usedRawFallback else { return (transcript, outcome.note) }
+        Self.log.notice(
+            "note cleanup: \(outcome.cleanedCount, privacy: .public) of \(transcript.utterances.count, privacy: .public) turns"
+        )
+        return (
+            transcript.applying(texts: outcome.texts, cleanedBy: preset.name),
+            outcome.note
+        )
     }
 
     // MARK: - Transcription
