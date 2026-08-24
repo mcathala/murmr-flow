@@ -77,6 +77,7 @@ final class MeetingCoordinator {
 
     enum RecordingError: LocalizedError {
         case noAudio
+        case systemCaptureFailed
 
         var errorDescription: String? {
             switch self {
@@ -84,6 +85,10 @@ final class MeetingCoordinator {
                 "No audio was captured. Check that Murmr Flow is allowed under Privacy & "
                     + "Security \u{203A} System Audio Recording, and that a microphone is "
                     + "connected."
+            case .systemCaptureFailed:
+                "System audio capture failed — the recording never received a single "
+                    + "frame of what the Mac was playing. Nothing was wrong with the "
+                    + "meeting; the tap did not run. Try recording again."
             }
         }
     }
@@ -206,6 +211,14 @@ final class MeetingCoordinator {
                 duration: recording.duration,
                 title: MeetingStore.defaultTitle(for: recording.startedAt)
             )
+
+            // A silent meeting and a dead tap both produce nothing. Only the callback
+            // count tells them apart, and saving a note that says "nothing was
+            // transcribed" for the second one sends the user looking at their microphone
+            // when the fault was ours.
+            if woven.isEmpty, recording.systemCallbacks == 0 {
+                throw RecordingError.systemCaptureFailed
+            }
 
             let (transcript, cleanupNote) = await cleaned(woven)
 

@@ -26,6 +26,11 @@ final class MeetingRecorder {
         let duration: TimeInterval
         /// The folder holding both files, so the caller can delete it wholesale.
         let folder: URL
+        /// IOProc invocations on the system tap. Zero means the tap never ran, which is a
+        /// capture failure and not a quiet meeting — the two are indistinguishable from
+        /// the audio alone, and telling the user the wrong one sends them hunting in the
+        /// wrong place.
+        let systemCallbacks: Int
     }
 
     enum RecorderError: LocalizedError {
@@ -128,7 +133,8 @@ final class MeetingRecorder {
             them: systemResult.url,
             startedAt: startedAt,
             duration: duration,
-            folder: folder
+            folder: folder,
+            systemCallbacks: systemResult.callbacks
         )
     }
 

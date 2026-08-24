@@ -48,7 +48,12 @@ final class SystemAudioRecorder: @unchecked Sendable {
     /// Counts IOProc invocations. Worth keeping rather than deleting after the bug it
     /// found: a tap that starts cleanly and then delivers nothing looks identical to a
     /// silent meeting, and this is the only thing that tells them apart.
-    private let callbacks = OSAllocatedUnfairLock(initialState: 0)
+    ///
+    /// `run` rises once per `start()`, so the silent-start watchdog can tell "this
+    /// recording has delivered nothing" from "a different recording has since begun" —
+    /// and from "we already stopped", which resets the count and would otherwise read as
+    /// a failure every time a meeting ended inside a second.
+    private let callbacks = OSAllocatedUnfairLock(initialState: (run: 0, count: 0))
 
     private(set) var outputURL: URL?
 
@@ -56,6 +61,9 @@ final class SystemAudioRecorder: @unchecked Sendable {
     private(set) var capturedFormat: AVAudioFormat?
 
     var isRecording: Bool { ioProcID != nil }
+
+    /// IOProc invocations so far. Zero while recording means the capture is dead.
+    var callbackCount: Int { callbacks.withLock { $0.count } }
 
     /// Loudness of what the Mac is currently playing, 0…1.
     var level: Float { writer?.level ?? 0 }
@@ -79,6 +87,7 @@ final class SystemAudioRecorder: @unchecked Sendable {
     /// ask ahead of time — so this is deliberately the moment the user pressed a button.
     func start(writingTo url: URL) throws {
         guard !isRecording else { return }
+        callbacks.withLock { $0.run += 1; $0.count = 0 }
 
         do {
             try createTap()
@@ -101,6 +110,26 @@ final class SystemAudioRecorder: @unchecked Sendable {
         }
 
         Self.log.notice("system audio capture started")
+        watchForSilentStart(run: callbacks.withLock { $0.run })
+    }
+
+    /// `AudioDeviceStart` returning `noErr` is not evidence that anything is running. A
+    /// dead aggregate looks exactly like a healthy one until the callbacks fail to arrive,
+    /// and the only previous way to find out was an empty transcript half an hour later.
+    /// At a 48 kHz clock the first callback is due within milliseconds, so a full second
+    /// of nothing is conclusive rather than merely slow.
+    ///
+    /// Everything it touches lives behind the counter's lock, because this runs on a
+    /// background queue while `start()` and `stop()` run on the main actor.
+    private func watchForSilentStart(run: Int) {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            let stalled = self.callbacks.withLock { $0.run == run && $0.count == 0 }
+            guard stalled else { return }
+            Self.log.error(
+                "system audio tap started but delivered no callbacks after 1s — capture is dead"
+            )
+        }
     }
 
     /// Stops capture and returns the file written, plus how much audio landed in it.
@@ -110,7 +139,7 @@ final class SystemAudioRecorder: @unchecked Sendable {
         AudioDeviceStop(aggregateID, ioProcID)
 
         let duration = writer?.finish() ?? 0
-        let fired = callbacks.withLock { $0 }
+        let fired = callbacks.withLock { $0.count }
         let url = outputURL
         teardown()
 
@@ -188,18 +217,21 @@ final class SystemAudioRecorder: @unchecked Sendable {
 
     /// A tap is only readable through an aggregate device that lists it.
     ///
-    /// **The current output device has to be in the sub-device list.** A tap carries no
-    /// clock of its own, so an aggregate built from a tap alone has nothing to drive its
-    /// IO cycle: it is created successfully, `AudioDeviceStart` returns `noErr`, and the
-    /// IOProc is then simply never called. Measured exactly that — a tap that reported
-    /// started and produced a 4096-byte file containing nothing but the WAV header.
+    /// **Some real device has to be in the sub-device list.** A tap carries no clock of
+    /// its own, so an aggregate built from a tap alone has nothing to drive its IO cycle:
+    /// it is created successfully, `AudioDeviceStart` returns `noErr`, and the IOProc is
+    /// then simply never called. Measured exactly that — a tap that reported started and
+    /// produced a 4096-byte file containing nothing but the WAV header.
     ///
-    /// Listing the output device does not take it over or change what the user hears. The
+    /// It does **not** have to be the device the user is listening on. See
+    /// `clockDeviceUID()` for why it had better not be.
+    ///
+    /// Listing a device does not take it over or change what the user hears. The
     /// aggregate stays private, is never made the system default, and we never write to
     /// its output streams — it is there to supply a clock.
     private func createAggregateDevice() throws {
         let tap = try tapUID()
-        let output = try defaultOutputUID()
+        let clock = try clockDeviceUID()
 
         let description: [String: Any] = [
             kAudioAggregateDeviceNameKey: "Murmr Flow Capture",
@@ -207,9 +239,9 @@ final class SystemAudioRecorder: @unchecked Sendable {
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
             kAudioAggregateDeviceTapAutoStartKey: true,
-            kAudioAggregateDeviceMainSubDeviceKey: output,
+            kAudioAggregateDeviceMainSubDeviceKey: clock,
             kAudioAggregateDeviceSubDeviceListKey: [
-                [kAudioSubDeviceUIDKey: output]
+                [kAudioSubDeviceUIDKey: clock]
             ],
             kAudioAggregateDeviceTapListKey: [
                 [
@@ -227,9 +259,29 @@ final class SystemAudioRecorder: @unchecked Sendable {
         aggregateID = id
     }
 
-    /// UID of whatever the Mac is currently playing through, which is the device the tap
-    /// is capturing from and therefore the right clock to follow.
-    private func defaultOutputUID() throws -> CFString {
+    /// UID of the device that drives the aggregate's IO cycle.
+    ///
+    /// **The built-in output, deliberately — not whatever the user is listening on.** The
+    /// tap is a *process* tap: it captures what applications play, upstream of routing, so
+    /// the clock has no bearing on what lands in the file. Measured on a Bluetooth headset
+    /// while clocking from the built-in device: identical peak sample, 0.3617 against
+    /// 0.3616.
+    ///
+    /// Clocking from the listening device, meanwhile, welds the capture to that device's
+    /// health. On a Bluetooth headset that is a bad bet. The IO rate follows the link:
+    /// measured 235 callbacks per window on A2DP, dropping to 131 the moment opening the
+    /// microphone dragged the headset into hands-free mode — and once, in the wild, a tap
+    /// that took 2.15 s to start and then delivered nothing at all for 24 minutes. Clocked
+    /// from the built-in device across the same transitions: 321, 308, 609. Untouched.
+    ///
+    /// Falls back to the current default output on a Mac with no built-in output at all,
+    /// which is better than refusing to record.
+    private func clockDeviceUID() throws -> CFString {
+        if let builtIn = builtInOutputDevice(), let uid = deviceUID(builtIn) {
+            Self.log.notice("clocking capture from built-in output \(uid as String, privacy: .public)")
+            return uid
+        }
+
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultOutputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -237,24 +289,87 @@ final class SystemAudioRecorder: @unchecked Sendable {
         )
         var deviceID = AudioObjectID(kAudioObjectUnknown)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        var status = AudioObjectGetPropertyData(
+        let status = AudioObjectGetPropertyData(
             AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
         )
-        guard status == noErr, deviceID != kAudioObjectUnknown else {
+        guard status == noErr, deviceID != kAudioObjectUnknown, let uid = deviceUID(deviceID) else {
             throw RecorderError.aggregateDeviceFailed(status)
         }
-
-        address.mSelector = kAudioDevicePropertyDeviceUID
-        var uid: CFString?
-        size = UInt32(MemoryLayout<CFString?>.size)
-        status = withUnsafeMutablePointer(to: &uid) {
-            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, $0)
-        }
-        guard status == noErr, let uid else {
-            throw RecorderError.aggregateDeviceFailed(status)
-        }
-        Self.log.notice("clocking capture from output device \(uid as String, privacy: .public)")
+        Self.log.notice(
+            "no built-in output; clocking capture from default output \(uid as String, privacy: .public)"
+        )
         return uid
+    }
+
+    /// First output device the machine reports as built in.
+    private func builtInOutputDevice() -> AudioObjectID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
+        ) == noErr, size > 0 else { return nil }
+
+        var devices = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &devices
+        ) == noErr else { return nil }
+
+        return devices.first { transportType($0) == kAudioDeviceTransportTypeBuiltIn
+            && outputChannelCount($0) > 0 }
+    }
+
+    private func transportType(_ device: AudioObjectID) -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr else {
+            return 0
+        }
+        return value
+    }
+
+    /// Output channels, which is what separates a speaker from a microphone. The built-in
+    /// microphone also reports itself as built-in transport.
+    private func outputChannelCount(_ device: AudioObjectID) -> Int {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr,
+            size > 0
+        else { return 0 }
+
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: 16)
+        defer { raw.deallocate() }
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, raw) == noErr else {
+            return 0
+        }
+        let list = raw.assumingMemoryBound(to: AudioBufferList.self)
+        return UnsafeMutableAudioBufferListPointer(list).reduce(0) { $0 + Int($1.mNumberChannels) }
+    }
+
+    private func deviceUID(_ device: AudioObjectID) -> CFString? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size = UInt32(MemoryLayout<CFString?>.size)
+        var uid: CFString?
+        let status = withUnsafeMutablePointer(to: &uid) {
+            AudioObjectGetPropertyData(device, &address, 0, nil, &size, $0)
+        }
+        return status == noErr ? uid : nil
     }
 
     // MARK: - IO
@@ -267,7 +382,7 @@ final class SystemAudioRecorder: @unchecked Sendable {
             // Real-time audio thread. The writer copies and hands off; nothing here
             // touches the file.
             guard let self else { return }
-            self.callbacks.withLock { $0 += 1 }
+            self.callbacks.withLock { $0.count += 1 }
             self.writer?.append(bufferList: inputData)
         }
         guard status == noErr, procID != nil else {
@@ -295,6 +410,8 @@ final class SystemAudioRecorder: @unchecked Sendable {
             tapID = AudioObjectID(kAudioObjectUnknown)
         }
         writer = nil
-        callbacks.withLock { $0 = 0 }
+        // Bumping the run invalidates any watchdog still pending for the recording that
+        // just ended, which would otherwise see a freshly zeroed count and cry failure.
+        callbacks.withLock { $0.run += 1; $0.count = 0 }
     }
 }
