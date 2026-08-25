@@ -82,7 +82,6 @@ struct PaneTabs<Tab: Hashable & Identifiable>: View {
                 }
                 .buttonStyle(.plain)
             }
-            Spacer(minLength: 0)
         }
         .padding(3)
         // A recessed track, so three pills read as one control rather than as three
@@ -95,6 +94,11 @@ struct PaneTabs<Tab: Hashable & Identifiable>: View {
                         .strokeBorder(Theme.Palette.hairline, lineWidth: 1)
                 }
         }
+        // The track hugs the tabs and the whole control is centred. Stretching it to the
+        // column's width left the labels in the top-left corner of a mostly empty box —
+        // the one element in a pane of full-width cards that had to invent something to
+        // do with the space.
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
