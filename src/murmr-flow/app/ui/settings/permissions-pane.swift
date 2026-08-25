@@ -3,8 +3,7 @@ import SwiftUI
 /// The only pane that should ever look empty.
 ///
 /// Granted permissions collapse to a single line. Anything that needs attention is at the
-/// top, outlined, with the button that fixes it. The build-signing warning that used to
-/// live on this screen is gone — that was a message for a terminal.
+/// top, outlined, with the button that fixes it.
 struct PermissionsPane: View {
 
     let permissions: PermissionManager

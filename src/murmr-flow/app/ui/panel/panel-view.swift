@@ -324,7 +324,3 @@ private struct Waveform: View {
         return 3 + 15 * AudioLevel.normalised(level) * falloff
     }
 }
-
-// The level meter used to live here as a private `Meter`. It moved to `LevelMeter` in
-// shared-views when the Notetaker grew a record bar, so both places draw the same signal
-// the same way.
