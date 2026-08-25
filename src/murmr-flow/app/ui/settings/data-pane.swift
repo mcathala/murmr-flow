@@ -11,7 +11,7 @@ import SwiftUI
 struct DataPane: View {
 
     let history: HistoryStore
-    let notes: MeetingStore
+    let notes: NoteStore
 
     private enum Pending: Identifiable {
         case dictations, notes, everything

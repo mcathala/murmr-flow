@@ -12,7 +12,7 @@ import OSLog
 ///
 /// Meetings are deliberately *not* in here. Their notes are Markdown files on disk and
 /// those files are the source of truth, so listing them means reading the folder — see
-/// `MeetingStore`. Two stores because there are genuinely two kinds of thing: one we own,
+/// `NoteStore`. Two stores because there are genuinely two kinds of thing: one we own,
 /// and one the user owns.
 @MainActor
 @Observable

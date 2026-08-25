@@ -8,7 +8,7 @@ import Observation
 /// the app would balloon the download and defeat the curl installer.
 @MainActor
 @Observable
-final class ModelManager {
+final class SpeechModelLoader {
 
     enum State: Equatable {
         case notLoaded

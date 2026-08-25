@@ -76,13 +76,13 @@ final class PanelModel {
     /// The whole failure vocabulary. Which half broke is all you need in the moment; the
     /// detail belongs on Home, where there is room for it.
     enum Failure: Equatable {
-        case transcription
-        case cleanup
+        case speechModel
+        case aiProvider
 
         var message: String {
             switch self {
-            case .transcription: "Speech model failed"
-            case .cleanup: "AI provider failed"
+            case .speechModel: "Speech model failed"
+            case .aiProvider: "AI provider failed"
             }
         }
     }

@@ -115,9 +115,9 @@ final class MeetingCoordinator {
     /// opening a second input stream over the top of it.
     var onRecordingChange: (@MainActor (Bool) -> Void)?
 
-    private let models: ModelManager
+    private let loader: SpeechModelLoader
     private let transcriber: TranscriptionService
-    private let notes: MeetingStore
+    private let notes: NoteStore
     private let settings: SettingsStore
     private let prompts: PromptStore
     private let providers: ProviderStore
@@ -127,15 +127,15 @@ final class MeetingCoordinator {
     private var tickTask: Task<Void, Never>?
 
     init(
-        models: ModelManager,
+        loader: SpeechModelLoader,
         transcriber: TranscriptionService,
-        notes: MeetingStore,
+        notes: NoteStore,
         settings: SettingsStore,
         prompts: PromptStore,
         providers: ProviderStore,
         devices: AudioDeviceStore
     ) {
-        self.models = models
+        self.loader = loader
         self.transcriber = transcriber
         self.notes = notes
         self.settings = settings
@@ -161,9 +161,9 @@ final class MeetingCoordinator {
 
         // Refuse rather than downloading mid-meeting. Otherwise the user records for an
         // hour and only then discovers there is no model to transcribe it with.
-        guard models.models != nil else {
+        guard loader.models != nil else {
             stage = .failed(modelNotReadyMessage())
-            if !models.isPreparing { Task { await models.prepare() } }
+            if !loader.isPreparing { Task { await loader.prepare() } }
             return
         }
 
@@ -215,7 +215,7 @@ final class MeetingCoordinator {
                 them: theirs,
                 startedAt: recording.startedAt,
                 duration: recording.duration,
-                title: MeetingStore.defaultTitle(for: recording.startedAt)
+                title: NoteStore.defaultTitle(for: recording.startedAt)
             )
 
             // A silent meeting and a dead tap both produce nothing. Only the callback
@@ -271,9 +271,9 @@ final class MeetingCoordinator {
     private func cleaned(
         _ transcript: MeetingTranscript
     ) async -> (MeetingTranscript, String?) {
-        guard settings.noteCleanupEnabled else { return (transcript, nil) }
+        guard settings.notetakerCleanupEnabled else { return (transcript, nil) }
         guard !transcript.isEmpty else { return (transcript, nil) }
-        guard let preset = prompts.notePrompt else {
+        guard let preset = prompts.notetakerPrompt else {
             return (transcript, "No clean-up prompt is set for Notetaker.")
         }
 
@@ -312,7 +312,7 @@ final class MeetingCoordinator {
     // MARK: - Model state
 
     private func modelNotReadyMessage() -> String {
-        switch models.state {
+        switch loader.state {
         case .downloading(let fraction):
             "Still downloading the speech model — \(Int(fraction * 100))%."
         case .preparing, .loading:

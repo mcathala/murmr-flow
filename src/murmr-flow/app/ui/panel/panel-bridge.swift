@@ -182,7 +182,7 @@ final class PanelBridge {
             if let run = dictation.lastRun, run.id != reportedRunID {
                 reportedRunID = run.id
                 model.preview = ""
-                model.set(run.usedRawFallback ? .failed(.cleanup) : .resting)
+                model.set(run.usedRawFallback ? .failed(.aiProvider) : .resting)
             } else if model.phase.isBusy {
                 model.preview = ""
                 model.set(.resting)
@@ -197,7 +197,7 @@ final class PanelBridge {
         // the provider or a key is the AI provider; everything else is the speech model.
         let lowered = message.lowercased()
         let cleanupWords = ["key", "provider", "api", "clean", "model responded", "http"]
-        return cleanupWords.contains(where: lowered.contains) ? .cleanup : .transcription
+        return cleanupWords.contains(where: lowered.contains) ? .aiProvider : .speechModel
     }
 
     private func captureTarget() {

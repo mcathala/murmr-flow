@@ -5,7 +5,7 @@ import SwiftUI
 /// It used to offer three fixed triggers. Three was an arbitrary number — it was what we
 /// had implemented — so the answer to "which key" was whichever of ours you disliked least.
 /// Now you press the key you want and the app takes it.
-struct KeysPane: View {
+struct HotkeysPane: View {
 
     let services: AppServices
 

@@ -50,8 +50,8 @@ final class PromptStore {
 
     /// Notetaker's preset. Still optional: a preset can be deleted, and pointing at a
     /// prompt that no longer exists would be worse than pointing at nothing.
-    var notePromptID: UUID? {
-        didSet { defaults.set(notePromptID?.uuidString, forKey: Key.note) }
+    var notetakerPromptID: UUID? {
+        didSet { defaults.set(notetakerPromptID?.uuidString, forKey: Key.note) }
     }
 
     private let defaults: UserDefaults
@@ -98,8 +98,8 @@ final class PromptStore {
 
         // Falls back to Meeting the same way dictation falls back to Default. Notetaker
         // having *a* prompt is not the same question as whether clean-up runs — that is
-        // `SettingsStore.noteCleanupEnabled`, one switch in one place.
-        self.notePromptID = loaded.first { $0.id == storedNote }?.id
+        // `SettingsStore.notetakerCleanupEnabled`, one switch in one place.
+        self.notetakerPromptID = loaded.first { $0.id == storedNote }?.id
             ?? loaded.first { $0.id == ID.meeting }?.id
 
         // Writes back the merged list, so a newly shipped built-in is stored once rather
@@ -113,8 +113,8 @@ final class PromptStore {
         presets.first { $0.id == dictationPromptID } ?? Self.defaultPreset
     }
 
-    var notePrompt: PromptPreset? {
-        notePromptID.flatMap { id in presets.first { $0.id == id } }
+    var notetakerPrompt: PromptPreset? {
+        notetakerPromptID.flatMap { id in presets.first { $0.id == id } }
     }
 
     func preset(id: UUID) -> PromptPreset? { presets.first { $0.id == id } }
@@ -192,7 +192,7 @@ final class PromptStore {
         // An assignment pointing at a deleted preset would silently fall back to Default
         // on the next dictation; move it now so the UI shows the truth.
         if dictationPromptID == preset.id { dictationPromptID = Self.defaultPreset.id }
-        if notePromptID == preset.id { notePromptID = Self.meetingPreset.id }
+        if notetakerPromptID == preset.id { notetakerPromptID = Self.meetingPreset.id }
         persist()
     }
 

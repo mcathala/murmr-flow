@@ -5,9 +5,9 @@ import SwiftUI
 /// Same rule as the clean-up pane: the one in use stays at the top, and nothing changes it
 /// except a button that says so. What has been proved about a model is stored with that
 /// model, so looking at the alternative does not discard it — and neither does relaunching.
-struct VoicePane: View {
+struct SpeechModelPane: View {
 
-    let models: ModelManager
+    let loader: SpeechModelLoader
     let dictation: DictationCoordinator
 
     private var speech: SpeechModelStore { dictation.speech }
@@ -17,7 +17,7 @@ struct VoicePane: View {
             SectionLabel(title: "In use")
             activeCard
 
-            if case .failed(let message) = models.state {
+            if case .failed(let message) = loader.state {
                 WarningRow(message: message)
             }
 
@@ -48,7 +48,7 @@ struct VoicePane: View {
                     Spacer(minLength: 0)
                 }
 
-                if case .downloading(let fraction) = models.state {
+                if case .downloading(let fraction) = loader.state {
                     ProgressView(value: fraction).controlSize(.small)
                 }
 
@@ -66,19 +66,19 @@ struct VoicePane: View {
     private var testRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Text(dictation.isTestingVoice
+                Text(dictation.isTestingSpeechModel
                      ? "Listening — say anything, then press Stop."
                      : "Say a few words and see what it hears.")
                     .font(.callout)
                 Spacer(minLength: 0)
-                Button(dictation.isTestingVoice ? "Stop" : "Test") {
-                    dictation.toggleVoiceTest()
+                Button(dictation.isTestingSpeechModel ? "Stop" : "Test") {
+                    dictation.toggleSpeechModelTest()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
             }
 
-            if dictation.isTestingVoice {
+            if dictation.isTestingSpeechModel {
                 ProgressView().controlSize(.small)
             } else if let heard = dictation.lastHeard {
                 Text("Heard \u{201C}\(heard)\u{201D}")
@@ -104,18 +104,18 @@ struct VoicePane: View {
                 }
                 availability(for: model)
                 Spacer(minLength: 0)
-                Button(ModelManager.isDownloaded(model) ? "Use" : "Download and use") {
+                Button(SpeechModelLoader.isDownloaded(model) ? "Use" : "Download and use") {
                     dictation.changeSpeechModel(model)
                 }
                 .controlSize(.small)
-                .disabled(models.state.isBusy)
+                .disabled(loader.state.isBusy)
             }
         }
     }
 
     @ViewBuilder
     private func availability(for model: SpeechModel) -> some View {
-        if ModelManager.isDownloaded(model) {
+        if SpeechModelLoader.isDownloaded(model) {
             if speech.verification(for: model).isWorking {
                 StatusChip(title: "Downloaded · tested", level: .ok)
             } else {
@@ -129,9 +129,9 @@ struct VoicePane: View {
     /// Three states, as everywhere else: not ready, ready but unproved, proved.
     @ViewBuilder
     private func badge(for model: SpeechModel) -> some View {
-        if dictation.isTestingVoice {
+        if dictation.isTestingSpeechModel {
             StatusChip(title: "Testing", level: .waiting)
-        } else if models.state.isBusy {
+        } else if loader.state.isBusy {
             StatusChip(title: "Getting ready", level: .waiting)
         } else {
             switch speech.verification(for: model) {
@@ -141,8 +141,8 @@ struct VoicePane: View {
                 StatusChip(title: "Not working", level: .bad)
             case .untested:
                 StatusChip(
-                    title: models.models != nil ? "Not tested" : "Not loaded",
-                    level: models.models != nil ? .waiting : .bad
+                    title: loader.models != nil ? "Not tested" : "Not loaded",
+                    level: loader.models != nil ? .waiting : .bad
                 )
             }
         }

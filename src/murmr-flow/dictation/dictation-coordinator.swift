@@ -101,7 +101,7 @@ final class DictationCoordinator {
 
     /// True while the microphone test is recording. The *result* lives with the model in
     /// `SpeechModelStore`, so it survives switching models and relaunching.
-    private(set) var isTestingVoice = false
+    private(set) var isTestingSpeechModel = false
 
     /// What the last test heard back, kept only for the run that produced it.
     private(set) var lastHeard: String?
@@ -118,7 +118,7 @@ final class DictationCoordinator {
     private(set) var preview: String = ""
 
     let settings: SettingsStore
-    let models: ModelManager
+    let loader: SpeechModelLoader
 
     private let recorder = MicRecorder()
 
@@ -152,7 +152,7 @@ final class DictationCoordinator {
 
     init(
         settings: SettingsStore = SettingsStore(),
-        models: ModelManager = ModelManager(),
+        loader: SpeechModelLoader = SpeechModelLoader(),
         transcriber: TranscriptionService = TranscriptionService(),
         history: HistoryStore = HistoryStore(),
         prompts: PromptStore = PromptStore(),
@@ -161,14 +161,14 @@ final class DictationCoordinator {
         devices: AudioDeviceStore? = nil
     ) {
         self.settings = settings
-        self.models = models
+        self.loader = loader
         self.transcriber = transcriber
         self.history = history
         self.prompts = prompts
         self.providers = providers
         self.speech = speech
         self.devices = devices
-        models.select(speech.activeModel)
+        loader.select(speech.activeModel)
     }
 
     // MARK: - Hotkey
@@ -217,13 +217,13 @@ final class DictationCoordinator {
         // Refuse rather than downloading mid-dictation. Loading is kicked off at launch,
         // so this only fires if that hasn't finished — and holding the key through a
         // ~600 MB download would look like the app had hung.
-        if models.models == nil {
+        if loader.models == nil {
             // A fast load deliberately shows no busy state, so check the flag too.
-            if models.isPreparing {
+            if loader.isPreparing {
                 stage = .failed("The speech model is still getting ready.")
                 return
             }
-            switch models.state {
+            switch loader.state {
             case .preparing:
                 stage = .failed("The speech model is still getting ready.")
             case .downloading(let fraction):
@@ -389,8 +389,8 @@ final class DictationCoordinator {
 
     private func ensureModelLoaded() async throws {
         if await transcriber.isReady { return }
-        if models.models == nil { await models.prepare() }
-        guard let loaded = models.models else {
+        if loader.models == nil { await loader.prepare() }
+        guard let loaded = loader.models else {
             throw TranscriptionService.ServiceError.modelsNotLoaded
         }
         try await transcriber.load(loaded)
@@ -409,10 +409,10 @@ final class DictationCoordinator {
     func changeSpeechModel(_ model: SpeechModel) {
         guard model != speech.activeModel else { return }
         speech.setActive(model)
-        models.select(model)
+        loader.select(model)
         Task {
             await transcriber.unload()
-            if ModelManager.isDownloaded(model) {
+            if SpeechModelLoader.isDownloaded(model) {
                 await warmUp()
             }
         }
@@ -420,9 +420,9 @@ final class DictationCoordinator {
 
     /// Download and load ahead of first use, so the first dictation isn't slow.
     func warmUp() async {
-        models.select(speech.activeModel)
-        await models.prepare()
-        if let loaded = models.models {
+        loader.select(speech.activeModel)
+        await loader.prepare()
+        if let loaded = loader.models {
             try? await transcriber.load(loaded)
         }
     }
@@ -533,9 +533,9 @@ final class DictationCoordinator {
     /// reported ready as soon as its files were on disk, which said nothing about whether
     /// inference runs, which microphone is selected, or whether that microphone is muted.
     /// The first time you found out was your first real dictation.
-    func toggleVoiceTest() {
-        if isTestingVoice {
-            Task { await finishVoiceTest() }
+    func toggleSpeechModelTest() {
+        if isTestingSpeechModel {
+            Task { await finishSpeechModelTest() }
             return
         }
 
@@ -551,7 +551,7 @@ final class DictationCoordinator {
             recorder.inputDeviceID = devices?.selectedInputDeviceID
             try recorder.start()
             lastHeard = nil
-            isTestingVoice = true
+            isTestingSpeechModel = true
         } catch {
             speech.setVerification(
                 .failed(error.localizedDescription), for: speech.activeModel
@@ -559,11 +559,11 @@ final class DictationCoordinator {
         }
     }
 
-    private func finishVoiceTest() async {
+    private func finishSpeechModelTest() async {
         let model = speech.activeModel
         let clock = ContinuousClock()
         let started = clock.now
-        defer { isTestingVoice = false }
+        defer { isTestingSpeechModel = false }
 
         do {
             let capture = try recorder.finishCapture()

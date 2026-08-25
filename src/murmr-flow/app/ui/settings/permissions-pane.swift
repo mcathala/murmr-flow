@@ -9,7 +9,7 @@ struct PermissionsPane: View {
 
     let permissions: PermissionManager
     @Bindable var settings: SettingsStore
-    let notes: MeetingStore
+    let notes: NoteStore
 
     var body: some View {
         PaneScroll(title: "Permissions") {
@@ -62,7 +62,7 @@ struct PermissionsPane: View {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Where notes are saved").font(.callout.weight(.medium))
-                        Text(MeetingStore.folder.path(percentEncoded: false))
+                        Text(NoteStore.folder.path(percentEncoded: false))
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(2)

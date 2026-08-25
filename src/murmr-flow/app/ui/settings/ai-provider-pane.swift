@@ -9,7 +9,7 @@ import SwiftUI
 ///
 /// Everything a provider knows now lives with that provider: endpoint, model and whether
 /// it has been proved. Editing one leaves the other alone.
-struct CleanupPane: View {
+struct AIProviderPane: View {
 
     @Bindable var settings: SettingsStore
     let dictation: DictationCoordinator
@@ -27,11 +27,11 @@ struct CleanupPane: View {
             }
 
             SettingRow(title: "Clean up meeting notes") {
-                Toggle("", isOn: $settings.noteCleanupEnabled).labelsHidden()
+                Toggle("", isOn: $settings.notetakerCleanupEnabled).labelsHidden()
             }
 
             // The provider is shared, so it is worth setting up if *either* is on.
-            if settings.cleanupEnabled || settings.noteCleanupEnabled {
+            if settings.cleanupEnabled || settings.notetakerCleanupEnabled {
                 SectionLabel(title: "In use")
                 row(providers.activeEntry, isActive: true)
 
@@ -60,7 +60,7 @@ struct CleanupPane: View {
     /// Names only what is actually switched on, so the warning can't claim dictation is
     /// affected when only notes are.
     private static func affected(_ settings: SettingsStore) -> String {
-        switch (settings.cleanupEnabled, settings.noteCleanupEnabled) {
+        switch (settings.cleanupEnabled, settings.notetakerCleanupEnabled) {
         case (true, true): "dictation and meeting notes"
         case (true, false): "dictation"
         default: "meeting notes"

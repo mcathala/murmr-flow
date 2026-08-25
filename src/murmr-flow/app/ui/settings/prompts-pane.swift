@@ -23,7 +23,7 @@ struct PromptsPane: View {
             }
             .controlSize(.small)
 
-            if prompts.notePrompt == nil {
+            if prompts.notetakerPrompt == nil {
                 Text("No prompt is assigned to Notetaker, so meetings are saved exactly "
                      + "as transcribed.")
                     .font(.caption)
@@ -42,7 +42,7 @@ struct PromptsPane: View {
                     if prompts.dictationPromptID == preset.id {
                         Badge(text: "Dictation", symbol: "mic.fill")
                     }
-                    if prompts.notePromptID == preset.id {
+                    if prompts.notetakerPromptID == preset.id {
                         Badge(text: "Notetaker", symbol: "text.document")
                     }
                     Spacer(minLength: 0)
@@ -85,9 +85,9 @@ struct PromptsPane: View {
                     .controlSize(.small)
                     .disabled(prompts.dictationPromptID == preset.id)
 
-                Button("Use for Notetaker") { prompts.notePromptID = preset.id }
+                Button("Use for Notetaker") { prompts.notetakerPromptID = preset.id }
                     .controlSize(.small)
-                    .disabled(prompts.notePromptID == preset.id)
+                    .disabled(prompts.notetakerPromptID == preset.id)
 
                 Spacer(minLength: 0)
 

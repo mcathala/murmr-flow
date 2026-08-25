@@ -4,9 +4,9 @@ import SwiftUI
 ///
 /// We recorded meetings and wrote files, then abandoned them — the only thing the app
 /// offered afterwards was "Show in Finder". This is where you read them.
-struct NotesView: View {
+struct NotetakerView: View {
 
-    let notes: MeetingStore
+    let notes: NoteStore
     let meetings: MeetingCoordinator
     let settings: SettingsStore
     let prompts: PromptStore
@@ -114,10 +114,10 @@ struct NotesView: View {
                     .controlSize(.small)
             } else if meetings.stage.isBusy {
                 ProgressView().controlSize(.small)
-            } else if let note = prompts.notePrompt, settings.noteCleanupEnabled {
+            } else if let note = prompts.notetakerPrompt, settings.notetakerCleanupEnabled {
                 Menu(note.name) {
                     ForEach(prompts.presets) { preset in
-                        Button(preset.name) { prompts.notePromptID = preset.id }
+                        Button(preset.name) { prompts.notetakerPromptID = preset.id }
                     }
                 }
                 .menuStyle(.borderlessButton)

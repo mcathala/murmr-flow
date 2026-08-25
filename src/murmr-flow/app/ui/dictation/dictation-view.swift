@@ -5,7 +5,7 @@ import SwiftUI
 /// The Cleaned/Raw toggle is the point of this screen. Until the raw transcript was kept,
 /// there was no way to tell whether the model had improved your words or mangled them —
 /// and no way to try a different prompt without saying it all again.
-struct DictaphoneView: View {
+struct DictationView: View {
 
     let dictation: DictationCoordinator
     let history: HistoryStore

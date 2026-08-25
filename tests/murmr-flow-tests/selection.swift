@@ -131,7 +131,7 @@ struct SidebarSnapshotTests {
         }
 
         let view = VStack(alignment: .leading, spacing: 2) {
-            ForEach(top, id: \.0) { row($0.0, $0.1, selected: $0.0 == "Dictaphone") }
+            ForEach(top, id: \.0) { row($0.0, $0.1, selected: $0.0 == "Dictation") }
 
             Text("Settings")
                 .font(Theme.Text.label)

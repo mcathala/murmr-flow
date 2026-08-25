@@ -13,18 +13,18 @@ struct MainWindow: View {
     /// and the keyboard shortcut can move it from outside the view.
     enum Route: Hashable {
         case home
-        case dictaphone
-        case notes
+        case dictation
+        case notetaker
         case insights
         case settings(SettingsPane)
 
-        static let top: [Route] = [.home, .dictaphone, .notes, .insights]
+        static let top: [Route] = [.home, .dictation, .notetaker, .insights]
 
         var label: String {
             switch self {
             case .home: "Home"
-            case .dictaphone: "Dictation"
-            case .notes: "Notetaker"
+            case .dictation: "Dictation"
+            case .notetaker: "Notetaker"
             case .insights: "Insights"
             case .settings(let pane): pane.label
             }
@@ -33,8 +33,8 @@ struct MainWindow: View {
         var symbol: String {
             switch self {
             case .home: "square.grid.2x2"
-            case .dictaphone: "mic"
-            case .notes: "text.document"
+            case .dictation: "mic"
+            case .notetaker: "text.document"
             case .insights: "chart.bar"
             case .settings(let pane): pane.symbol
             }
@@ -148,14 +148,14 @@ struct MainWindow: View {
         switch services.route {
         case .home:
             HomeView(services: services, onOpen: { services.route = $0 })
-        case .dictaphone:
-            DictaphoneView(
+        case .dictation:
+            DictationView(
                 dictation: services.dictation,
                 history: services.history,
                 prompts: services.prompts
             )
-        case .notes:
-            NotesView(
+        case .notetaker:
+            NotetakerView(
                 notes: services.notes,
                 meetings: services.meetings,
                 settings: services.settings,

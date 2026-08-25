@@ -9,7 +9,7 @@ import SwiftUI
 /// The rule every pane follows: **a healthy install shows almost nothing.** No captions
 /// restating what a toggle does, no rows confirming that something is fine.
 enum SettingsPane: String, Hashable, CaseIterable, Identifiable {
-    case voice, cleanup, keys, prompts, permissions, data
+    case speechModel, aiProvider, hotkeys, prompts, permissions, data
 
     var id: String { rawValue }
 
@@ -23,9 +23,9 @@ enum SettingsPane: String, Hashable, CaseIterable, Identifiable {
     /// bought us.
     var label: String {
         switch self {
-        case .voice: "Speech model"
-        case .cleanup: "AI provider"
-        case .keys: "Hotkeys"
+        case .speechModel: "Speech model"
+        case .aiProvider: "AI provider"
+        case .hotkeys: "Hotkeys"
         case .prompts: "Prompts"
         case .permissions: "Permissions"
         case .data: "Data"
@@ -34,9 +34,9 @@ enum SettingsPane: String, Hashable, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .voice: "waveform"
-        case .cleanup: "sparkles"
-        case .keys: "keyboard"
+        case .speechModel: "waveform"
+        case .aiProvider: "sparkles"
+        case .hotkeys: "keyboard"
         case .prompts: "text.quote"
         case .permissions: "lock.shield"
         case .data: "externaldrive"
@@ -51,12 +51,12 @@ struct SettingsPaneView: View {
 
     var body: some View {
         switch pane {
-        case .voice:
-            VoicePane(models: services.dictation.models, dictation: services.dictation)
-        case .cleanup:
-            CleanupPane(settings: services.settings, dictation: services.dictation)
-        case .keys:
-            KeysPane(services: services)
+        case .speechModel:
+            SpeechModelPane(loader: services.dictation.loader, dictation: services.dictation)
+        case .aiProvider:
+            AIProviderPane(settings: services.settings, dictation: services.dictation)
+        case .hotkeys:
+            HotkeysPane(services: services)
         case .prompts:
             PromptsPane(prompts: services.prompts)
         case .permissions:

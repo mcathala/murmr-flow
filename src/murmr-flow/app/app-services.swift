@@ -21,16 +21,16 @@ final class AppServices {
     var route: MainWindow.Route = .home
 
     /// One settings store, one model, one transcriber — shared by both modes. Two
-    /// `ModelManager`s would each load their own copy of the model, and two
+    /// `SpeechModelLoader`s would each load their own copy of the model, and two
     /// `SettingsStore`s would not see each other's changes.
     let settings = SettingsStore()
     let history = HistoryStore()
-    let notes = MeetingStore()
+    let notes = NoteStore()
     let prompts = PromptStore()
     let providers = ProviderStore()
     let speech = SpeechModelStore()
     let audioDevices: AudioDeviceStore
-    private let models = ModelManager()
+    private let loader = SpeechModelLoader()
     private let transcriber = TranscriptionService()
 
     let dictation: DictationCoordinator
@@ -54,12 +54,12 @@ final class AppServices {
         let devices = AudioDeviceStore(settings: settings)
         audioDevices = devices
         dictation = DictationCoordinator(
-            settings: settings, models: models, transcriber: transcriber,
+            settings: settings, loader: loader, transcriber: transcriber,
             history: history, prompts: prompts, providers: providers,
             speech: speech, devices: devices
         )
         meetings = MeetingCoordinator(
-            models: models, transcriber: transcriber, notes: notes,
+            loader: loader, transcriber: transcriber, notes: notes,
             settings: settings, prompts: prompts, providers: providers,
             devices: devices
         )
@@ -114,7 +114,7 @@ final class AppServices {
         Task {
             Self.log.notice("warmUp starting")
             await dictation.warmUp()
-            Self.log.notice("warmUp finished, state=\(String(describing: self.dictation.models.state), privacy: .public)")
+            Self.log.notice("warmUp finished, state=\(String(describing: self.dictation.loader.state), privacy: .public)")
         }
     }
 

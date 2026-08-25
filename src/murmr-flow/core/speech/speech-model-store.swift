@@ -8,7 +8,7 @@ import Observation
 /// and a relaunch discarded it regardless.
 ///
 /// Unlike a provider there is nothing to configure per model, so this holds only the
-/// active choice and the verifications. Download state stays in `ModelManager`, which is
+/// active choice and the verifications. Download state stays in `SpeechModelLoader`, which is
 /// where the work happens.
 @MainActor
 @Observable

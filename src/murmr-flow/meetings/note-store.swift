@@ -14,7 +14,7 @@ import OSLog
 /// app honest about that.
 @MainActor
 @Observable
-final class MeetingStore {
+final class NoteStore {
 
     private static let log = Logger(subsystem: "app.murmr.MurmrFlow", category: "notes")
 
