@@ -2,9 +2,9 @@ import SwiftUI
 
 /// The app window: a sidebar and one section at a time.
 ///
-/// Settings lives **in** the sidebar, nested under its own heading, rather than in a
-/// separate Settings window. One window means one place to be, and the four sections are
-/// visible as a list instead of hidden behind a keystroke. ⌘, selects the first of them.
+/// Settings lives **in** the sidebar, as a level you enter, rather than in a separate
+/// Settings window. One window means one place to be, and ⌘, enters that level rather
+/// than opening a second scene.
 struct MainWindow: View {
 
     let services: AppServices
@@ -38,6 +38,12 @@ struct MainWindow: View {
             case .insights: "chart.bar"
             case .settings(let pane): pane.symbol
             }
+        }
+
+        /// Which of the sidebar's two levels this route belongs to.
+        var isSettings: Bool {
+            if case .settings = self { return true }
+            return false
         }
     }
 
@@ -88,59 +94,109 @@ struct MainWindow: View {
             // Land on the thing that needs attention rather than hiding a broken
             // permission behind a row the user has no reason to click.
             if !services.permissions.allGranted {
-                services.route = .settings(.privacyData)
+                services.openSettings(.privacyData)
             }
         }
     }
 
+    /// Five rows, whichever level you are on.
+    ///
+    /// The list is **swapped**, not grown. Settings used to be four more rows under a
+    /// heading, which made the column eight long and put configuration ahead of the app in
+    /// the one place you navigate from. A disclosure group would not have fixed it: it
+    /// still shows nine rows once open, and it stays open.
+    ///
+    /// The level is **derived** from the route rather than stored, so there is no second
+    /// source of truth to keep in step and none of the navigation chrome this window went
+    /// to such lengths to remove — `.settings(_)` draws one list, anything else draws the
+    /// other. `AppServices.openSettings` is what remembers where to come back to.
+    ///
     /// Selection is drawn by `SelectableRow`, not by `List`. The system highlight is
     /// `controlAccentColor` — a system-wide setting no app can override — so a selected row
     /// arrived bright blue in the middle of a navy and gold interface.
     private var sidebar: some View {
         List {
-                ForEach(Route.top, id: \.self) { route in
-                    sidebarRow(route.label, symbol: route.symbol, route: route)
-                }
-
-                Section {
-                    ForEach(SettingsPane.allCases) { pane in
-                        sidebarRow(pane.label, symbol: pane.symbol, route: .settings(pane))
-                    }
-                } header: {
-                    Text("Settings")
-                        .font(Theme.Text.label)
-                        .tracking(Theme.labelTracking)
-                        .textCase(.uppercase)
-                        .foregroundStyle(Theme.Palette.faint)
-                }
+            if services.route.isSettings {
+                settingsLevel
+            } else {
+                topLevel
             }
+        }
         .listStyle(.sidebar)
         // Hidden, or `List` paints its own opaque sidebar material and the window ends up
         // with a grey column beside a navy one.
         .scrollContentBackground(.hidden)
     }
 
-    private func sidebarRow(_ label: String, symbol: String, route: Route) -> some View {
-        SelectableRow(isSelected: services.route == route) {
+    @ViewBuilder
+    private var topLevel: some View {
+        ForEach(Route.top, id: \.self) { route in
+            sidebarRow(
+                route.label, symbol: route.symbol, isSelected: services.route == route
+            ) {
+                services.route = route
+            }
+        }
+
+        // Not a `Route` of its own. There is no detail view for "Settings" — only for the
+        // sections inside it — so a case here would be a state that can never be drawn.
+        sidebarRow(
+            "Settings", symbol: "gearshape", isSelected: false, trailing: "chevron.right"
+        ) {
+            services.openSettings()
+        }
+    }
+
+    @ViewBuilder
+    private var settingsLevel: some View {
+        // The way out, and the name of the level you are on. The chevron sits in the icon
+        // column, so the four labels below line up with it rather than starting further left.
+        sidebarRow("Settings", symbol: "chevron.left", isSelected: false, isTitle: true) {
+            services.closeSettings()
+        }
+
+        ForEach(SettingsPane.allCases) { pane in
+            sidebarRow(
+                pane.label, symbol: pane.symbol,
+                isSelected: services.route == .settings(pane)
+            ) {
+                services.route = .settings(pane)
+            }
+        }
+    }
+
+    private func sidebarRow(
+        _ label: String,
+        symbol: String,
+        isSelected: Bool,
+        trailing: String? = nil,
+        isTitle: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        SelectableRow(isSelected: isSelected) {
             HStack(spacing: 9) {
                 Image(systemName: symbol)
                     .font(.system(size: 12.5))
                     // A fixed width, so the labels line up whatever the glyph's shape.
                     .frame(width: 17)
-                    .foregroundStyle(
-                        services.route == route ? Theme.Palette.gold : Theme.Palette.muted
-                    )
+                    .foregroundStyle(isSelected ? Theme.Palette.gold : Theme.Palette.muted)
                 Text(label)
-                    .font(Theme.Text.body)
+                    .font(isTitle ? Theme.Text.bodyStrong : Theme.Text.body)
                     .foregroundStyle(
-                        services.route == route ? Theme.Palette.text : Theme.Palette.muted
+                        isSelected || isTitle ? Theme.Palette.text : Theme.Palette.muted
                     )
+                Spacer(minLength: 0)
+                if let trailing {
+                    Image(systemName: trailing)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.Palette.faint)
+                }
             }
         }
         .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
-        .onTapGesture { services.route = route }
+        .onTapGesture(perform: action)
     }
 
     @ViewBuilder

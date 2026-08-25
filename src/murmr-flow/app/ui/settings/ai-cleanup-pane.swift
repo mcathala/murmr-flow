@@ -11,6 +11,17 @@ import SwiftUI
 /// provider** is still what Home's status chip reports and what the panel names when a
 /// clean-up fails, because that is a claim about the machine, not about the job.
 ///
+/// Three groups, and **tabs rather than three headings in one scroll.** Merging the prompts
+/// in gave this section eight cards, two of which open into editors, under `SectionLabel`s
+/// that are 9.5pt uppercase in the faintest colour in the palette — a hint, not a division.
+/// One tab at a time is a comfortable screen. It is the only section with a tab bar; see
+/// `PaneTabs` for when that is the right call.
+///
+/// **The switches sit above the tabs, not inside one**, because they govern all three. So
+/// does the not-ready warning: a provider with no key breaks prompts and spelling too, and
+/// hiding that behind whichever tab happens not to be showing would be the one failure this
+/// pane must never keep quiet about.
+///
 /// **One rule for the providers: nothing changes the active one except a button that says
 /// so.** The previous version made tapping a row to look at it the same action as putting
 /// it into service, so adding a key to a second endpoint took the working one out of use —
@@ -28,7 +39,29 @@ struct AICleanupPane: View {
     /// the whole point.
     @State private var editing: String?
 
+    /// Deliberately not remembered across visits. Landing on the provider every time is
+    /// predictable; coming back to whichever tab you left three days ago is not.
+    @State private var facet: Facet = .provider
+
     private var providers: ProviderStore { dictation.providers }
+
+    /// The three groups. Named `Facet` rather than `Group` or `Tab`, both of which are
+    /// SwiftUI's.
+    private enum Facet: String, CaseIterable, Identifiable {
+        case provider, prompts, spelling
+
+        var id: String { rawValue }
+
+        /// One word each, so the bar stays a bar. "Spelling" is the card called "Words to
+        /// spell my way", which is too long to be a tab.
+        var title: String {
+            switch self {
+            case .provider: "Provider"
+            case .prompts: "Prompts"
+            case .spelling: "Spelling"
+            }
+        }
+    }
 
     var body: some View {
         PaneScroll(title: "AI clean-up") {
@@ -44,18 +77,8 @@ struct AICleanupPane: View {
             // nothing at all if neither is: the provider is shared, and so are the
             // prompts and the custom words — both are read only while rendering a
             // clean-up prompt. With clean-up off they would be controls for a stage that
-            // never runs.
+            // never runs, so there is no tab bar either.
             if settings.cleanupEnabled || settings.notetakerCleanupEnabled {
-                SectionLabel(title: "AI provider")
-                row(providers.activeEntry, isActive: true)
-
-                if !providers.others.isEmpty {
-                    SectionLabel(title: "Other providers")
-                    ForEach(providers.others) { entry in
-                        row(entry, isActive: false)
-                    }
-                }
-
                 if !providers.isUsable(providers.activeID) {
                     WarningRow(
                         message: "\(providers.activeEntry.displayName) isn't ready, so "
@@ -63,11 +86,24 @@ struct AICleanupPane: View {
                     )
                 }
 
-                SectionLabel(title: "Prompts")
-                PromptsSection(prompts: prompts)
+                PaneTabs(tabs: Facet.allCases, title: \.title, selection: $facet)
 
-                SectionLabel(title: "Words to spell my way")
-                CustomWordsCard(settings: settings)
+                switch facet {
+                case .provider:
+                    SectionLabel(title: "In use")
+                    row(providers.activeEntry, isActive: true)
+
+                    if !providers.others.isEmpty {
+                        SectionLabel(title: "Other providers")
+                        ForEach(providers.others) { entry in
+                            row(entry, isActive: false)
+                        }
+                    }
+                case .prompts:
+                    PromptsSection(prompts: prompts)
+                case .spelling:
+                    CustomWordsCard(settings: settings)
+                }
             } else {
                 Text("Dictation and meeting notes both keep the raw transcript. No "
                      + "provider, no key, no network.")

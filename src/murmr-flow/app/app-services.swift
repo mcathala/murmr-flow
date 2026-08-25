@@ -20,6 +20,14 @@ final class AppServices {
     /// menu bar and the ⌘, shortcut can move it from outside the view.
     var route: MainWindow.Route = .home
 
+    /// Where leaving Settings returns you.
+    ///
+    /// The sidebar swaps its list rather than growing one, so Settings is a level you
+    /// enter and leave. Three places used to set `route` to a settings pane directly — the
+    /// sidebar row, ⌘, and the menu bar — and none of them could have known where "back"
+    /// should go. They all call `openSettings` now, which is the only thing that records it.
+    private(set) var routeBeforeSettings: MainWindow.Route = .home
+
     /// One settings store, one model, one transcriber — shared by both modes. Two
     /// `SpeechModelLoader`s would each load their own copy of the model, and two
     /// `SettingsStore`s would not see each other's changes.
@@ -63,6 +71,20 @@ final class AppServices {
             settings: settings, prompts: prompts, providers: providers,
             devices: devices
         )
+    }
+
+    // MARK: - Settings level
+
+    /// Enters Settings, remembering what to come back to. Re-entering from inside Settings
+    /// leaves that memory alone, or moving between two panes would make Home the only way
+    /// out of every one of them.
+    func openSettings(_ pane: SettingsPane = .speechModel) {
+        if !route.isSettings { routeBeforeSettings = route }
+        route = .settings(pane)
+    }
+
+    func closeSettings() {
+        route = routeBeforeSettings
     }
 
     // MARK: - Launch

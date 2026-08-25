@@ -103,7 +103,7 @@ struct RowSelectionTests {
 @Suite("Sidebar snapshot")
 struct SidebarSnapshotTests {
 
-    @Test("render the rows, selected and not")
+    @Test("render both levels, selected and not")
     func render() throws {
         guard let directory = ProcessInfo.processInfo.environment["MURMR_SNAPSHOT_DIR"] else {
             return
@@ -112,10 +112,16 @@ struct SidebarSnapshotTests {
         // The app's own labels, not stand-ins — the point is to catch a label that does not
         // fit. "Voice transcription" truncated to "Voice transcri…" in the running app and
         // a snapshot with invented rows would never have shown it.
+        //
+        // Both levels, because the sidebar swaps its list rather than growing one: five rows
+        // at the top, five in Settings, and either could be the one that overflows.
         let top: [(String, String)] = MainWindow.Route.top.map { ($0.label, $0.symbol) }
         let settings: [(String, String)] = SettingsPane.allCases.map { ($0.label, $0.symbol) }
 
-        func row(_ label: String, _ symbol: String, selected: Bool) -> some View {
+        func row(
+            _ label: String, _ symbol: String, selected: Bool,
+            trailing: String? = nil, isTitle: Bool = false
+        ) -> some View {
             SelectableRow(isSelected: selected) {
                 HStack(spacing: 9) {
                     Image(systemName: symbol)
@@ -123,30 +129,41 @@ struct SidebarSnapshotTests {
                         .frame(width: 17)
                         .foregroundStyle(selected ? Theme.Palette.gold : Theme.Palette.muted)
                     Text(label)
-                        .font(Theme.Text.body)
-                        .foregroundStyle(selected ? Theme.Palette.text : Theme.Palette.muted)
+                        .font(isTitle ? Theme.Text.bodyStrong : Theme.Text.body)
+                        .foregroundStyle(
+                            selected || isTitle ? Theme.Palette.text : Theme.Palette.muted
+                        )
                         .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let trailing {
+                        Image(systemName: trailing)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.Palette.faint)
+                    }
                 }
             }
         }
 
-        let view = VStack(alignment: .leading, spacing: 2) {
-            ForEach(top, id: \.0) { row($0.0, $0.1, selected: $0.0 == "Dictation") }
-
-            Text("Settings")
-                .font(Theme.Text.label)
-                .tracking(Theme.labelTracking)
-                .textCase(.uppercase)
-                .foregroundStyle(Theme.Palette.faint)
-                .padding(.top, 12)
-                .padding(.leading, 9)
-
-            ForEach(settings, id: \.0) { row($0.0, $0.1, selected: false) }
+        func column(@ViewBuilder _ rows: () -> some View) -> some View {
+            VStack(alignment: .leading, spacing: 2) { rows() }
+                // The sidebar's default width, so a label that does not fit shows here too.
+                .frame(width: 198)
+                .padding(.vertical, 8)
+                .glassColumn(.thick)
         }
-        // The sidebar's default width, so a label that does not fit shows here too.
-        .frame(width: 198)
-        .padding(.vertical, 8)
-        .glassColumn(.thick)
+
+        let view = HStack(spacing: 12) {
+            column {
+                ForEach(top, id: \.0) { row($0.0, $0.1, selected: $0.0 == "Dictation") }
+                row("Settings", "gearshape", selected: false, trailing: "chevron.right")
+            }
+            column {
+                row("Settings", "chevron.left", selected: false, isTitle: true)
+                ForEach(settings, id: \.0) {
+                    row($0.0, $0.1, selected: $0.0 == "AI clean-up")
+                }
+            }
+        }
         .background(InkGround())
 
         let renderer = ImageRenderer(content: view.environment(\.colorScheme, .dark))

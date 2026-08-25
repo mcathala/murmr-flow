@@ -35,7 +35,7 @@ struct MurmrFlowApp: App {
             // with it for presentation.
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
-                    services.route = .settings(.speechModel)
+                    services.openSettings()
                     openWindow(id: Self.mainWindowID)
                 }
                 .keyboardShortcut(",", modifiers: .command)
