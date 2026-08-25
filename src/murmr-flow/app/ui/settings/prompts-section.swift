@@ -54,7 +54,7 @@ struct PromptsSection: View {
                         Badge(text: "Notetaker", symbol: "text.document")
                     }
                     Spacer(minLength: 0)
-                    Button(isOpen ? "Close" : "Edit") {
+                    Button(isOpen ? "Done" : "Edit") {
                         selected = isOpen ? nil : preset.id
                     }
                     .controlSize(.small)

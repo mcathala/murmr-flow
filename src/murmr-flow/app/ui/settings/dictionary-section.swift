@@ -85,7 +85,7 @@ struct DictionarySection: View {
 
                     Badge(text: entry.scope.label, symbol: symbol(entry.scope))
 
-                    Button(isOpen ? "Close" : "Edit") {
+                    Button(isOpen ? "Done" : "Edit") {
                         open = isOpen ? nil : entry.id
                     }
                     .controlSize(.small)
