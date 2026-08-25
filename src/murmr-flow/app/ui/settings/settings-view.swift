@@ -66,7 +66,8 @@ struct SettingsPaneView: View {
             AICleanupPane(
                 settings: services.settings,
                 dictation: services.dictation,
-                prompts: services.prompts
+                prompts: services.prompts,
+                dictionary: services.dictionary
             )
         case .hotkeys:
             HotkeysPane(services: services)

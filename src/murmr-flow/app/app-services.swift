@@ -36,6 +36,7 @@ final class AppServices {
     let notes = NoteStore()
     let prompts = PromptStore()
     let providers = ProviderStore()
+    let dictionary = DictionaryStore()
     let speech = SpeechModelStore()
     let audioDevices: AudioDeviceStore
     private let loader = SpeechModelLoader()
@@ -64,12 +65,12 @@ final class AppServices {
         dictation = DictationCoordinator(
             settings: settings, loader: loader, transcriber: transcriber,
             history: history, prompts: prompts, providers: providers,
-            speech: speech, devices: devices
+            speech: speech, dictionary: dictionary, devices: devices
         )
         meetings = MeetingCoordinator(
             loader: loader, transcriber: transcriber, notes: notes,
             settings: settings, prompts: prompts, providers: providers,
-            devices: devices
+            dictionary: dictionary, devices: devices
         )
     }
 

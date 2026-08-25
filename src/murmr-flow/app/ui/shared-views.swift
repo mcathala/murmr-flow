@@ -22,14 +22,18 @@ struct SectionLabel: View {
     }
 }
 
-/// Tabs for a section that holds three or more groups you only work in one at a time.
+/// A segmented control: one of a small closed set, chosen by tapping it.
 ///
-/// **The rule for reaching for this: three groups with real content, and you are only ever
-/// in one of them.** AI clean-up qualifies — provider, prompts, spelling. Nothing else does
-/// yet: Speech model is one list, Hotkeys is two keys and two toggles, and Privacy & data
-/// has four groups that are each two lines, where seeing the permissions and the delete
-/// buttons at once is worth more than hiding either. A section with one subject must not
-/// sprout an empty tab bar.
+/// Two jobs. As a **tab bar** at the top of a section, and as an inline **picker** for a
+/// value with three or four possibilities — a dictionary entry's scope. Same shape both
+/// times, because both are "these are the options, this is the one".
+///
+/// **The rule for using it as a tab bar: three groups with real content, and you are only
+/// ever in one of them.** AI clean-up qualifies — provider, prompts, dictionary. Nothing
+/// else does yet: Speech model is one list, Hotkeys is two keys and two toggles, and
+/// Privacy & data has four groups that are each two lines, where seeing the permissions and
+/// the delete buttons at once is worth more than hiding either. A section with one subject
+/// must not sprout an empty tab bar.
 ///
 /// A `SectionLabel` is 9.5pt uppercase in the faintest colour in the palette, which is a
 /// hint rather than a division. That is fine for two groups in one scroll and was not
@@ -47,6 +51,8 @@ struct PaneTabs<Tab: Hashable & Identifiable>: View {
     let tabs: [Tab]
     let title: (Tab) -> String
     @Binding var selection: Tab
+    /// Centred as a tab bar, leading as an inline picker sitting after its label.
+    var alignment: Alignment = .center
 
     var body: some View {
         HStack(spacing: 2) {
@@ -94,11 +100,11 @@ struct PaneTabs<Tab: Hashable & Identifiable>: View {
                         .strokeBorder(Theme.Palette.hairline, lineWidth: 1)
                 }
         }
-        // The track hugs the tabs and the whole control is centred. Stretching it to the
-        // column's width left the labels in the top-left corner of a mostly empty box —
-        // the one element in a pane of full-width cards that had to invent something to
-        // do with the space.
-        .frame(maxWidth: .infinity, alignment: .center)
+        // The track hugs the tabs, and the control is placed rather than stretched.
+        // Filling the column's width left the labels in the top-left corner of a mostly
+        // empty box — the one element in a pane of full-width cards that had to invent
+        // something to do with the space.
+        .frame(maxWidth: .infinity, alignment: alignment)
     }
 }
 

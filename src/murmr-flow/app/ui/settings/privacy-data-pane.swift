@@ -16,6 +16,13 @@ import SwiftUI
 /// that fixes it. And **the two halves of Delete are not equally recoverable**, so it says
 /// so rather than treating them as the same action: a note is a file and goes to the
 /// Trash, while a dictation is a row in a log with nowhere to go.
+///
+/// Two captions were dropped on purpose, and one of them was a real claim: audio is
+/// discarded once a note is written, which was said here as a footnote to a delete button —
+/// *"deleting a note here does not remove the audio"* — phrased so defensively it invited
+/// the question it answered. The fact is still true (`MeetingCoordinator` discards the
+/// recording either way) and is worth stating as a feature somewhere it reads as one. It is
+/// not currently stated anywhere a user can see.
 struct PrivacyDataPane: View {
 
     let permissions: PermissionManager
@@ -97,11 +104,11 @@ struct PrivacyDataPane: View {
             }
         }
 
-        // System audio has no API to query, so there is nothing honest to show until
-        // a meeting actually asks for it. Saying "granted" here would be a guess.
-        Text("System audio is requested the first time you record a meeting.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        // System audio is deliberately not mentioned. It has no API to query, so there was
+        // never anything honest to show — and the line that used to say it would be asked
+        // for later was a promise about the future in a pane whose rule is that anything
+        // fine collapses to one line. `SystemAudioRecorder` already produces the real
+        // message at the moment it fails, which is the only place it can be acted on.
     }
 
     // MARK: - Where notes are saved
@@ -177,12 +184,6 @@ struct PrivacyDataPane: View {
                     .disabled(isEmpty)
             }
         }
-
-        Text("Deleting a note here does not remove the audio — that was already "
-             + "discarded when the note was written.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var isEmpty: Bool {

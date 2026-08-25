@@ -38,20 +38,29 @@ actor CleanupService {
         config: ProviderConfig?,
         prompt: PromptLibrary,
         context: PromptLibrary.Context,
+        dictionary: [DictionaryEntry] = [],
         timeout: TimeInterval = CleanupService.dictationTimeout
     ) async -> Outcome {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .raw(transcript, note: nil) }
 
+        // The dictionary is applied here rather than in the caller, because this is the one
+        // seam every path goes through — and because an exact replacement has to survive
+        // `config == nil`. Swapping a spoken phrase for stored text is local string work
+        // that needs no provider, so clean-up being off must not switch it off too.
+        let expansion = DictionaryExpander.expand(trimmed, using: dictionary)
+
         guard let config else {
-            return .raw(transcript, note: "No cleanup provider configured.")
+            return .raw(expansion.resolved, note: "No cleanup provider configured.")
         }
         guard config.apiKey != nil else {
-            return .raw(transcript, note: "No API key saved — add one in Settings.")
+            return .raw(expansion.resolved, note: "No API key saved — add one in Settings.")
         }
 
         var rendered = context
-        rendered.transcript = trimmed
+        rendered.transcript = expansion.text
+        rendered.hints = DictionaryExpander.hints(from: dictionary)
+        rendered.hasMarkers = !expansion.isEmpty
 
         do {
             let completion = try await client.complete(
@@ -62,22 +71,37 @@ actor CleanupService {
 
             // A model that returns something wildly longer than the input has ignored
             // the instructions and started answering or explaining. Typing that into the
-            // user's document would be worse than typing the raw transcript.
-            guard isPlausibleCleanup(original: trimmed, cleaned: completion.text) else {
+            // user's document would be worse than typing the raw transcript. Measured
+            // against what was actually sent, markers and all.
+            guard isPlausibleCleanup(original: expansion.text, cleaned: completion.text) else {
                 return .raw(
-                    transcript,
+                    expansion.resolved,
                     note: "Cleanup returned something unexpected; used the raw transcript."
                 )
             }
 
+            // A marker that did not come back means the model swallowed something the user
+            // asked for exactly. Their words are never lost, so this falls back to the
+            // uncleaned text *with* the replacements in it — unpunctuated beats missing an
+            // email address.
+            guard let restored = expansion.restore(into: completion.text) else {
+                return Outcome(
+                    text: expansion.resolved,
+                    usedRawFallback: true,
+                    note: "Clean-up dropped a dictionary marker, so the raw transcript "
+                        + "was used.",
+                    latency: completion.latency
+                )
+            }
+
             return Outcome(
-                text: completion.text,
+                text: restored,
                 usedRawFallback: false,
                 note: nil,
                 latency: completion.latency
             )
         } catch {
-            return .raw(transcript, note: error.localizedDescription)
+            return .raw(expansion.resolved, note: error.localizedDescription)
         }
     }
 
@@ -124,24 +148,46 @@ actor CleanupService {
         config: ProviderConfig?,
         prompt: PromptLibrary,
         context: PromptLibrary.Context,
+        dictionary: [DictionaryEntry] = [],
         timeout: TimeInterval = CleanupService.noteTimeout
     ) async -> TurnsOutcome {
         guard !turns.isEmpty else { return .raw(turns, note: nil) }
-        guard let config else {
-            return .raw(turns, note: "No cleanup provider configured.")
-        }
-        guard config.apiKey != nil else {
-            return .raw(turns, note: "No API key saved — add one in Settings.")
+
+        // Per turn, not per batch: a marker must never straddle a batch boundary, and a
+        // turn the model never returns still deserves its replacements.
+        let expansions = turns.map { DictionaryExpander.expand($0.text, using: dictionary) }
+        let masked = zip(turns, expansions).map {
+            Turn(speaker: $0.speaker, text: $1.text)
         }
 
-        var texts = turns.map(\.text)
+        guard let config else {
+            return TurnsOutcome(
+                texts: expansions.map(\.resolved),
+                cleanedCount: 0,
+                note: "No cleanup provider configured.",
+                latency: 0
+            )
+        }
+        guard config.apiKey != nil else {
+            return TurnsOutcome(
+                texts: expansions.map(\.resolved),
+                cleanedCount: 0,
+                note: "No API key saved — add one in Settings.",
+                latency: 0
+            )
+        }
+
+        var texts = expansions.map(\.resolved)
         var cleanedCount = 0
         var latency: TimeInterval = 0
         var failure: String?
+        let hints = DictionaryExpander.hints(from: dictionary)
 
-        for batch in Self.batches(of: turns) {
+        for batch in Self.batches(of: masked) {
             var rendered = context
-            rendered.transcript = Self.numbered(turns[batch], startingAt: batch.lowerBound)
+            rendered.transcript = Self.numbered(masked[batch], startingAt: batch.lowerBound)
+            rendered.hints = hints
+            rendered.hasMarkers = expansions[batch].contains { !$0.isEmpty }
 
             let body = prompt.render(rendered) + "\n\n" + PromptLibrary.turnContract
             do {
@@ -152,11 +198,16 @@ actor CleanupService {
 
                 for (index, cleaned) in Self.parseNumbered(completion.text) {
                     guard batch.contains(index) else { continue }  // not a line we asked for
-                    let original = turns[index].text
+                    let original = masked[index].text
                     guard isPlausibleCleanup(original: original, cleaned: cleaned) else {
                         continue
                     }
-                    texts[index] = cleaned
+                    // A turn whose marker the model lost keeps the resolved raw wording it
+                    // already has, and does not count as cleaned.
+                    guard let restored = expansions[index].restore(into: cleaned) else {
+                        continue
+                    }
+                    texts[index] = restored
                     cleanedCount += 1
                 }
             } catch {
