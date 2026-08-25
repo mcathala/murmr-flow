@@ -4,39 +4,50 @@ import SwiftUI
 ///
 /// They were going to be two features — a chip field for words, a separate screen for
 /// longer text — and they are the same thing at different lengths. `Cavalley → Kovalee` and
-/// `"my email address" → mc@kovalee.app` are one rule written twice, so they are one list
+/// `"my email address" → name@example.com` are one rule written twice, so they are one list
 /// with one card.
 ///
 /// The card is the app's established shape for a list you own: closed is a name and its
 /// badges, open is the editor, one at a time. Five entries expanded at once would be a
 /// wall, and you only ever edit one.
 ///
-/// The **only** thing a reader has to understand is that an entry with a trigger is exact
-/// and local while an entry without one is a hint for the model — so that is what the card
-/// shows, and the warning at the top is the one place it is spelled out, and only when
-/// clean-up being off has actually made the hints inert.
+/// **The kind is chosen, not inferred.** The first version showed both fields always and put
+/// *"Leave empty for a spelling hint"* in the trigger's placeholder — an instruction
+/// pretending to be an example, asking the user to express a choice by leaving a box blank,
+/// in words only this codebase uses. Now the two kinds are a control, each shows only the
+/// fields it needs, and every placeholder is an example of what to type.
 struct DictionarySection: View {
 
     let dictionary: DictionaryStore
-    /// Hints go into the clean-up prompt, so with clean-up off they do nothing. Exact
-    /// replacements are unaffected, which is the whole reason this tab is not hidden with
-    /// the rest of the section.
+    /// A spelling fix goes into the clean-up prompt, so with clean-up off it does nothing. A
+    /// swap is unaffected, which is the whole reason this tab is not hidden with the rest of
+    /// the section.
     let cleanupIsOn: Bool
 
     @State private var open: UUID?
 
-    private var hintCount: Int {
-        dictionary.entries.filter { !$0.isReplacement && $0.isUsable }.count
+    /// `openEntry` exists so a snapshot can draw the editor. Nothing else passes it — a
+    /// section rendered by `ImageRenderer` cannot be clicked, and the editor is the part of
+    /// this view most worth looking at.
+    init(dictionary: DictionaryStore, cleanupIsOn: Bool, openEntry: UUID? = nil) {
+        self.dictionary = dictionary
+        self.cleanupIsOn = cleanupIsOn
+        self._open = State(initialValue: openEntry)
+    }
+
+    private var spellingCount: Int {
+        dictionary.entries.filter { $0.kind == .spelling && $0.isUsable }.count
     }
 
     var body: some View {
         Group {
-            if !cleanupIsOn, hintCount > 0 {
+            if !cleanupIsOn, spellingCount > 0 {
                 WarningRow(
-                    message: "\(hintCount == 1 ? "One entry has" : "\(hintCount) entries have") "
-                        + "nothing in \u{201C}When I say\u{201D}, so they are hints for the "
-                        + "clean-up — which is off. Give them a trigger and they work "
-                        + "either way."
+                    message: spellingCount == 1
+                        ? "One entry is a spelling fix, which the clean-up applies — and "
+                            + "clean-up is off. Swaps still work."
+                        : "\(spellingCount) entries are spelling fixes, which the clean-up "
+                            + "applies — and clean-up is off. Swaps still work."
                 )
             }
 
@@ -53,7 +64,7 @@ struct DictionarySection: View {
 
             if dictionary.entries.isEmpty {
                 Text("Say \u{201C}my email address\u{201D} and have your address typed, or "
-                     + "add a name the speech model keeps getting wrong.")
+                     + "fix a name the speech model keeps getting wrong.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -68,25 +79,7 @@ struct DictionarySection: View {
         return Card(highlighted: isOpen) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    if entry.isReplacement {
-                        Text("\u{201C}\(entry.trigger)\u{201D}")
-                            .font(.callout.weight(.semibold))
-                            .lineLimit(1)
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Theme.Palette.faint)
-                        Text(oneLine(entry.replacement))
-                            .font(.callout)
-                            .foregroundStyle(Theme.Palette.muted)
-                            .lineLimit(1)
-                    } else {
-                        Text(entry.replacement.isEmpty ? "Empty entry" : entry.replacement)
-                            .font(.callout.weight(.semibold))
-                            .lineLimit(1)
-                        Text("spelling hint")
-                            .font(.caption)
-                            .foregroundStyle(Theme.Palette.faint)
-                    }
+                    header(entry)
 
                     Spacer(minLength: 0)
 
@@ -103,30 +96,72 @@ struct DictionarySection: View {
         }
     }
 
+    /// A closed card says what the entry does, and an entry with nothing in it yet says only
+    /// that it is new — the version that read "Empty entry · spelling hint" managed to be
+    /// both accusatory and wrong.
+    @ViewBuilder
+    private func header(_ entry: DictionaryEntry) -> some View {
+        switch entry.kind {
+        case .swap:
+            if entry.trigger.isEmpty, entry.replacement.isEmpty {
+                Text("New entry").font(.callout.weight(.semibold))
+            } else {
+                Text("\u{201C}\(entry.trigger.isEmpty ? "…" : entry.trigger)\u{201D}")
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.Palette.faint)
+                Text(oneLine(entry.replacement))
+                    .font(.callout)
+                    .foregroundStyle(Theme.Palette.muted)
+                    .lineLimit(1)
+            }
+        case .spelling:
+            Text(entry.replacement.isEmpty ? "New entry" : entry.replacement)
+                .font(.callout.weight(.semibold))
+                .lineLimit(1)
+            if !entry.replacement.isEmpty {
+                Text("spelling")
+                    .font(.caption)
+                    .foregroundStyle(Theme.Palette.faint)
+            }
+        }
+    }
+
     private func editor(_ entry: DictionaryEntry) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Divider()
 
-            LabeledContent("When I say") {
-                TextField(
-                    "Leave empty for a spelling hint",
-                    text: binding(entry, \.trigger)
-                )
-                .textFieldStyle(.roundedBorder)
-            }
-            .font(.caption)
+            // First, because it decides which fields are below it. Switching keeps whatever
+            // has been typed, so changing your mind twice costs nothing.
+            PaneTabs(
+                tabs: DictionaryEntry.Kind.allCases,
+                title: \.label,
+                selection: kindBinding(entry),
+                alignment: .leading
+            )
 
-            LabeledContent("Write") {
-                // A `TextEditor` rather than a field, because this is where a snippet
-                // lives — an address is one line and an intro email is twenty.
-                TextEditor(text: binding(entry, \.replacement))
-                    .font(.callout)
-                    .frame(minHeight: 54)
-                    .scrollDisabled(true)
-                    .padding(.horizontal, 4)
-                    .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 6))
+            switch current(entry).kind {
+            case .swap:
+                LabeledContent("When I say") {
+                    TextField("my email address", text: binding(entry, \.trigger))
+                        .textFieldStyle(.roundedBorder)
+                }
+                .font(.caption)
+
+                LabeledContent("Write") {
+                    replacement(entry, placeholder: "name@example.com")
+                }
+                .font(.caption)
+
+            case .spelling:
+                LabeledContent("Word") {
+                    TextField("Acme", text: binding(entry, \.replacement))
+                        .textFieldStyle(.roundedBorder)
+                }
+                .font(.caption)
             }
-            .font(.caption)
 
             HStack(spacing: 10) {
                 Text("Used in")
@@ -149,6 +184,28 @@ struct DictionarySection: View {
                 .controlSize(.small)
             }
         }
+    }
+
+    /// A `TextEditor` rather than a field, because this is where a snippet lives — an
+    /// address is one line and an intro email is twenty. It has no placeholder of its own,
+    /// hence the overlay.
+    private func replacement(_ entry: DictionaryEntry, placeholder: String) -> some View {
+        TextEditor(text: binding(entry, \.replacement))
+            .font(.callout)
+            .frame(minHeight: 54)
+            .scrollDisabled(true)
+            .padding(.horizontal, 4)
+            .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 6))
+            .overlay(alignment: .topLeading) {
+                if current(entry).replacement.isEmpty {
+                    Text(placeholder)
+                        .font(.callout)
+                        .foregroundStyle(Theme.Palette.faint)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+            }
     }
 
     /// The same two glyphs the prompt badges use, so "Dictation" means the same thing in
@@ -182,6 +239,17 @@ struct DictionarySection: View {
             set: { value in
                 var updated = current(entry)
                 updated[keyPath: field] = value
+                dictionary.update(updated)
+            }
+        )
+    }
+
+    private func kindBinding(_ entry: DictionaryEntry) -> Binding<DictionaryEntry.Kind> {
+        Binding(
+            get: { current(entry).kind },
+            set: { value in
+                var updated = current(entry)
+                updated.kind = value
                 dictionary.update(updated)
             }
         )

@@ -54,11 +54,11 @@ enum DictionaryExpander {
         }
     }
 
-    /// Replaces every triggered entry in `text`. Entries without a trigger are ignored
-    /// here — they are hints for the prompt, not something to match on.
+    /// Replaces every `swap` entry found in `text`. A `spelling` entry is ignored here —
+    /// it is a hint for the prompt, not something to match on.
     static func expand(_ text: String, using entries: [DictionaryEntry]) -> Expansion {
         let candidates = entries
-            .filter { $0.isReplacement && $0.isUsable }
+            .filter { $0.kind == .swap && $0.isUsable }
             .map { (tokens: normalisedTokens(of: $0.trigger), value: $0.replacement) }
             .filter { !$0.tokens.isEmpty }
             // Longest first, so a longer trigger is never shadowed by a shorter one that
@@ -110,11 +110,10 @@ enum DictionaryExpander {
         return Expansion(text: output, markers: markers)
     }
 
-    /// The words a prompt is told to spell a particular way — every entry that has no
-    /// trigger to match on.
+    /// The words a prompt is told to spell a particular way.
     static func hints(from entries: [DictionaryEntry]) -> [String] {
         entries
-            .filter { !$0.isReplacement && $0.isUsable }
+            .filter { $0.kind == .spelling && $0.isUsable }
             .map(\.replacement)
     }
 

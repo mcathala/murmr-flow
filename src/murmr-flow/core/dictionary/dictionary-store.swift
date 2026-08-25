@@ -38,7 +38,9 @@ final class DictionaryStore {
         let legacy = defaults.stringArray(forKey: Key.legacyWords) ?? []
         guard !legacy.isEmpty else { return }
 
-        entries = legacy.map { DictionaryEntry(replacement: $0, scope: .both) }
+        entries = legacy.map {
+            DictionaryEntry(kind: .spelling, replacement: $0, scope: .both)
+        }
         persist()
     }
 
@@ -54,9 +56,14 @@ final class DictionaryStore {
     /// Returns what it added, so a view can open the editor on it straight away.
     @discardableResult
     func add(
-        trigger: String = "", replacement: String = "", scope: DictionaryEntry.Scope = .both
+        kind: DictionaryEntry.Kind = .swap,
+        trigger: String = "",
+        replacement: String = "",
+        scope: DictionaryEntry.Scope = .both
     ) -> DictionaryEntry {
-        let entry = DictionaryEntry(trigger: trigger, replacement: replacement, scope: scope)
+        let entry = DictionaryEntry(
+            kind: kind, trigger: trigger, replacement: replacement, scope: scope
+        )
         entries.append(entry)
         persist()
         return entry
