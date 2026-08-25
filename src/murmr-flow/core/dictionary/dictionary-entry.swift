@@ -87,6 +87,16 @@ struct DictionaryEntry: Codable, Identifiable, Hashable, Sendable {
         self.scope = scope
     }
 
+    /// Nothing typed in either field — an entry that was created and then abandoned.
+    ///
+    /// Deliberately *not* the inverse of `isUsable`. A swap with a trigger and no
+    /// replacement is unusable but not blank, and it is kept: discarding it would throw away
+    /// something the user typed. Blank means there is provably nothing to lose.
+    var isBlank: Bool {
+        trigger.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Everything an entry of this kind needs before it is worth handing to a pipeline. A
     /// swap with no trigger has nothing to match on; either kind with no replacement has
     /// nothing to say.

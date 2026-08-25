@@ -56,6 +56,7 @@ struct DictionarySection: View {
             }
 
             Button {
+                close()
                 open = dictionary.add().id
             } label: {
                 Label("New entry", systemImage: "plus")
@@ -70,6 +71,15 @@ struct DictionarySection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        // Switching tab or leaving the section closes the editor without anyone pressing
+        // Done, and would otherwise be the one way to strand a blank entry.
+        .onDisappear { close() }
+    }
+
+    /// Shuts whichever editor is open, and takes the entry with it if nothing was typed.
+    private func close() {
+        if let open { dictionary.discardIfBlank(open) }
+        open = nil
     }
 
     // MARK: - One entry
@@ -86,7 +96,8 @@ struct DictionarySection: View {
                     Badge(text: entry.scope.label, symbol: symbol(entry.scope))
 
                     Button(isOpen ? "Done" : "Edit") {
-                        open = isOpen ? nil : entry.id
+                        close()
+                        if !isOpen { open = entry.id }
                     }
                     .controlSize(.small)
                 }

@@ -259,6 +259,40 @@ struct DictionaryStoreTests {
         #expect(store.entries(usedIn: .notetaker).map(\.replacement) == ["2", "3"])
     }
 
+    @Test("an abandoned entry is dropped when its editor closes")
+    func discardsBlank() {
+        let store = DictionaryStore(defaults: scratch("blank"))
+        let new = store.add()
+
+        #expect(store.entries.count == 1)
+        store.discardIfBlank(new.id)
+        #expect(store.entries.isEmpty)
+    }
+
+    @Test("half-written entries survive, complete or not")
+    func keepsHalfWritten() {
+        let store = DictionaryStore(defaults: scratch("half"))
+        let triggerOnly = store.add(kind: .swap, trigger: "my email")
+        let wordOnly = store.add(kind: .spelling, replacement: "Murmr Flow")
+
+        store.discardIfBlank(triggerOnly.id)
+        store.discardIfBlank(wordOnly.id)
+
+        // The first is not usable yet — but it is typing, and typing is not thrown away.
+        #expect(store.entries.count == 2)
+        #expect(!triggerOnly.isUsable)
+        #expect(!triggerOnly.isBlank)
+    }
+
+    @Test("whitespace alone is still blank")
+    func whitespaceIsBlank() {
+        let store = DictionaryStore(defaults: scratch("space"))
+        let spaces = store.add(kind: .swap, trigger: "  ", replacement: "\n ")
+
+        store.discardIfBlank(spaces.id)
+        #expect(store.entries.isEmpty)
+    }
+
     @Test("an entry with no replacement is never handed to a pipeline")
     func skipsUnusable() {
         let store = DictionaryStore(defaults: scratch("unusable"))

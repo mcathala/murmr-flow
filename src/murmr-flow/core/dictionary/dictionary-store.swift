@@ -80,6 +80,18 @@ final class DictionaryStore {
         persist()
     }
 
+    /// Drops an entry that was created and never filled in.
+    ///
+    /// A new entry is persisted the moment "New entry" is clicked, because the editor edits
+    /// something that exists rather than a draft the view has to hold and reconcile. The
+    /// price is that abandoning one would leave a dead card in the list, so closing its
+    /// editor throws it away — but only if it is genuinely `isBlank`. Anything with typing
+    /// in it stays, complete or not.
+    func discardIfBlank(_ id: UUID) {
+        guard let entry = entries.first(where: { $0.id == id }), entry.isBlank else { return }
+        remove(entry)
+    }
+
     private func persist() {
         guard let data = try? JSONEncoder().encode(entries) else { return }
         defaults.set(data, forKey: Key.entries)
