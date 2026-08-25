@@ -1,10 +1,14 @@
 import SwiftUI
 
-/// The two hotkeys, recorded rather than chosen from a list.
+/// The two hotkeys, recorded rather than chosen from a list — and what happens while one
+/// is held.
 ///
 /// It used to offer three fixed triggers. Three was an arbitrary number — it was what we
 /// had implemented — so the answer to "which key" was whichever of ours you disliked least.
 /// Now you press the key you want and the app takes it.
+///
+/// Pausing music moved here from Permissions, which had collected it along with a folder
+/// path and a version string. It is not a permission; it is what holding the key does.
 struct HotkeysPane: View {
 
     let services: AppServices
@@ -49,6 +53,8 @@ struct HotkeysPane: View {
                 WarningRow(message: rejected)
             }
 
+            SectionLabel(title: "Behaviour")
+
             // The one caption that survives in the app. "Off" genuinely needs a sentence:
             // the label alone cannot tell you what the other behaviour is.
             SettingRow(
@@ -58,6 +64,14 @@ struct HotkeysPane: View {
                 Toggle("", isOn: Binding(
                     get: { settings.holdToTalk },
                     set: { settings.holdToTalk = $0 }
+                ))
+                .labelsHidden()
+            }
+
+            SettingRow(title: "Pause music while dictating") {
+                Toggle("", isOn: Binding(
+                    get: { settings.pauseMediaWhileDictating },
+                    set: { settings.pauseMediaWhileDictating = $0 }
                 ))
                 .labelsHidden()
             }

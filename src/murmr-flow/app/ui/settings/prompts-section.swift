@@ -2,15 +2,23 @@ import SwiftUI
 
 /// The prompts, and which one each mode uses.
 ///
+/// A group inside AI clean-up rather than a section of its own: a prompt is what the
+/// provider is told to do, so it is unreadable apart from the provider that runs it. It
+/// keeps its own file because it is 150 lines of editor, not because it is a separate
+/// subject.
+///
 /// The assignment is shown as a badge *on the prompt* rather than as two dropdowns
 /// elsewhere, so the whole arrangement reads in one look.
-struct PromptsPane: View {
+struct PromptsSection: View {
 
     let prompts: PromptStore
     @State private var selected: UUID?
 
+    /// A `Group`, not a `VStack`: the rows become siblings in the enclosing `PaneScroll`,
+    /// so they are spaced like every other card in the section instead of forming a
+    /// tighter block of their own.
     var body: some View {
-        PaneScroll(title: "Prompts") {
+        Group {
             ForEach(prompts.presets) { preset in
                 row(preset)
             }

@@ -3,7 +3,7 @@ import SwiftUI
 /// The app window: a sidebar and one section at a time.
 ///
 /// Settings lives **in** the sidebar, nested under its own heading, rather than in a
-/// separate Settings window. One window means one place to be, and the five panes are
+/// separate Settings window. One window means one place to be, and the four sections are
 /// visible as a list instead of hidden behind a keystroke. ⌘, selects the first of them.
 struct MainWindow: View {
 
@@ -88,7 +88,7 @@ struct MainWindow: View {
             // Land on the thing that needs attention rather than hiding a broken
             // permission behind a row the user has no reason to click.
             if !services.permissions.allGranted {
-                services.route = .settings(.permissions)
+                services.route = .settings(.privacyData)
             }
         }
     }

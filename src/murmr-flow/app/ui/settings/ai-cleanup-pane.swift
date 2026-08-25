@@ -1,18 +1,28 @@
 import SwiftUI
 
-/// The clean-up providers.
+/// Clean-up: whether it runs, what runs it, and what it is told to do.
 ///
-/// **One rule: nothing changes the active provider except a button that says so.** The
-/// previous version made tapping a row to look at it the same action as putting it into
-/// service, so adding a key to a second endpoint took the working one out of use — and
-/// because verification was a single global flag, coming back meant testing again.
+/// One section, because these are one subject. The provider, its key and its model used
+/// to sit here while the prompts sat in a sidebar row of their own — so "why did my
+/// dictation come out like this" could not be answered from either. The instructions now
+/// live beside the engine that follows them.
+///
+/// The section is named for the job; the cards inside keep the engine's name. **AI
+/// provider** is still what Home's status chip reports and what the panel names when a
+/// clean-up fails, because that is a claim about the machine, not about the job.
+///
+/// **One rule for the providers: nothing changes the active one except a button that says
+/// so.** The previous version made tapping a row to look at it the same action as putting
+/// it into service, so adding a key to a second endpoint took the working one out of use —
+/// and because verification was a single global flag, coming back meant testing again.
 ///
 /// Everything a provider knows now lives with that provider: endpoint, model and whether
 /// it has been proved. Editing one leaves the other alone.
-struct AIProviderPane: View {
+struct AICleanupPane: View {
 
     @Bindable var settings: SettingsStore
     let dictation: DictationCoordinator
+    let prompts: PromptStore
 
     /// Which row has its editor open. Independent of which provider is active, which is
     /// the whole point.
@@ -21,7 +31,7 @@ struct AIProviderPane: View {
     private var providers: ProviderStore { dictation.providers }
 
     var body: some View {
-        PaneScroll(title: "AI provider") {
+        PaneScroll(title: "AI clean-up") {
             SettingRow(title: "Clean up my dictation") {
                 Toggle("", isOn: $settings.cleanupEnabled).labelsHidden()
             }
@@ -30,9 +40,13 @@ struct AIProviderPane: View {
                 Toggle("", isOn: $settings.notetakerCleanupEnabled).labelsHidden()
             }
 
-            // The provider is shared, so it is worth setting up if *either* is on.
+            // Everything below is worth setting up if *either* switch is on, and does
+            // nothing at all if neither is: the provider is shared, and so are the
+            // prompts and the custom words — both are read only while rendering a
+            // clean-up prompt. With clean-up off they would be controls for a stage that
+            // never runs.
             if settings.cleanupEnabled || settings.notetakerCleanupEnabled {
-                SectionLabel(title: "In use")
+                SectionLabel(title: "AI provider")
                 row(providers.activeEntry, isActive: true)
 
                 if !providers.others.isEmpty {
@@ -48,6 +62,9 @@ struct AIProviderPane: View {
                             + "\(Self.affected(settings)) will keep the raw transcript."
                     )
                 }
+
+                SectionLabel(title: "Prompts")
+                PromptsSection(prompts: prompts)
 
                 SectionLabel(title: "Words to spell my way")
                 CustomWordsCard(settings: settings)
