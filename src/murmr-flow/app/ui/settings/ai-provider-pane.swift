@@ -48,6 +48,9 @@ struct AIProviderPane: View {
                             + "\(Self.affected(settings)) will keep the raw transcript."
                     )
                 }
+
+                SectionLabel(title: "Words to spell my way")
+                CustomWordsCard(settings: settings)
             } else {
                 Text("Dictation and meeting notes both keep the raw transcript. No "
                      + "provider, no key, no network.")
@@ -224,5 +227,55 @@ struct AIProviderPane: View {
                 }
             }
         )
+    }
+}
+
+/// Names and jargon, as a list rather than a comma-separated text field.
+///
+/// These go into the **clean-up prompt**, not the speech model. The card used to sit in
+/// the speech pane above a line claiming the opposite — that it biased transcription and
+/// "works with clean-up switched off entirely." It never did: the words are stored under
+/// `cleanup.customWords` and read in exactly one place, `PromptLibrary.render`, which
+/// turns them into "Spell these correctly if you hear them: …" for the provider. With
+/// clean-up off they did nothing at all, which is why the card now sits inside the branch
+/// that only draws when one of the two switches is on.
+///
+/// Biasing the speech model itself would be the better fix and is a different job — it
+/// needs vocabulary support from FluidAudio, not a prompt.
+private struct CustomWordsCard: View {
+
+    @Bindable var settings: SettingsStore
+    @State private var entry = ""
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                if settings.customWords.isEmpty {
+                    Text("Names the clean-up should spell your way, however they come "
+                         + "out of the speech model.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    RemovableChips(items: settings.customWords) { word in
+                        settings.customWords.removeAll { $0 == word }
+                    }
+                }
+                HStack(spacing: 8) {
+                    TextField("Add a word", text: $entry)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(add)
+                    Button("Add", action: add)
+                        .controlSize(.small)
+                        .disabled(entry.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func add() {
+        let word = entry.trimmingCharacters(in: .whitespaces)
+        guard !word.isEmpty, !settings.customWords.contains(word) else { return }
+        settings.customWords.append(word)
+        entry = ""
     }
 }

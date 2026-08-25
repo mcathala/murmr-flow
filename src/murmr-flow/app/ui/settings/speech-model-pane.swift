@@ -25,9 +25,6 @@ struct SpeechModelPane: View {
             ForEach(speech.others) { model in
                 alternativeRow(model)
             }
-
-            SectionLabel(title: "Words to spell my way")
-            CustomWordsCard(settings: dictation.settings)
         }
     }
 
@@ -149,44 +146,3 @@ struct SpeechModelPane: View {
     }
 }
 
-/// Names and jargon, as a list rather than a comma-separated text field.
-///
-/// These go to the **speech model**, not the cleanup prompt. Biasing the transcription
-/// beats asking a language model to repair "cover a lee" into "Kovalee" afterwards — and
-/// it works with clean-up switched off entirely.
-private struct CustomWordsCard: View {
-
-    @Bindable var settings: SettingsStore
-    @State private var entry = ""
-
-    var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 10) {
-                if settings.customWords.isEmpty {
-                    Text("Add names the model keeps getting wrong.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    RemovableChips(items: settings.customWords) { word in
-                        settings.customWords.removeAll { $0 == word }
-                    }
-                }
-                HStack(spacing: 8) {
-                    TextField("Add a word", text: $entry)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(add)
-                    Button("Add", action: add)
-                        .controlSize(.small)
-                        .disabled(entry.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-        }
-    }
-
-    private func add() {
-        let word = entry.trimmingCharacters(in: .whitespaces)
-        guard !word.isEmpty, !settings.customWords.contains(word) else { return }
-        settings.customWords.append(word)
-        entry = ""
-    }
-}
