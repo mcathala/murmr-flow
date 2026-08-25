@@ -64,7 +64,12 @@ struct PromptLibrary {
 
     struct Context {
         var transcript: String
-        var customWords: [String] = []
+        /// Words the model should spell a particular way — the dictionary entries that have
+        /// no trigger to match on, so there is nothing to do but ask.
+        var hints: [String] = []
+        /// Set when the transcript carries `DictionaryExpander` markers, which the model
+        /// has to leave alone for the values to be spliced back in.
+        var hasMarkers = false
         var frontmostApp: String?
         var language: String?
     }
@@ -72,21 +77,28 @@ struct PromptLibrary {
     func render(_ context: Context) -> String {
         var output = template
 
-        let vocabulary = context.customWords.isEmpty
+        let vocabulary = context.hints.isEmpty
             ? ""
             : "Spell these correctly if you hear them: "
-                + context.customWords.joined(separator: ", ")
+                + context.hints.joined(separator: ", ")
 
         // A prompt written as instructions to a person, with no template syntax in it at
         // all, has to work — so anything the request cannot go without is added here
         // rather than being a rule the user was expected to have read. Without the
         // transcript the model is asked to clean nothing; without the vocabulary line the
-        // custom words the user typed in Settings quietly do nothing.
+        // dictionary hints the user typed in Settings quietly do nothing.
         if !vocabulary.isEmpty, !output.contains("${custom_words}") {
             output += "\n\n${custom_words}"
         }
         if !output.contains("${transcript}") {
             output += "\n\nTranscript:\n${transcript}"
+        }
+        // Not a placeholder the user can move or delete: a dropped marker costs them the
+        // exact text they asked for, and the fallback that catches it costs them the
+        // clean-up. Cheaper to ask for it plainly, every time there is one.
+        if context.hasMarkers {
+            output += "\n\nLeave any [[MF…]] markers exactly as they are — do not "
+                + "translate, reword, punctuate or remove them."
         }
 
         let replacements: [String: String] = [

@@ -22,6 +22,92 @@ struct SectionLabel: View {
     }
 }
 
+/// A segmented control: one of a small closed set, chosen by tapping it.
+///
+/// Two jobs. As a **tab bar** at the top of a section, and as an inline **picker** for a
+/// value with three or four possibilities — a dictionary entry's scope. Same shape both
+/// times, because both are "these are the options, this is the one".
+///
+/// **The rule for using it as a tab bar: three groups with real content, and you are only
+/// ever in one of them.** AI clean-up qualifies — provider, prompts, dictionary. Nothing
+/// else does yet: Speech model is one list, Hotkeys is two keys and two toggles, and
+/// Privacy & data has four groups that are each two lines, where seeing the permissions and
+/// the delete buttons at once is worth more than hiding either. A section with one subject
+/// must not sprout an empty tab bar.
+///
+/// A `SectionLabel` is 9.5pt uppercase in the faintest colour in the palette, which is a
+/// hint rather than a division. That is fine for two groups in one scroll and was not
+/// enough for three, each of which opens an editor of its own.
+///
+/// Not a `Picker(.segmented)`: the system control draws its selection in
+/// `controlAccentColor`, the same system-wide colour that made `List(selection:)`
+/// unusable here — see `SelectableRow`.
+///
+/// Selection is `tide`, not gold. Gold means live or chosen and there is one per screen;
+/// the sidebar's selected row has already spent it, and this is the palette's stated
+/// answer for any other highlight.
+struct PaneTabs<Tab: Hashable & Identifiable>: View {
+
+    let tabs: [Tab]
+    let title: (Tab) -> String
+    @Binding var selection: Tab
+    /// Centred as a tab bar, leading as an inline picker sitting after its label.
+    var alignment: Alignment = .center
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(tabs) { tab in
+                let isSelected = tab == selection
+                Button {
+                    selection = tab
+                } label: {
+                    Text(title(tab))
+                        .font(isSelected ? Theme.Text.bodyStrong : Theme.Text.body)
+                        .foregroundStyle(
+                            isSelected ? Theme.Palette.text : Theme.Palette.muted
+                        )
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 6)
+                        .background {
+                            if isSelected {
+                                RoundedRectangle(
+                                    cornerRadius: Theme.Radius.inner, style: .continuous
+                                )
+                                .fill(Theme.Palette.tide.opacity(0.20))
+                                .overlay {
+                                    RoundedRectangle(
+                                        cornerRadius: Theme.Radius.inner, style: .continuous
+                                    )
+                                    .strokeBorder(
+                                        Theme.Palette.tide.opacity(0.42), lineWidth: 1
+                                    )
+                                }
+                            }
+                        }
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        // A recessed track, so three pills read as one control rather than as three
+        // loose buttons that happen to sit in a row.
+        .background {
+            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                .fill(Theme.Palette.abyss.opacity(0.40))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                        .strokeBorder(Theme.Palette.hairline, lineWidth: 1)
+                }
+        }
+        // The track hugs the tabs, and the control is placed rather than stretched.
+        // Filling the column's width left the labels in the top-left corner of a mostly
+        // empty box — the one element in a pane of full-width cards that had to invent
+        // something to do with the space.
+        .frame(maxWidth: .infinity, alignment: alignment)
+    }
+}
+
 struct WarningRow: View {
     let message: String
     var tint: Color = Theme.Palette.gold

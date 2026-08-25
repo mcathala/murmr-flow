@@ -13,7 +13,6 @@ final class SettingsStore {
         static let enabled = "cleanup.enabled"
         static let noteEnabled = "cleanup.noteEnabled"
         static let prompt = "cleanup.prompt"
-        static let customWords = "cleanup.customWords"
         static let hotkey = "dictation.hotkey"
         static let meetingHotkey = "meeting.hotkey"
         static let pauseMedia = "dictation.pauseMedia"
@@ -30,7 +29,6 @@ final class SettingsStore {
         self.notetakerCleanupEnabled = defaults.object(forKey: Key.noteEnabled) as? Bool ?? true
         self.promptTemplate =
             defaults.string(forKey: Key.prompt) ?? PromptLibrary.defaultCleanupPrompt
-        self.customWords = defaults.stringArray(forKey: Key.customWords) ?? []
         self.hotkey = Self.decode(defaults.data(forKey: Key.hotkey)) ?? .default
         self.meetingHotkey = Self.decode(defaults.data(forKey: Key.meetingHotkey))
         self.pauseMediaWhileDictating =
@@ -60,9 +58,9 @@ final class SettingsStore {
         didSet { defaults.set(promptTemplate, forKey: Key.prompt) }
     }
 
-    var customWords: [String] {
-        didSet { defaults.set(customWords, forKey: Key.customWords) }
-    }
+    // The custom words that used to live here are now `DictionaryStore`, which reads
+    // `cleanup.customWords` once to seed itself and then owns the list. The key is still on
+    // disk and deliberately untouched — see that store for why.
 
     // MARK: - Dictation
 

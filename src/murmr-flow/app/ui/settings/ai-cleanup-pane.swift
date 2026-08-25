@@ -1,27 +1,82 @@
 import SwiftUI
 
-/// The clean-up providers.
+/// Clean-up: whether it runs, what runs it, and what it is told to do.
 ///
-/// **One rule: nothing changes the active provider except a button that says so.** The
-/// previous version made tapping a row to look at it the same action as putting it into
-/// service, so adding a key to a second endpoint took the working one out of use — and
-/// because verification was a single global flag, coming back meant testing again.
+/// One section, because these are one subject. The provider, its key and its model used
+/// to sit here while the prompts sat in a sidebar row of their own — so "why did my
+/// dictation come out like this" could not be answered from either. The instructions now
+/// live beside the engine that follows them.
+///
+/// The section is named for the job; the cards inside keep the engine's name. **AI
+/// provider** is still what Home's status chip reports and what the panel names when a
+/// clean-up fails, because that is a claim about the machine, not about the job.
+///
+/// Three groups, and **tabs rather than three headings in one scroll.** Merging the prompts
+/// in gave this section eight cards, two of which open into editors, under `SectionLabel`s
+/// that are 9.5pt uppercase in the faintest colour in the palette — a hint, not a division.
+/// One tab at a time is a comfortable screen. It is the only section with a tab bar; see
+/// `PaneTabs` for when that is the right call.
+///
+/// **The switches sit above the tabs, not inside one**, because they govern all three. So
+/// does the not-ready warning: a provider with no key breaks the prompts and the dictionary
+/// hints too, and hiding that behind whichever tab happens not to be showing would be the
+/// one failure this pane must never keep quiet about.
+///
+/// **The tab bar is not gated, though the tabs are.** Everything here used to collapse to
+/// one sentence with both switches off, which was right while everything here needed a
+/// provider. The dictionary's exact replacements do not — they are local string work — so
+/// hiding that tab would hide a feature that still works. Provider and Prompts say they are
+/// off instead.
+///
+/// **One rule for the providers: nothing changes the active one except a button that says
+/// so.** The previous version made tapping a row to look at it the same action as putting
+/// it into service, so adding a key to a second endpoint took the working one out of use —
+/// and because verification was a single global flag, coming back meant testing again.
 ///
 /// Everything a provider knows now lives with that provider: endpoint, model and whether
 /// it has been proved. Editing one leaves the other alone.
-struct AIProviderPane: View {
+struct AICleanupPane: View {
 
     @Bindable var settings: SettingsStore
     let dictation: DictationCoordinator
+    let prompts: PromptStore
+    let dictionary: DictionaryStore
 
     /// Which row has its editor open. Independent of which provider is active, which is
     /// the whole point.
     @State private var editing: String?
 
+    /// Deliberately not remembered across visits. Landing on the provider every time is
+    /// predictable; coming back to whichever tab you left three days ago is not.
+    @State private var facet: Facet = .provider
+
     private var providers: ProviderStore { dictation.providers }
 
+    /// The three groups. Named `Facet` rather than `Group` or `Tab`, both of which are
+    /// SwiftUI's.
+    private enum Facet: String, CaseIterable, Identifiable {
+        case provider, prompts, dictionary
+
+        var id: String { rawValue }
+
+        /// One word each, so the bar stays a bar.
+        var title: String {
+            switch self {
+            case .provider: "Provider"
+            case .prompts: "Prompts"
+            case .dictionary: "Dictionary"
+            }
+        }
+    }
+
+    /// Whether anything is cleaned at all. The provider is shared, so one switch is enough
+    /// to make setting it up worthwhile.
+    private var isCleaningSomething: Bool {
+        settings.cleanupEnabled || settings.notetakerCleanupEnabled
+    }
+
     var body: some View {
-        PaneScroll(title: "AI provider") {
+        PaneScroll(title: "AI clean-up") {
             SettingRow(title: "Clean up my dictation") {
                 Toggle("", isOn: $settings.cleanupEnabled).labelsHidden()
             }
@@ -30,34 +85,47 @@ struct AIProviderPane: View {
                 Toggle("", isOn: $settings.notetakerCleanupEnabled).labelsHidden()
             }
 
-            // The provider is shared, so it is worth setting up if *either* is on.
-            if settings.cleanupEnabled || settings.notetakerCleanupEnabled {
-                SectionLabel(title: "In use")
-                row(providers.activeEntry, isActive: true)
+            if isCleaningSomething, !providers.isUsable(providers.activeID) {
+                WarningRow(
+                    message: "\(providers.activeEntry.displayName) isn't ready, so "
+                        + "\(Self.affected(settings)) will keep the raw transcript."
+                )
+            }
 
-                if !providers.others.isEmpty {
-                    SectionLabel(title: "Other providers")
-                    ForEach(providers.others) { entry in
-                        row(entry, isActive: false)
+            PaneTabs(tabs: Facet.allCases, title: \.title, selection: $facet)
+
+            switch facet {
+            case .provider:
+                if isCleaningSomething {
+                    SectionLabel(title: "In use")
+                    row(providers.activeEntry, isActive: true)
+
+                    if !providers.others.isEmpty {
+                        SectionLabel(title: "Other providers")
+                        ForEach(providers.others) { entry in
+                            row(entry, isActive: false)
+                        }
                     }
+                } else {
+                    switchedOff
                 }
-
-                if !providers.isUsable(providers.activeID) {
-                    WarningRow(
-                        message: "\(providers.activeEntry.displayName) isn't ready, so "
-                            + "\(Self.affected(settings)) will keep the raw transcript."
-                    )
+            case .prompts:
+                if isCleaningSomething {
+                    PromptsSection(prompts: prompts)
+                } else {
+                    switchedOff
                 }
-
-                SectionLabel(title: "Words to spell my way")
-                CustomWordsCard(settings: settings)
-            } else {
-                Text("Dictation and meeting notes both keep the raw transcript. No "
-                     + "provider, no key, no network.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+            case .dictionary:
+                DictionarySection(dictionary: dictionary, cleanupIsOn: isCleaningSomething)
             }
         }
+    }
+
+    private var switchedOff: some View {
+        Text("Dictation and meeting notes both keep the raw transcript. No provider, no "
+             + "key, no network.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
     }
 
     /// Names only what is actually switched on, so the warning can't claim dictation is
@@ -227,55 +295,5 @@ struct AIProviderPane: View {
                 }
             }
         )
-    }
-}
-
-/// Names and jargon, as a list rather than a comma-separated text field.
-///
-/// These go into the **clean-up prompt**, not the speech model. The card used to sit in
-/// the speech pane above a line claiming the opposite — that it biased transcription and
-/// "works with clean-up switched off entirely." It never did: the words are stored under
-/// `cleanup.customWords` and read in exactly one place, `PromptLibrary.render`, which
-/// turns them into "Spell these correctly if you hear them: …" for the provider. With
-/// clean-up off they did nothing at all, which is why the card now sits inside the branch
-/// that only draws when one of the two switches is on.
-///
-/// Biasing the speech model itself would be the better fix and is a different job — it
-/// needs vocabulary support from FluidAudio, not a prompt.
-private struct CustomWordsCard: View {
-
-    @Bindable var settings: SettingsStore
-    @State private var entry = ""
-
-    var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 10) {
-                if settings.customWords.isEmpty {
-                    Text("Names the clean-up should spell your way, however they come "
-                         + "out of the speech model.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    RemovableChips(items: settings.customWords) { word in
-                        settings.customWords.removeAll { $0 == word }
-                    }
-                }
-                HStack(spacing: 8) {
-                    TextField("Add a word", text: $entry)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(add)
-                    Button("Add", action: add)
-                        .controlSize(.small)
-                        .disabled(entry.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-        }
-    }
-
-    private func add() {
-        let word = entry.trimmingCharacters(in: .whitespaces)
-        guard !word.isEmpty, !settings.customWords.contains(word) else { return }
-        settings.customWords.append(word)
-        entry = ""
     }
 }

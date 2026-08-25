@@ -276,15 +276,30 @@ struct PromptRenderTests {
         #expect(!rendered.contains("${"))
     }
 
-    @Test("custom words reach a prompt that never mentions them")
+    @Test("dictionary hints reach a prompt that never mentions them")
     func appendsVocabulary() {
         let rendered = PromptLibrary(template: "Tidy this up.")
-            .render(PromptLibrary.Context(transcript: "kovalee", customWords: ["Kovalee"]))
+            .render(PromptLibrary.Context(transcript: "kovalee", hints: ["Kovalee"]))
         #expect(rendered.contains("Kovalee"))
         #expect(!rendered.contains("${"))
     }
 
-    @Test("with no custom words, nothing is appended for them")
+    @Test("a transcript carrying markers asks the model to leave them alone")
+    func markerInstruction() {
+        let rendered = PromptLibrary(template: "Tidy this up.")
+            .render(PromptLibrary.Context(transcript: "send it to [[MF0]]", hasMarkers: true))
+        #expect(rendered.contains("[[MF"))
+        #expect(rendered.lowercased().contains("exactly as they are"))
+    }
+
+    @Test("with no markers, nothing is said about them")
+    func noMarkerInstruction() {
+        let rendered = PromptLibrary(template: "Tidy this up.")
+            .render(PromptLibrary.Context(transcript: "hello"))
+        #expect(!rendered.contains("[[MF"))
+    }
+
+    @Test("with no dictionary hints, nothing is appended for them")
     func noVocabularyLine() {
         let rendered = PromptLibrary(template: "Tidy this up.")
             .render(PromptLibrary.Context(transcript: "hello"))

@@ -121,6 +121,7 @@ final class MeetingCoordinator {
     private let settings: SettingsStore
     private let prompts: PromptStore
     private let providers: ProviderStore
+    private let dictionary: DictionaryStore
     private let devices: AudioDeviceStore
     private let recorder = MeetingRecorder()
     private let cleanup = CleanupService()
@@ -133,6 +134,7 @@ final class MeetingCoordinator {
         settings: SettingsStore,
         prompts: PromptStore,
         providers: ProviderStore,
+        dictionary: DictionaryStore,
         devices: AudioDeviceStore
     ) {
         self.loader = loader
@@ -141,6 +143,7 @@ final class MeetingCoordinator {
         self.settings = settings
         self.prompts = prompts
         self.providers = providers
+        self.dictionary = dictionary
         self.devices = devices
     }
 
@@ -284,10 +287,8 @@ final class MeetingCoordinator {
             },
             config: providers.activeConfig,
             prompt: PromptLibrary(template: preset.template),
-            context: PromptLibrary.Context(
-                transcript: "",  // filled in per batch
-                customWords: settings.customWords
-            )
+            context: PromptLibrary.Context(transcript: ""),  // filled in per batch
+            dictionary: dictionary.entries(usedIn: .notetaker)
         )
 
         guard !outcome.usedRawFallback else { return (transcript, outcome.note) }

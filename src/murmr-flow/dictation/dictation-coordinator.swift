@@ -130,6 +130,7 @@ final class DictationCoordinator {
     let history: HistoryStore
     let prompts: PromptStore
     let providers: ProviderStore
+    let dictionary: DictionaryStore
     let speech: SpeechModelStore
     private let cleanup = CleanupService()
     private let hotkey = HotkeyMonitor()
@@ -158,6 +159,7 @@ final class DictationCoordinator {
         prompts: PromptStore = PromptStore(),
         providers: ProviderStore = ProviderStore(),
         speech: SpeechModelStore = SpeechModelStore(),
+        dictionary: DictionaryStore = DictionaryStore(),
         devices: AudioDeviceStore? = nil
     ) {
         self.settings = settings
@@ -167,6 +169,7 @@ final class DictationCoordinator {
         self.prompts = prompts
         self.providers = providers
         self.speech = speech
+        self.dictionary = dictionary
         self.devices = devices
         loader.select(speech.activeModel)
     }
@@ -321,9 +324,9 @@ final class DictationCoordinator {
                 prompt: PromptLibrary(template: prompts.dictationPrompt.template),
                 context: PromptLibrary.Context(
                     transcript: raw,
-                    customWords: settings.customWords,
                     frontmostApp: targetApp?.bundleIdentifier
-                )
+                ),
+                dictionary: dictionary.entries(usedIn: .dictation)
             )
 
             stage = .injecting
@@ -454,10 +457,8 @@ final class DictationCoordinator {
             transcript: record.rawText,
             config: config,
             prompt: PromptLibrary(template: prompts.dictationPrompt.template),
-            context: PromptLibrary.Context(
-                transcript: record.rawText,
-                customWords: settings.customWords
-            )
+            context: PromptLibrary.Context(transcript: record.rawText),
+            dictionary: dictionary.entries(usedIn: .dictation)
         )
 
         history.replace(
