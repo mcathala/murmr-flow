@@ -233,7 +233,7 @@ final class DictationCoordinator {
             case .failed(let message):
                 stage = .failed(message)
             case .notLoaded, .ready:
-                stage = .failed("The speech model isn't loaded. Open Setup to load it.")
+                stage = .failed("The speech model isn't loaded. Open Settings › Speech model.")
                 Task { await warmUp() }
             }
             return

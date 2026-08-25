@@ -320,7 +320,7 @@ final class MeetingCoordinator {
         case .failed(let message):
             message
         case .notLoaded, .ready:
-            "The speech model isn't loaded yet. Open Setup to load it."
+            "The speech model isn't loaded yet. Open Settings › Speech model."
         }
     }
 

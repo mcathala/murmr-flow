@@ -381,7 +381,7 @@ struct HomeSummarySnapshotTests {
 
 /// Renders the two record cards one above the other.
 ///
-/// The Notes card was added as a copy of the Dictation card's and drifted immediately — wrong
+/// The Notetaker card was added as a copy of the Dictation card and drifted immediately — wrong
 /// button colour, wrong fonts, wrong width — and none of that showed up in a diff. They
 /// share `RecordCard` now, and this is what makes "the same" checkable by eye rather than
 /// by reading two files.
