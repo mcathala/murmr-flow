@@ -1,12 +1,16 @@
 # Murmr Flow
 
-Local-first voice dictation and meeting notes for macOS.
+Local-first dictation and meeting notes for macOS.
 
-Speech-to-text runs entirely on-device. Audio never leaves the machine.
+The speech model runs entirely on-device. Audio never leaves the machine; only
+cleaned-up text is sent to an AI provider, and only if you configure one.
 
-> **Early work in progress.** Not usable yet — there is no audio capture or
-> transcription in the code so far. Current state is a permissions and code-signing
-> harness.
+**Two jobs.** *Dictation* — hold a hotkey, speak, and the text is inserted wherever
+your cursor is. *Notetaker* — record a meeting and get a Markdown note with speaker
+labels.
+
+> **Work in progress.** Both jobs work end to end. Still a personal daily-driver
+> rather than something to hand to anyone who can't run a build script.
 
 ## Requirements
 
@@ -46,9 +50,10 @@ Speech-to-text runs entirely on-device. Audio never leaves the machine.
 
 ```
 Package.swift              SwiftPM executable; no .xcodeproj by design
-src/murmr-flow/            app code — app/ and core/
+src/murmr-flow/            app code — app/, core/, dictation/, meetings/
 resources/                 Info.plist and entitlements templates
 scripts/                   build, install, verify, helpers
+tests/                     swift-testing suites
 ```
 
 Files and directories are lowercase `kebab-case`; Swift *type* names stay
