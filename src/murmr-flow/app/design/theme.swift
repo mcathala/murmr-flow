@@ -74,7 +74,6 @@ enum Theme {
         static let heading = Font.custom(Face.ui, size: 15).weight(.semibold)
         /// The default. Transcripts, list rows, most labels.
         static let body = Font.custom(Face.ui, size: 13)
-        /// Body, emphasised.
         static let bodyStrong = Font.custom(Face.ui, size: 13).weight(.medium)
         /// Secondary lines under a row.
         static let small = Font.custom(Face.ui, size: 11.5)

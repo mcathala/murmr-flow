@@ -3,13 +3,12 @@ import SwiftUI
 /// The only pane that should ever look empty.
 ///
 /// Granted permissions collapse to a single line. Anything that needs attention is at the
-/// top, outlined, with the button that fixes it. The build-signing warning that used to
-/// live on this screen is gone — that was a message for a terminal.
+/// top, outlined, with the button that fixes it.
 struct PermissionsPane: View {
 
     let permissions: PermissionManager
     @Bindable var settings: SettingsStore
-    let notes: MeetingStore
+    let notes: NoteStore
 
     var body: some View {
         PaneScroll(title: "Permissions") {
@@ -25,7 +24,7 @@ struct PermissionsPane: View {
                 if permissions.accessibility != .granted {
                     WarningRow(
                         message: "Accessibility is off, so dictation copies to the "
-                            + "clipboard instead of typing.",
+                            + "clipboard instead of inserting it.",
                         action: ("Open Settings", { permissions.openAccessibilitySettings() })
                     )
                 }
@@ -62,7 +61,7 @@ struct PermissionsPane: View {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Where notes are saved").font(.callout.weight(.medium))
-                        Text(MeetingStore.folder.path(percentEncoded: false))
+                        Text(NoteStore.folder.path(percentEncoded: false))
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(2)

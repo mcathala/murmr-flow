@@ -179,7 +179,7 @@ struct LegacyFolderTests {
         try write("# One", to: legacy.appendingPathComponent("one.md"))
         try write("# Two", to: legacy.appendingPathComponent("two.md"))
 
-        MeetingStore.adoptLegacyFolder(from: legacy, to: destination)
+        NoteStore.adoptLegacyFolder(from: legacy, to: destination)
 
         let moved = try FileManager.default.contentsOfDirectory(atPath: destination.path)
         #expect(Set(moved) == ["one.md", "two.md"])
@@ -195,7 +195,7 @@ struct LegacyFolderTests {
         try write("", to: legacy.appendingPathComponent(".DS_Store"))
         try write("", to: root.appendingPathComponent("Murmr Flow/.DS_Store"))
 
-        MeetingStore.adoptLegacyFolder(from: legacy, to: destination)
+        NoteStore.adoptLegacyFolder(from: legacy, to: destination)
 
         #expect(FileManager.default.fileExists(
             atPath: destination.appendingPathComponent("one.md").path
@@ -218,7 +218,7 @@ struct LegacyFolderTests {
         try write("old copy", to: legacy.appendingPathComponent("clash.md"))
         try write("the one being used", to: destination.appendingPathComponent("clash.md"))
 
-        MeetingStore.adoptLegacyFolder(from: legacy, to: destination)
+        NoteStore.adoptLegacyFolder(from: legacy, to: destination)
 
         let kept = try String(
             contentsOf: destination.appendingPathComponent("clash.md"), encoding: .utf8
@@ -238,7 +238,7 @@ struct LegacyFolderTests {
         try write("# Note", to: legacy.appendingPathComponent("note.md"))
         try write("mine", to: legacy.appendingPathComponent("audio.wav"))
 
-        MeetingStore.adoptLegacyFolder(from: legacy, to: destination)
+        NoteStore.adoptLegacyFolder(from: legacy, to: destination)
 
         #expect(FileManager.default.fileExists(
             atPath: destination.appendingPathComponent("note.md").path
@@ -251,7 +251,7 @@ struct LegacyFolderTests {
     @Test("no old folder is not a failure")
     func missingLegacyFolder() {
         let root = scratch()
-        MeetingStore.adoptLegacyFolder(
+        NoteStore.adoptLegacyFolder(
             from: root.appendingPathComponent("nothing-here", isDirectory: true),
             to: root.appendingPathComponent("new", isDirectory: true)
         )
@@ -380,20 +380,20 @@ struct PromptPresetTests {
         #expect(!prompts.addNew().template.contains("${"))
     }
 
-    @Test("note mode starts assigned, so meetings are cleaned up out of the box")
+    @Test("Notetaker starts assigned, so meetings are cleaned up out of the box")
     func noteModeHasAPrompt() {
         let prompts = PromptStore(defaults: defaults())
-        #expect(prompts.notePromptID == PromptStore.meetingPreset.id)
-        #expect(prompts.notePrompt?.name == "Meeting")
+        #expect(prompts.notetakerPromptID == PromptStore.meetingPreset.id)
+        #expect(prompts.notetakerPrompt?.name == "Meeting")
     }
 
-    @Test("deleting the prompt note mode used falls back rather than leaving nothing")
+    @Test("deleting the prompt Notetaker used falls back rather than leaving nothing")
     func deleteFallsBack() {
         let prompts = PromptStore(defaults: defaults())
         let mine = prompts.addNew()
-        prompts.notePromptID = mine.id
+        prompts.notetakerPromptID = mine.id
 
         prompts.delete(mine)
-        #expect(prompts.notePromptID == PromptStore.meetingPreset.id)
+        #expect(prompts.notetakerPromptID == PromptStore.meetingPreset.id)
     }
 }

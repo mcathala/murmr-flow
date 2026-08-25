@@ -4,9 +4,9 @@ import SwiftUI
 ///
 /// We recorded meetings and wrote files, then abandoned them — the only thing the app
 /// offered afterwards was "Show in Finder". This is where you read them.
-struct NotesView: View {
+struct NotetakerView: View {
 
-    let notes: MeetingStore
+    let notes: NoteStore
     let meetings: MeetingCoordinator
     let settings: SettingsStore
     let prompts: PromptStore
@@ -24,7 +24,7 @@ struct NotesView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Matches `PaneScroll`'s inset exactly, so the card lands in the same place
-            // as the Dictaphone's — 20 all round, 14 of rhythm before what follows.
+            // as Dictation's — 20 all round, 14 of rhythm before what follows.
             recordBar
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
@@ -87,17 +87,17 @@ struct NotesView: View {
 
     // MARK: - Record
 
-    /// Starting a meeting from the tab that holds meetings.
+    /// Starting a meeting from the section that holds them.
     ///
     /// There was a "Start meeting" button, but only inside the empty state — so the way to
     /// record your second meeting was to already know about the menu bar or the panel.
-    /// Deliberately the same shape as the Dictaphone's record card: one primary button,
+    /// Deliberately the same shape as Dictation's record card: one primary button,
     /// state in words next to it, and the prompt this mode will use on the right.
     private var recordBar: some View {
         RecordCard(
             title: recordHeadline,
             subtitle: recordSubhead,
-            buttonTitle: meetings.stage.isRecording ? "Stop" : "Record",
+            buttonTitle: meetings.stage.isRecording ? "Stop" : "Start meeting",
             buttonSymbol: meetings.stage.isRecording ? "stop.fill" : "record.circle.fill",
             isActive: meetings.stage.isRecording,
             // Busy but not recording means transcribing: there is nothing useful to stop
@@ -114,10 +114,10 @@ struct NotesView: View {
                     .controlSize(.small)
             } else if meetings.stage.isBusy {
                 ProgressView().controlSize(.small)
-            } else if let note = prompts.notePrompt, settings.noteCleanupEnabled {
+            } else if let note = prompts.notetakerPrompt, settings.notetakerCleanupEnabled {
                 Menu(note.name) {
                     ForEach(prompts.presets) { preset in
-                        Button(preset.name) { prompts.notePromptID = preset.id }
+                        Button(preset.name) { prompts.notetakerPromptID = preset.id }
                     }
                 }
                 .menuStyle(.borderlessButton)
@@ -135,7 +135,7 @@ struct NotesView: View {
         case .failed:
             "Couldn't record that"
         case .idle, .saved:
-            // The Dictaphone's headline names the key you'd hold. A meeting key is
+            // Dictation's headline names the key you'd hold. A meeting key is
             // optional, so when there isn't one this says where things stand instead —
             // repeating the button's own word back at it tells you nothing.
             settings.meetingHotkey.map { "Press \($0.displayName) anywhere" }
@@ -265,7 +265,7 @@ struct NotesView: View {
 
     private func contextDeleteTitle(for note: NoteFile) -> String {
         selection.contains(note) && selection.count > 1
-            ? "Move \(selection.count) Notes to Trash"
+            ? "Move \(selection.count) notes to Trash"
             : "Move to Trash"
     }
 

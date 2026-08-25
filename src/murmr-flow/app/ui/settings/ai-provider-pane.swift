@@ -9,7 +9,7 @@ import SwiftUI
 ///
 /// Everything a provider knows now lives with that provider: endpoint, model and whether
 /// it has been proved. Editing one leaves the other alone.
-struct CleanupPane: View {
+struct AIProviderPane: View {
 
     @Bindable var settings: SettingsStore
     let dictation: DictationCoordinator
@@ -21,17 +21,17 @@ struct CleanupPane: View {
     private var providers: ProviderStore { dictation.providers }
 
     var body: some View {
-        PaneScroll(title: "AI clean-up") {
+        PaneScroll(title: "AI provider") {
             SettingRow(title: "Clean up my dictation") {
                 Toggle("", isOn: $settings.cleanupEnabled).labelsHidden()
             }
 
             SettingRow(title: "Clean up meeting notes") {
-                Toggle("", isOn: $settings.noteCleanupEnabled).labelsHidden()
+                Toggle("", isOn: $settings.notetakerCleanupEnabled).labelsHidden()
             }
 
             // The provider is shared, so it is worth setting up if *either* is on.
-            if settings.cleanupEnabled || settings.noteCleanupEnabled {
+            if settings.cleanupEnabled || settings.notetakerCleanupEnabled {
                 SectionLabel(title: "In use")
                 row(providers.activeEntry, isActive: true)
 
@@ -48,6 +48,9 @@ struct CleanupPane: View {
                             + "\(Self.affected(settings)) will keep the raw transcript."
                     )
                 }
+
+                SectionLabel(title: "Words to spell my way")
+                CustomWordsCard(settings: settings)
             } else {
                 Text("Dictation and meeting notes both keep the raw transcript. No "
                      + "provider, no key, no network.")
@@ -60,7 +63,7 @@ struct CleanupPane: View {
     /// Names only what is actually switched on, so the warning can't claim dictation is
     /// affected when only notes are.
     private static func affected(_ settings: SettingsStore) -> String {
-        switch (settings.cleanupEnabled, settings.noteCleanupEnabled) {
+        switch (settings.cleanupEnabled, settings.notetakerCleanupEnabled) {
         case (true, true): "dictation and meeting notes"
         case (true, false): "dictation"
         default: "meeting notes"
@@ -224,5 +227,55 @@ struct CleanupPane: View {
                 }
             }
         )
+    }
+}
+
+/// Names and jargon, as a list rather than a comma-separated text field.
+///
+/// These go into the **clean-up prompt**, not the speech model. The card used to sit in
+/// the speech pane above a line claiming the opposite — that it biased transcription and
+/// "works with clean-up switched off entirely." It never did: the words are stored under
+/// `cleanup.customWords` and read in exactly one place, `PromptLibrary.render`, which
+/// turns them into "Spell these correctly if you hear them: …" for the provider. With
+/// clean-up off they did nothing at all, which is why the card now sits inside the branch
+/// that only draws when one of the two switches is on.
+///
+/// Biasing the speech model itself would be the better fix and is a different job — it
+/// needs vocabulary support from FluidAudio, not a prompt.
+private struct CustomWordsCard: View {
+
+    @Bindable var settings: SettingsStore
+    @State private var entry = ""
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                if settings.customWords.isEmpty {
+                    Text("Names the clean-up should spell your way, however they come "
+                         + "out of the speech model.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    RemovableChips(items: settings.customWords) { word in
+                        settings.customWords.removeAll { $0 == word }
+                    }
+                }
+                HStack(spacing: 8) {
+                    TextField("Add a word", text: $entry)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(add)
+                    Button("Add", action: add)
+                        .controlSize(.small)
+                        .disabled(entry.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func add() {
+        let word = entry.trimmingCharacters(in: .whitespaces)
+        guard !word.isEmpty, !settings.customWords.contains(word) else { return }
+        settings.customWords.append(word)
+        entry = ""
     }
 }

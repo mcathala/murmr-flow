@@ -27,7 +27,7 @@ final class SettingsStore {
         self.defaults = defaults
 
         self.cleanupEnabled = defaults.object(forKey: Key.enabled) as? Bool ?? true
-        self.noteCleanupEnabled = defaults.object(forKey: Key.noteEnabled) as? Bool ?? true
+        self.notetakerCleanupEnabled = defaults.object(forKey: Key.noteEnabled) as? Bool ?? true
         self.promptTemplate =
             defaults.string(forKey: Key.prompt) ?? PromptLibrary.defaultCleanupPrompt
         self.customWords = defaults.stringArray(forKey: Key.customWords) ?? []
@@ -52,8 +52,8 @@ final class SettingsStore {
     /// appears; a meeting is already finished, nobody is waiting on a cursor, and the
     /// request is the whole conversation — so someone may reasonably want one and not the
     /// other, in either direction.
-    var noteCleanupEnabled: Bool {
-        didSet { defaults.set(noteCleanupEnabled, forKey: Key.noteEnabled) }
+    var notetakerCleanupEnabled: Bool {
+        didSet { defaults.set(notetakerCleanupEnabled, forKey: Key.noteEnabled) }
     }
 
     var promptTemplate: String {

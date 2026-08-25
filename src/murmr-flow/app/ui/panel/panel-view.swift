@@ -119,7 +119,7 @@ struct PanelView: View {
         .help("Start recording a meeting")
     }
 
-    /// The pill *is* the dictaphone, so this is the primary action of the row.
+    /// The pill *is* the dictation control, so this is the primary action of the row.
     private var dictateButton: some View {
         Button {
             model.onToggleDictation?()
@@ -324,7 +324,3 @@ private struct Waveform: View {
         return 3 + 15 * AudioLevel.normalised(level) * falloff
     }
 }
-
-// The level meter used to live here as a private `Meter`. It moved to `LevelMeter` in
-// shared-views when the Notes tab grew a record bar, so both places draw the same signal
-// the same way.

@@ -33,13 +33,13 @@ struct HomeView: View {
     /// it belongs in the warning below rather than sitting here as a status.
     private var status: some View {
         HStack(spacing: 8) {
-            StatusChip(title: "Voice engine", level: voiceLevel)
-            StatusChip(title: "AI clean-up", level: cleanupLevel)
+            StatusChip(title: "Speech model", level: speechModelLevel)
+            StatusChip(title: "AI provider", level: aiProviderLevel)
             Spacer(minLength: 0)
         }
     }
 
-    private var voiceLevel: StatusChip.Level {
+    private var speechModelLevel: StatusChip.Level {
         let speech = services.speech
         switch speech.verification(for: speech.activeModel) {
         case .working: return .ok
@@ -47,11 +47,11 @@ struct HomeView: View {
         case .untested:
             // Loaded is not the same as proved. Until the test has run, the honest
             // reading is "ready to try", not "working".
-            return services.dictation.models.state == .ready ? .waiting : .bad
+            return services.dictation.loader.state == .ready ? .waiting : .bad
         }
     }
 
-    private var cleanupLevel: StatusChip.Level {
+    private var aiProviderLevel: StatusChip.Level {
         guard services.settings.cleanupEnabled else { return .waiting }
         let providers = services.providers
         switch providers.state(for: providers.activeID).verification {
@@ -72,11 +72,11 @@ struct HomeView: View {
         }
         if !services.dictation.hotkeyActive {
             return (
-                "The key watcher isn't running. Restart Murmr Flow.",
+                "The hotkey watcher isn't running. Restart Murmr Flow.",
                 ("Quit", { NSApplication.shared.terminate(nil) })
             )
         }
-        if case .failed(let message) = services.dictation.models.state {
+        if case .failed(let message) = services.dictation.loader.state {
             return (message, ("Retry", { Task { await services.dictation.warmUp() } }))
         }
         return nil
@@ -162,7 +162,7 @@ struct HomeView: View {
                 VStack(spacing: 0) {
                     ForEach(items) { item in
                         Button {
-                            onOpen(item.isNote ? .notes : .dictaphone)
+                            onOpen(item.isNote ? .notetaker : .dictation)
                         } label: {
                             HStack(spacing: 10) {
                                 if let bundleID = item.bundleID,

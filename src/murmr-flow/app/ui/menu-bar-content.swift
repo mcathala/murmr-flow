@@ -56,7 +56,7 @@ struct MenuBarContent: View {
             Button("Open Murmr Flow") { openWindow(id: MurmrFlowApp.mainWindowID) }
                 .controlSize(.small)
             Button("Settings…") {
-                services.route = .settings(.voice)
+                services.route = .settings(.speechModel)
                 openWindow(id: MurmrFlowApp.mainWindowID)
             }
             .controlSize(.small)
