@@ -274,7 +274,7 @@ final class MeetingCoordinator {
         guard settings.noteCleanupEnabled else { return (transcript, nil) }
         guard !transcript.isEmpty else { return (transcript, nil) }
         guard let preset = prompts.notePrompt else {
-            return (transcript, "No clean-up prompt is set for Note mode.")
+            return (transcript, "No clean-up prompt is set for Notetaker.")
         }
 
         stage = .transcribing(.cleaning)

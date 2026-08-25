@@ -43,7 +43,7 @@ final class DictationCoordinator {
             case .recording: "Listening…"
             case .transcribing: "Transcribing…"
             case .cleaning: "Cleaning up…"
-            case .injecting: "Typing…"
+            case .injecting: "Inserting…"
             case .failed: "Failed"
             }
         }

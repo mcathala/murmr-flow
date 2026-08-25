@@ -25,7 +25,7 @@ struct PermissionsPane: View {
                 if permissions.accessibility != .granted {
                     WarningRow(
                         message: "Accessibility is off, so dictation copies to the "
-                            + "clipboard instead of typing.",
+                            + "clipboard instead of inserting it.",
                         action: ("Open Settings", { permissions.openAccessibilitySettings() })
                     )
                 }

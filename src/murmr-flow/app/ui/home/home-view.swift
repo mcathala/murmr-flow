@@ -33,8 +33,8 @@ struct HomeView: View {
     /// it belongs in the warning below rather than sitting here as a status.
     private var status: some View {
         HStack(spacing: 8) {
-            StatusChip(title: "Voice engine", level: voiceLevel)
-            StatusChip(title: "AI clean-up", level: cleanupLevel)
+            StatusChip(title: "Speech model", level: voiceLevel)
+            StatusChip(title: "AI provider", level: cleanupLevel)
             Spacer(minLength: 0)
         }
     }
@@ -72,7 +72,7 @@ struct HomeView: View {
         }
         if !services.dictation.hotkeyActive {
             return (
-                "The key watcher isn't running. Restart Murmr Flow.",
+                "The hotkey watcher isn't running. Restart Murmr Flow.",
                 ("Quit", { NSApplication.shared.terminate(nil) })
             )
         }

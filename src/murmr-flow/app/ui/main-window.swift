@@ -23,8 +23,8 @@ struct MainWindow: View {
         var label: String {
             switch self {
             case .home: "Home"
-            case .dictaphone: "Dictaphone"
-            case .notes: "Notes"
+            case .dictaphone: "Dictation"
+            case .notes: "Notetaker"
             case .insights: "Insights"
             case .settings(let pane): pane.label
             }

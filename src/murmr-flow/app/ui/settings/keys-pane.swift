@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The two key binds, recorded rather than chosen from a list.
+/// The two hotkeys, recorded rather than chosen from a list.
 ///
 /// It used to offer three fixed triggers. Three was an arbitrary number — it was what we
 /// had implemented — so the answer to "which key" was whichever of ours you disliked least.
@@ -24,21 +24,21 @@ struct KeysPane: View {
     }
 
     var body: some View {
-        PaneScroll(title: "Key binds") {
+        PaneScroll(title: "Hotkeys") {
             SectionLabel(title: "Active")
 
             bindCard(
                 slot: .dictate,
-                title: "Dictate",
+                title: "Dictation",
                 hotkey: settings.hotkey,
                 subtitle: dictation.hotkeyActive
                     ? nil
-                    : "The key watcher isn't running, so this won't fire."
+                    : "The hotkey watcher isn't running, so this won't fire."
             )
 
             bindCard(
                 slot: .meeting,
-                title: "Start or stop a meeting",
+                title: "Notetaker",
                 hotkey: settings.meetingHotkey,
                 subtitle: settings.meetingHotkey == nil
                     ? "Not set — meetings start from the panel or the window."
@@ -64,7 +64,7 @@ struct KeysPane: View {
 
             if !dictation.hotkeyActive {
                 WarningRow(
-                    message: "Grant Accessibility, then restart Murmr Flow, or no key bind "
+                    message: "Grant Accessibility, then restart Murmr Flow, or no hotkey "
                         + "will fire."
                 )
             }
@@ -139,7 +139,7 @@ struct KeysPane: View {
             // The two binds must not be the same key, or one of them silently never wins.
             let other = slot == .dictate ? settings.meetingHotkey : settings.hotkey
             if captured == other {
-                rejected = "\(captured.displayName) is already used by the other bind."
+                rejected = "\(captured.displayName) is already used by the other hotkey."
                 return
             }
 

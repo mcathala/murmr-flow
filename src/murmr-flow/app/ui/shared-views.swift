@@ -147,7 +147,7 @@ struct SettingRow<Control: View>: View {
 /// One component rather than two similar cards. Notes got its own copy first and drifted
 /// immediately — gold button instead of the accent, the Theme fonts instead of the system
 /// ones, a wider button — because "the same as the other one" is not something two files
-/// can keep true. The trailing slot is the only part that differs on purpose: Dictaphone
+/// can keep true. The trailing slot is the only part that differs on purpose: Dictation
 /// puts its prompt there, Notes swaps in live levels while a meeting is running.
 struct RecordCard<Trailing: View>: View {
     let title: String

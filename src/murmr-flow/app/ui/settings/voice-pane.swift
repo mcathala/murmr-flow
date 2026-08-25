@@ -13,7 +13,7 @@ struct VoicePane: View {
     private var speech: SpeechModelStore { dictation.speech }
 
     var body: some View {
-        PaneScroll(title: "Voice transcription") {
+        PaneScroll(title: "Speech model") {
             SectionLabel(title: "In use")
             activeCard
 

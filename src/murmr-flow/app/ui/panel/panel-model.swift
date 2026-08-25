@@ -81,8 +81,8 @@ final class PanelModel {
 
         var message: String {
             switch self {
-            case .transcription: "Voice transcription failed"
-            case .cleanup: "AI clean-up failed"
+            case .transcription: "Speech model failed"
+            case .cleanup: "AI provider failed"
             }
         }
     }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The five settings panes.
+/// The six settings panes.
 ///
 /// They are sidebar rows in the main window rather than a separate Settings scene: one
 /// window means one place to be, and listing the panes shows what is configurable instead
@@ -13,14 +13,19 @@ enum SettingsPane: String, Hashable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Short enough for the sidebar at its default width. "Voice transcription" truncated
-    /// to "Voice transcri…", and under a SETTINGS heading beside "AI clean-up" the first
-    /// word was carrying nothing anyway. The pane's own heading still says it in full.
+    /// The same words the rest of the app uses, and the same words the pane's own heading
+    /// uses — see the vocabulary table in `docs/11-conventions.md`. A pane called one thing
+    /// in the sidebar and another at the top of itself was most of what made the old naming
+    /// hard to follow.
+    ///
+    /// All six fit the sidebar at its default width. "Voice transcription" did not: it
+    /// truncated to "Voice transcri…", which is what the label and the heading disagreeing
+    /// bought us.
     var label: String {
         switch self {
-        case .voice: "Transcription"
-        case .cleanup: "AI clean-up"
-        case .keys: "Key binds"
+        case .voice: "Speech model"
+        case .cleanup: "AI provider"
+        case .keys: "Hotkeys"
         case .prompts: "Prompts"
         case .permissions: "Permissions"
         case .data: "Data"

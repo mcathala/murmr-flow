@@ -48,7 +48,7 @@ final class PromptStore {
         didSet { defaults.set(dictationPromptID.uuidString, forKey: Key.dictation) }
     }
 
-    /// Note mode's preset. Still optional: a preset can be deleted, and pointing at a
+    /// Notetaker's preset. Still optional: a preset can be deleted, and pointing at a
     /// prompt that no longer exists would be worse than pointing at nothing.
     var notePromptID: UUID? {
         didSet { defaults.set(notePromptID?.uuidString, forKey: Key.note) }
@@ -96,7 +96,7 @@ final class PromptStore {
         self.dictationPromptID = loaded.first { $0.id == storedDictation }?.id
             ?? Self.defaultPreset.id
 
-        // Falls back to Meeting the same way dictation falls back to Default. Note mode
+        // Falls back to Meeting the same way dictation falls back to Default. Notetaker
         // having *a* prompt is not the same question as whether clean-up runs — that is
         // `SettingsStore.noteCleanupEnabled`, one switch in one place.
         self.notePromptID = loaded.first { $0.id == storedNote }?.id
@@ -211,7 +211,7 @@ final class PromptStore {
 
     static var defaultPreset: PromptPreset { builtIns[0] }
 
-    /// Note mode's default. Looked up by id rather than position, so reordering the
+    /// Notetaker's default. Looked up by id rather than position, so reordering the
     /// built-ins can't quietly change which prompt meetings use.
     static var meetingPreset: PromptPreset {
         builtIns.first { $0.id == ID.meeting } ?? defaultPreset
@@ -313,7 +313,7 @@ final class PromptStore {
             isBuiltIn: true
         ),
 
-        // Note mode's default. Written for a conversation rather than one person talking:
+        // Notetaker's default. Written for a conversation rather than one person talking:
         // the turns belong to two people, and merging or summarising them would put words
         // in someone's mouth. The line-per-turn format is appended by the app, so this
         // prompt only has to say how to tidy the words.

@@ -164,7 +164,7 @@ final class PanelBridge {
             // The live text goes when tidying starts. Keeping it visible while the model
             // rewrites it invites a comparison the panel is too small to host.
             model.preview = ""
-            model.set(.working("Tidying up…"))
+            model.set(.working("Cleaning up…"))
 
         case .injecting:
             model.set(.working("Inserting…"))
@@ -194,7 +194,7 @@ final class PanelBridge {
 
     private static func failure(for message: String) -> PanelModel.Failure {
         // The panel's whole vocabulary is two lines: which half broke. Anything mentioning
-        // the provider or a key is the AI side; everything else is the voice side.
+        // the provider or a key is the AI provider; everything else is the speech model.
         let lowered = message.lowercased()
         let cleanupWords = ["key", "provider", "api", "clean", "model responded", "http"]
         return cleanupWords.contains(where: lowered.contains) ? .cleanup : .transcription

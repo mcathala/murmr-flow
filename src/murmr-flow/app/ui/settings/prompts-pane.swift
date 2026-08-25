@@ -24,7 +24,7 @@ struct PromptsPane: View {
             .controlSize(.small)
 
             if prompts.notePrompt == nil {
-                Text("No prompt is assigned to Note mode, so meetings are saved exactly "
+                Text("No prompt is assigned to Notetaker, so meetings are saved exactly "
                      + "as transcribed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -40,10 +40,10 @@ struct PromptsPane: View {
                 HStack(spacing: 8) {
                     Text(preset.name).font(.callout.weight(.semibold))
                     if prompts.dictationPromptID == preset.id {
-                        Badge(text: "Dictaphone", symbol: "mic.fill")
+                        Badge(text: "Dictation", symbol: "mic.fill")
                     }
                     if prompts.notePromptID == preset.id {
-                        Badge(text: "Note mode", symbol: "text.document")
+                        Badge(text: "Notetaker", symbol: "text.document")
                     }
                     Spacer(minLength: 0)
                     Button(isOpen ? "Close" : "Edit") {
@@ -81,11 +81,11 @@ struct PromptsPane: View {
                 .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 6))
 
             HStack(spacing: 8) {
-                Button("Use for Dictaphone") { prompts.dictationPromptID = preset.id }
+                Button("Use for Dictation") { prompts.dictationPromptID = preset.id }
                     .controlSize(.small)
                     .disabled(prompts.dictationPromptID == preset.id)
 
-                Button("Use for Note mode") { prompts.notePromptID = preset.id }
+                Button("Use for Notetaker") { prompts.notePromptID = preset.id }
                     .controlSize(.small)
                     .disabled(prompts.notePromptID == preset.id)
 

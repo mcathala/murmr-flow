@@ -21,7 +21,7 @@ struct CleanupPane: View {
     private var providers: ProviderStore { dictation.providers }
 
     var body: some View {
-        PaneScroll(title: "AI clean-up") {
+        PaneScroll(title: "AI provider") {
             SettingRow(title: "Clean up my dictation") {
                 Toggle("", isOn: $settings.cleanupEnabled).labelsHidden()
             }
