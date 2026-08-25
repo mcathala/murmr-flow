@@ -157,7 +157,9 @@ struct DictionarySection: View {
 
             case .spelling:
                 LabeledContent("Word") {
-                    TextField("Acme", text: binding(entry, \.replacement))
+                    // The app's own name, because it is the example: a speech model hears
+                    // "murmur flow" and writes it that way every time.
+                    TextField("Murmr Flow", text: binding(entry, \.replacement))
                         .textFieldStyle(.roundedBorder)
                 }
                 .font(.caption)
