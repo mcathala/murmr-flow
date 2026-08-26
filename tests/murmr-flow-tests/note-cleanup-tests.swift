@@ -175,7 +175,7 @@ struct LegacyFolderTests {
     func moves() throws {
         let root = scratch()
         let legacy = root.appendingPathComponent("Murmr Flow/Meetings", isDirectory: true)
-        let destination = root.appendingPathComponent("MurmurNotes", isDirectory: true)
+        let destination = root.appendingPathComponent("MurmrNotes", isDirectory: true)
         try write("# One", to: legacy.appendingPathComponent("one.md"))
         try write("# Two", to: legacy.appendingPathComponent("two.md"))
 
@@ -190,7 +190,7 @@ struct LegacyFolderTests {
     func pruneIgnoresFinderLeftovers() throws {
         let root = scratch()
         let legacy = root.appendingPathComponent("Murmr Flow/Meetings", isDirectory: true)
-        let destination = root.appendingPathComponent("MurmurNotes", isDirectory: true)
+        let destination = root.appendingPathComponent("MurmrNotes", isDirectory: true)
         try write("# One", to: legacy.appendingPathComponent("one.md"))
         try write("", to: legacy.appendingPathComponent(".DS_Store"))
         try write("", to: root.appendingPathComponent("Murmr Flow/.DS_Store"))
@@ -258,6 +258,45 @@ struct LegacyFolderTests {
         #expect(!FileManager.default.fileExists(
             atPath: root.appendingPathComponent("new").path
         ))
+    }
+
+    @Test("the folder is spelled the way the app is, and both old names are still read")
+    func spellingAndOrder() {
+        #expect(NoteStore.folder.lastPathComponent == "MurmrNotes")
+        #expect(
+            NoteStore.legacyFolders.map(\.lastPathComponent) == ["MurmurNotes", "Meetings"]
+        )
+    }
+
+    @Test("with a note in each old folder, the newer folder wins the clash")
+    func newestLegacyWins() throws {
+        let root = scratch()
+        let destination = root.appendingPathComponent("MurmrNotes", isDirectory: true)
+        let misspelled = root.appendingPathComponent("MurmurNotes", isDirectory: true)
+        let nested = root.appendingPathComponent("Murmr Flow/Meetings", isDirectory: true)
+        try write("the newer copy", to: misspelled.appendingPathComponent("clash.md"))
+        try write("the older copy", to: nested.appendingPathComponent("clash.md"))
+        try write("# Only here", to: nested.appendingPathComponent("older.md"))
+
+        // The order `legacyFolders` declares, run against a scratch root.
+        for legacy in [misspelled, nested] {
+            NoteStore.adoptLegacyFolder(from: legacy, to: destination)
+        }
+
+        let kept = try String(
+            contentsOf: destination.appendingPathComponent("clash.md"), encoding: .utf8
+        )
+        #expect(kept == "the newer copy")
+        // The older copy is skipped rather than lost, and its folder stays for holding it.
+        #expect(FileManager.default.fileExists(
+            atPath: nested.appendingPathComponent("clash.md").path
+        ))
+        // Anything that does not clash still arrives, from either folder.
+        #expect(FileManager.default.fileExists(
+            atPath: destination.appendingPathComponent("older.md").path
+        ))
+        // The misspelled folder emptied, so it goes.
+        #expect(!FileManager.default.fileExists(atPath: misspelled.path))
     }
 }
 

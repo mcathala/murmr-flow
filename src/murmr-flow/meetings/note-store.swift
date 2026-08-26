@@ -22,25 +22,42 @@ final class NoteStore {
     private(set) var notes: [NoteFile] = []
 
     init() {
-        Self.adoptLegacyFolder()
+        Self.adoptLegacyFolders()
         reload()
     }
 
-    /// `~/Documents/MurmurNotes`. Documents rather than Application Support, because
+    /// `~/Documents/MurmrNotes`. Documents rather than Application Support, because
     /// these are the user's own notes and not our state.
     ///
-    /// One flat folder rather than `MurmurNotes/Meetings`: the folder is already named
+    /// One flat folder rather than `MurmrNotes/Meetings`: the folder is already named
     /// for what it holds, so a nested folder with one thing in it is a level to click
     /// through for nothing.
+    ///
+    /// `MurmrNotes` rather than `murmr-notes`: kebab-case is how this repository names its
+    /// own files, and this is a folder the user browses in Finder among their own
+    /// documents. The notes inside it are named `2026-08-21 14-32 Meeting.md` and can be
+    /// retitled to any sentence, so a hyphenated container would not match its contents.
     static var folder: URL {
-        documentsFolder.appendingPathComponent("MurmurNotes", isDirectory: true)
+        documentsFolder.appendingPathComponent("MurmrNotes", isDirectory: true)
     }
 
-    /// Where notes were written before the rename. Read only — nothing new goes here.
-    static var legacyFolder: URL {
-        documentsFolder
-            .appendingPathComponent("Murmr Flow", isDirectory: true)
-            .appendingPathComponent("Meetings", isDirectory: true)
+    /// Every folder notes have been written to before, newest first. Read only — nothing
+    /// new goes to any of them.
+    ///
+    /// The order is the point: a name already taken at the destination is left alone, so
+    /// whichever folder is adopted first wins a clash. The most recently written one holds
+    /// the most recent copy of a note, so it goes first.
+    ///
+    /// `MurmurNotes` spelled the brand with the `u` the product drops everywhere else —
+    /// the app is Murmr Flow — so it read as a folder belonging to something the user had
+    /// never installed.
+    static var legacyFolders: [URL] {
+        [
+            documentsFolder.appendingPathComponent("MurmurNotes", isDirectory: true),
+            documentsFolder
+                .appendingPathComponent("Murmr Flow", isDirectory: true)
+                .appendingPathComponent("Meetings", isDirectory: true),
+        ]
     }
 
     private static var documentsFolder: URL {
@@ -49,19 +66,22 @@ final class NoteStore {
                 .appendingPathComponent("Documents", isDirectory: true)
     }
 
-    /// Moves notes written under the old folder name into the new one.
+    /// Moves notes out of every folder the app used to write to.
+    static func adoptLegacyFolders() {
+        for legacy in legacyFolders {
+            adoptLegacyFolder(from: legacy, to: folder)
+        }
+    }
+
+    /// Moves notes written under an old folder name into the current one.
     ///
     /// Renaming the folder in code would otherwise make every existing note vanish from
     /// the app — the files would still be on disk, but nothing would be looking there.
     /// Moved rather than copied, so there is one copy of each note and no question about
     /// which one an edit lands in. A name already taken at the destination is left alone
     /// rather than overwritten.
-    static func adoptLegacyFolder(
-        from legacy: URL? = nil, to destination: URL? = nil
-    ) {
+    static func adoptLegacyFolder(from legacy: URL, to destination: URL) {
         let manager = FileManager.default
-        let legacy = legacy ?? legacyFolder
-        let destination = destination ?? folder
         guard let names = try? manager.contentsOfDirectory(atPath: legacy.path) else { return }
 
         for name in names where name.hasSuffix(".md") {
