@@ -321,6 +321,13 @@ final class DictationCoordinator {
                 return
             }
 
+            // Words came back, which is everything the voice test proves — so record it
+            // the same way. Until now only the Test button did, and a model that had
+            // just dictated a paragraph still read "Not tested" on Home and in Settings.
+            speech.setVerification(
+                .working(latency: transcribeTime, at: Date()), for: speech.activeModel
+            )
+
             // From here on, text reaches the user no matter what fails.
             stage = .cleaning
             let outcome = await cleanup.clean(
