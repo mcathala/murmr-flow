@@ -24,19 +24,45 @@ import Observation
 final class OnboardingCoordinator {
 
     enum Step: Int, CaseIterable, Sendable {
-        case language, microphone, accessibility, tryIt
+        case language, microphone, accessibility, howItWorks, underTheHood, style, tryIt
 
-        var next: Step? { Step(rawValue: rawValue + 1) }
         var number: Int { rawValue + 1 }
-        static var count: Int { allCases.count }
+
+        /// The steps that change something on the machine. The rest explain or prove, and
+        /// have no condition that could already hold.
+        var isSetup: Bool {
+            switch self {
+            case .language, .microphone, .accessibility: true
+            case .howItWorks, .underTheHood, .style, .tryIt: false
+            }
+        }
+
+        /// Whether the step is left out once its condition holds. The language question is
+        /// not: it is about the person, not the download — a model already on disk only
+        /// means choosing it costs nothing — so it is asked whenever the flow runs at all.
+        var skipsWhenSatisfied: Bool { self != .language }
     }
 
+    /// Where completion is recorded. Public because `SettingsStore` reads it too: it is
+    /// the one mark that tells an install that existed before a default changed from a
+    /// fresh one.
+    nonisolated static let completedDefaultsKey = "onboarding.completed"
+
     private enum Key {
-        static let completed = "onboarding.completed"
+        static let completed = OnboardingCoordinator.completedDefaultsKey
     }
 
     private(set) var isComplete: Bool
     private(set) var step: Step = .language
+
+    /// The steps this run will show, in order — everything not already satisfied when it
+    /// began. Numbering comes from here, not from `Step`: a first page that read "Step 2 of
+    /// 6" because the model happened to be on disk already made the flow look broken.
+    private(set) var plan: [Step] = Step.allCases
+
+    /// "Step 1 of 5" — this step's place among the ones actually shown.
+    var position: Int { (plan.firstIndex(of: step) ?? 0) + 1 }
+    var total: Int { plan.count }
 
     /// True for the beat between a step's condition being met and the next step appearing,
     /// so the tick is seen rather than the screen simply changing under the user.
@@ -59,14 +85,15 @@ final class OnboardingCoordinator {
     /// Decides where to start. Called once, at launch.
     func begin() {
         guard !isComplete else { return }
-        let first = Self.firstUnsatisfied(from: .language, isSatisfied)
-        // Only the try-it step left means everything is already in place — the model is on
-        // disk and both grants exist. There is nothing to set up, so nothing is shown.
-        if first == .tryIt {
+        // Everything already in place — the model on disk, both grants made — means there
+        // is nothing to set up, so nothing is shown; the explanatory pages are for someone
+        // meeting the app for the first time, not for a machine that already runs it.
+        if Step.allCases.filter(\.isSetup).allSatisfy(isSatisfied) {
             finish()
             return
         }
-        step = first
+        plan = Step.allCases.filter { !$0.skipsWhenSatisfied || !isSatisfied($0) }
+        step = plan[0]
     }
 
     /// Moves to the next step whose condition isn't met yet, or finishes after the last.
@@ -74,12 +101,14 @@ final class OnboardingCoordinator {
         advanceTask?.cancel()
         advanceTask = nil
         isAdvancing = false
-        guard let next = step.next else {
+        // A step planned but since satisfied — a grant made from elsewhere while the flow
+        // was on an earlier page — drops out, so the count stays honest.
+        plan.removeAll { $0.rawValue > step.rawValue && $0.skipsWhenSatisfied && isSatisfied($0) }
+        guard let index = plan.firstIndex(of: step), index + 1 < plan.count else {
             finish()
             return
         }
-        // Try-it is never "satisfied", so this always lands on a step.
-        step = Self.firstUnsatisfied(from: next, isSatisfied)
+        step = plan[index + 1]
     }
 
     /// Checks the current step against the world and, if its condition now holds, moves on
@@ -101,15 +130,5 @@ final class OnboardingCoordinator {
         isAdvancing = false
         isComplete = true
         defaults.set(true, forKey: Key.completed)
-    }
-
-    private static func firstUnsatisfied(
-        from start: Step, _ isSatisfied: (Step) -> Bool
-    ) -> Step {
-        var current = start
-        while isSatisfied(current), let next = current.next {
-            current = next
-        }
-        return current
     }
 }

@@ -86,8 +86,8 @@ final class AppServices {
             case .language: SpeechModelLoader.isDownloaded(speech.activeModel)
             case .microphone: permissions.microphone == .granted
             case .accessibility: permissions.accessibility == .granted
-            // The one step with nothing to check: it is there to be done, not verified.
-            case .tryIt: false
+            // Nothing to check: these are there to be read or done, not verified.
+            case .howItWorks, .underTheHood, .style, .tryIt: false
             }
         }
     }
@@ -98,6 +98,7 @@ final class AppServices {
     /// while the flow was covering it.
     func finishOnboarding() {
         onboarding.finish()
+        dictation.deliversText = true
         route = .home
     }
 
@@ -162,6 +163,7 @@ final class AppServices {
 
         armHotkeyIfPossible()
         armMeetingHotkey()
+        FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
         Self.log.notice("hotkey armed: \(self.dictation.hotkeyActive, privacy: .public)")
 
         // Load the model now rather than during the first dictation. Otherwise the user
@@ -213,6 +215,18 @@ final class AppServices {
     func changeMeetingHotkey(to hotkey: Hotkey?) {
         settings.meetingHotkey = hotkey
         armMeetingHotkey()
+        FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
+    }
+
+    func changeDictationHotkey(to hotkey: Hotkey) {
+        dictation.changeHotkey(to: hotkey)
+        FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
+    }
+
+    /// The system gets its fn key back. Called from `applicationWillTerminate`; a crash
+    /// skips it, and the next launch picks the marker up instead.
+    func willTerminate() {
+        FnKeyOwner.release()
     }
 
     private func watchForAccessibility() {

@@ -119,7 +119,7 @@ struct SpeechModelPane: View {
                 StatusChip(title: "Downloaded", level: .waiting)
             }
         } else {
-            StatusChip(title: "\(model.approximateSizeMB) MB", level: .waiting)
+            StatusChip(title: model.approximateSizeLabel, level: .waiting)
         }
     }
 
