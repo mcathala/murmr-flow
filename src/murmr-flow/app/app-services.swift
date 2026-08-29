@@ -39,6 +39,10 @@ final class AppServices {
     let dictionary = DictionaryStore()
     let speech = SpeechModelStore()
     let audioDevices: AudioDeviceStore
+
+    /// First launch. Reads the same permission and model state as everything else, so a
+    /// step is shown only while its condition is unmet — see the coordinator for the rules.
+    let onboarding: OnboardingCoordinator
     private let loader = SpeechModelLoader()
     private let transcriber = TranscriptionService()
 
@@ -72,6 +76,29 @@ final class AppServices {
             settings: settings, prompts: prompts, providers: providers,
             dictionary: dictionary, devices: devices
         )
+
+        // Locals, not `self`: an escaping closure may not capture `self` before every
+        // stored property has been set, and this one is being set.
+        let permissions = self.permissions
+        let speech = self.speech
+        onboarding = OnboardingCoordinator { step in
+            switch step {
+            case .language: SpeechModelLoader.isDownloaded(speech.activeModel)
+            case .microphone: permissions.microphone == .granted
+            case .accessibility: permissions.accessibility == .granted
+            // The one step with nothing to check: it is there to be done, not verified.
+            case .tryIt: false
+            }
+        }
+    }
+
+    // MARK: - Onboarding
+
+    /// The last screen's Done. Lands on Home, whatever the menu bar or ⌘, did to the route
+    /// while the flow was covering it.
+    func finishOnboarding() {
+        onboarding.finish()
+        route = .home
     }
 
     // MARK: - Settings level
@@ -105,6 +132,11 @@ final class AppServices {
         hasStarted = true
         Self.log.notice("start(\(trigger, privacy: .public)) running")
 
+        onboarding.begin()
+        Self.log.notice(
+            "onboarding: \(self.onboarding.isComplete ? "complete" : String(describing: self.onboarding.step), privacy: .public)"
+        )
+
         // One bridge owns every link between the coordinators and the panel, so neither
         // coordinator ever holds a reference to a window.
         let bridge = PanelBridge(
@@ -134,6 +166,11 @@ final class AppServices {
 
         // Load the model now rather than during the first dictation. Otherwise the user
         // holds the key, speaks, releases — and only then waits for a ~600 MB download.
+        //
+        // Except when the first thing on screen is the question of *which* model: 600 MB of
+        // one would already be on its way before the user had answered. Choosing is what
+        // starts the download then — see `OnboardingView.choose`.
+        guard onboarding.isComplete || onboarding.step != .language else { return }
         Task {
             Self.log.notice("warmUp starting")
             await dictation.warmUp()

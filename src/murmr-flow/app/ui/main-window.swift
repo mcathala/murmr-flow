@@ -68,6 +68,34 @@ struct MainWindow: View {
     static let sidebarWidth: CGFloat = 198
 
     var body: some View {
+        Group {
+            // First launch takes the whole window. The sidebar is navigation, and there is
+            // nowhere to navigate to until the app can hear you.
+            if services.onboarding.isComplete {
+                shell.transition(.opacity)
+            } else {
+                OnboardingView(services: services).transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: services.onboarding.isComplete)
+        // One ground behind everything, so no layout state leaves a strip unpainted.
+        .background(InkGround())
+        .font(Theme.Text.body)
+        .foregroundStyle(Theme.Palette.text)
+        .tint(Theme.Palette.gold)
+        .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
+        .onAppear {
+            // Land on the thing that needs attention rather than hiding a broken
+            // permission behind a row the user has no reason to click. Not on a first
+            // launch, where the flow covering the window is already that landing.
+            if services.onboarding.isComplete, !services.permissions.allGranted {
+                services.openSettings(.privacyData)
+            }
+        }
+    }
+
+    /// The sidebar and the section it selects — the window on every launch but the first.
+    private var shell: some View {
         HStack(spacing: 0) {
             sidebar
                 .frame(width: Self.sidebarWidth)
@@ -83,19 +111,6 @@ struct MainWindow: View {
 
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        // One ground behind everything, so no layout state leaves a strip unpainted.
-        .background(InkGround())
-        .font(Theme.Text.body)
-        .foregroundStyle(Theme.Palette.text)
-        .tint(Theme.Palette.gold)
-        .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
-        .onAppear {
-            // Land on the thing that needs attention rather than hiding a broken
-            // permission behind a row the user has no reason to click.
-            if !services.permissions.allGranted {
-                services.openSettings(.privacyData)
-            }
         }
     }
 
