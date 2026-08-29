@@ -29,8 +29,32 @@ final class SettingsStore {
         self.notetakerCleanupEnabled = defaults.object(forKey: Key.noteEnabled) as? Bool ?? true
         self.promptTemplate =
             defaults.string(forKey: Key.prompt) ?? PromptLibrary.defaultCleanupPrompt
-        self.hotkey = Self.decode(defaults.data(forKey: Key.hotkey)) ?? .default
-        self.meetingHotkey = Self.decode(defaults.data(forKey: Key.meetingHotkey))
+        // An install from before fn was the default keeps the keys it had: right ⌥, and no
+        // meeting key. A default that was never written cannot be told from a fresh install
+        // by its absence — only by the onboarding flag, which an existing install has set
+        // and a new one has not. Written back so the choice is made once and then shows
+        // in Settings like any other.
+        let isExistingInstall = defaults.bool(forKey: OnboardingCoordinator.completedDefaultsKey)
+
+        if let hotkey = Self.decode(defaults.data(forKey: Key.hotkey)) {
+            self.hotkey = hotkey
+        } else if isExistingInstall {
+            self.hotkey = .legacyDefault
+            defaults.set(Self.encode(.legacyDefault), forKey: Key.hotkey)
+        } else {
+            self.hotkey = .default
+        }
+        // Three states on disk: never set (use the default), set (decode it), and cleared
+        // (an empty blob — `nil` would read back as never set and the default would return
+        // on the next launch, undoing the Clear button).
+        if let data = defaults.data(forKey: Key.meetingHotkey) {
+            self.meetingHotkey = data.isEmpty ? nil : Self.decode(data)
+        } else if isExistingInstall {
+            self.meetingHotkey = nil
+            defaults.set(Data(), forKey: Key.meetingHotkey)
+        } else {
+            self.meetingHotkey = .meetingDefault
+        }
         self.pauseMediaWhileDictating =
             defaults.object(forKey: Key.pauseMedia) as? Bool ?? true
         self.holdToTalk = defaults.object(forKey: Key.holdToTalk) as? Bool ?? true
@@ -69,11 +93,13 @@ final class SettingsStore {
         didSet { defaults.set(Self.encode(hotkey), forKey: Key.hotkey) }
     }
 
-    /// The key that starts a meeting. Optional, because there is no sensible default to
-    /// impose — a global key that begins recording everything you hear should be one you
-    /// asked for.
+    /// The key that starts a meeting. fn + left ⇧ by default — the dictation key with one
+    /// more finger; still optional, because someone may not want a global key that begins
+    /// recording everything they hear, and Clear must stay cleared.
     var meetingHotkey: Hotkey? {
-        didSet { defaults.set(meetingHotkey.flatMap(Self.encode), forKey: Key.meetingHotkey) }
+        didSet {
+            defaults.set(meetingHotkey.flatMap(Self.encode) ?? Data(), forKey: Key.meetingHotkey)
+        }
     }
 
     private static func encode(_ hotkey: Hotkey) -> Data? {
@@ -90,8 +116,10 @@ final class SettingsStore {
         didSet { defaults.set(pauseMediaWhileDictating, forKey: Key.pauseMedia) }
     }
 
-    /// Hold the key to talk, or press once to start and once to stop. Was a hardcoded
-    /// assumption; some people would rather not hold a key for a long dictation.
+    /// Hold the key to talk, or press once to start and once to stop. Hold is the default,
+    /// as in Wispr Flow: a dictation is a sentence or two, letting go is the natural way to
+    /// say "done", and a key that is held cannot be forgotten in the on position. The
+    /// meeting key is press-to-toggle regardless — nobody holds a key for an hour.
     var holdToTalk: Bool {
         didSet { defaults.set(holdToTalk, forKey: Key.holdToTalk) }
     }

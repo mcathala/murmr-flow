@@ -9,9 +9,11 @@ import CoreGraphics
 ///
 /// Two shapes, because macOS reports them through different events:
 ///
-///   - **A modifier on its own** — right ⌥, fn, right ⌘. Arrives as `flagsChanged`, and
-///     the only way to tell left from right is the key code, so the code is what we store
-///     rather than the flag.
+///   - **Modifiers only** — fn, right ⌥, or fn + left ⇧. Arrive as `flagsChanged`, and the
+///     only way to tell left from right is the key code, so the code of the key that
+///     completes the chord is what we store rather than its flag. Any other modifiers in
+///     the chord are stored as flags: left and right are told apart for the one key, not
+///     for its companions.
 ///   - **A key with modifiers** — ⌘⇧D. Arrives as `keyDown`.
 ///
 /// A bare non-modifier key is deliberately not expressible: it would fire every time you
@@ -19,14 +21,63 @@ import CoreGraphics
 struct Hotkey: Codable, Equatable, Sendable {
 
     let keyCode: UInt16
-    /// Modifiers that must be held *as well*. Empty for a modifier-only trigger, where the
-    /// key is its own modifier.
+    /// Modifiers that must be held *as well*. For a modifier-only trigger these are the
+    /// *other* modifiers in the chord — empty when the key is on its own.
     let modifierRawValue: UInt64
     let isModifierOnly: Bool
 
     var modifiers: CGEventFlags { CGEventFlags(rawValue: modifierRawValue) }
 
-    static let `default` = Hotkey(keyCode: 61, modifierRawValue: 0, isModifierOnly: true)
+    /// fn holds a dictation. The same key Wispr Flow and OpenWhispr chose: alone in the
+    /// corner of every Apple keyboard, nothing types with it, and no layout treats it as
+    /// AltGr the way French ones treat right ⌥.
+    static let `default` = Hotkey(keyCode: 63, modifierRawValue: 0, isModifierOnly: true)
+
+    /// What dictation was bound to before fn: right ⌥. Installs from then keep it — see
+    /// `SettingsStore` — so a key nobody asked to change does not change under them.
+    static let legacyDefault = Hotkey(keyCode: 61, modifierRawValue: 0, isModifierOnly: true)
+
+    /// fn + left ⇧ starts and stops a meeting. The same corner key with one more finger, so
+    /// the two jobs are learnt as one gesture and its variant rather than as two keys —
+    /// and a second finger is what stops a meeting starting by accident.
+    static let meetingDefault = Hotkey(
+        keyCode: 56, modifierRawValue: CGEventFlags.maskSecondaryFn.rawValue,
+        isModifierOnly: true
+    )
+
+    /// The one flag a modifier key sets while it is down, or nil for any other key.
+    var ownFlag: CGEventFlags? { Self.modifierFlags[keyCode] }
+
+    /// Whether fn is part of this key — on its own, in a chord, or held with a letter. The
+    /// system's own fn action has to be parked while any such key is ours.
+    var usesFn: Bool {
+        (isModifierOnly && keyCode == 63) || modifiers.contains(.maskSecondaryFn)
+    }
+
+    // MARK: - Matching
+
+    /// What a `flagsChanged` event means for a modifier-only trigger: now held (`true`),
+    /// now released (`false`), or nothing to do with it (`nil`).
+    ///
+    /// The event has to be about one of the chord's own keys — fn or left ⇧ for
+    /// fn + left ⇧ — so that pressing them in either order lands, and so that right ⇧ does
+    /// nothing when left ⇧ was recorded. The modifier bits then have to match **exactly**:
+    /// fn on its own is not held while ⇧ is also down, or the dictation key would fire on
+    /// the first half of the meeting chord.
+    func modifierState(keyCode code: UInt16, flags: CGEventFlags) -> Bool? {
+        guard isModifierOnly, let ownFlag else { return nil }
+        if code != keyCode {
+            guard let flag = Self.modifierFlags[code], flag != ownFlag, modifiers.contains(flag)
+            else { return nil }
+        }
+        let required = modifiers.union(ownFlag)
+        return flags.intersection(Self.allModifierMasks) == required
+    }
+
+    /// Every bit a modifier key can set, for isolating them from the rest of an event's flags.
+    static let allModifierMasks: CGEventFlags = [
+        .maskCommand, .maskAlternate, .maskControl, .maskShift, .maskSecondaryFn,
+    ]
 
     // MARK: - Naming
 
@@ -34,7 +85,10 @@ struct Hotkey: Codable, Equatable, Sendable {
     /// so it is recognisable rather than described.
     var displayName: String {
         if isModifierOnly {
-            return Self.modifierNames[keyCode] ?? "key \(keyCode)"
+            let key = Self.modifierNames[keyCode] ?? "key \(keyCode)"
+            // "fn + left ⇧": the companions by symbol, the key by name, because only the key
+            // knows which side it is on.
+            return (Self.words(for: modifiers) + [key]).joined(separator: " + ")
         }
         return Self.symbols(for: modifiers) + (Self.keyNames[keyCode] ?? "key \(keyCode)")
     }
@@ -85,6 +139,17 @@ struct Hotkey: Codable, Equatable, Sendable {
         return out
     }
 
+    /// The same, one word per modifier and with fn first, the way Apple writes fn chords.
+    private static func words(for flags: CGEventFlags) -> [String] {
+        var out: [String] = []
+        if flags.contains(.maskSecondaryFn) { out.append("fn") }
+        if flags.contains(.maskControl) { out.append("⌃") }
+        if flags.contains(.maskAlternate) { out.append("⌥") }
+        if flags.contains(.maskShift) { out.append("⇧") }
+        if flags.contains(.maskCommand) { out.append("⌘") }
+        return out
+    }
+
     /// Enough of the US layout to name what someone is likely to pick. Anything missing
     /// falls back to its code rather than being refused — an unnamed key still works.
     static let keyNames: [UInt16: String] = [
@@ -109,10 +174,18 @@ struct Hotkey: Codable, Equatable, Sendable {
 /// poor trade.
 ///
 /// Returning nil from the handler swallows the event, so recording ⌘Q does not quit.
+///
+/// Modifiers are taken when the first of them comes back **up**, not when it goes down:
+/// fn followed by ⇧ has to be recordable as one chord, and on the way down there is no
+/// telling whether another key is about to join.
 @MainActor
 final class HotkeyRecorder {
 
     private var monitor: Any?
+
+    /// Modifier keys currently down, in the order they were pressed. The last one is the
+    /// key; the rest are its companions.
+    private var heldModifiers: [UInt16] = []
 
     var isRecording: Bool { monitor != nil }
 
@@ -121,6 +194,7 @@ final class HotkeyRecorder {
 
     func start() {
         stop()
+        heldModifiers = []
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) {
             [weak self] event in
             guard let self else { return event }
@@ -155,15 +229,21 @@ final class HotkeyRecorder {
             return nil
 
         case .flagsChanged:
-            guard Hotkey.isModifierKeyCode(event.keyCode),
-                  let flag = Hotkey.modifierFlags[event.keyCode]
-            else { return nil }
-            // flagsChanged fires for press *and* release; only a press means the key is
-            // now held, which is the one we want to record.
-            guard Self.eventFlags(event.modifierFlags).contains(flag) else { return nil }
-
+            guard let flag = Hotkey.modifierFlags[event.keyCode] else { return nil }
+            // flagsChanged fires for press *and* release; which one has to be inferred
+            // from whether the flag is now set.
+            if Self.eventFlags(event.modifierFlags).contains(flag) {
+                heldModifiers.removeAll { $0 == event.keyCode }
+                heldModifiers.append(event.keyCode)
+                return nil
+            }
+            // Released. Whatever was down at that moment is the answer.
+            guard let key = heldModifiers.last else { return nil }
+            let companions = heldModifiers.dropLast()
+                .compactMap { Hotkey.modifierFlags[$0] }
+                .reduce(CGEventFlags()) { $0.union($1) }
             finish(
-                Hotkey(keyCode: event.keyCode, modifierRawValue: 0, isModifierOnly: true)
+                Hotkey(keyCode: key, modifierRawValue: companions.rawValue, isModifierOnly: true)
             )
             return nil
 

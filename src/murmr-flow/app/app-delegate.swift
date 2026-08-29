@@ -34,6 +34,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Synchronous on purpose: a Task would not run before the process is gone.
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            AppServices.shared.willTerminate()
+        }
+    }
+
     /// SwiftUI creates the window some time after launch, so poll rather than assuming
     /// it already exists. Three seconds because the window arrives later once there is
     /// more to build than an empty view.

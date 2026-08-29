@@ -31,8 +31,13 @@ final class OnboardingCoordinator {
         static var count: Int { allCases.count }
     }
 
+    /// Where completion is recorded. Public because `SettingsStore` reads it too: it is
+    /// the one mark that tells an install that existed before a default changed from a
+    /// fresh one.
+    nonisolated static let completedDefaultsKey = "onboarding.completed"
+
     private enum Key {
-        static let completed = "onboarding.completed"
+        static let completed = OnboardingCoordinator.completedDefaultsKey
     }
 
     private(set) var isComplete: Bool

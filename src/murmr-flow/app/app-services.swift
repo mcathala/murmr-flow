@@ -162,6 +162,7 @@ final class AppServices {
 
         armHotkeyIfPossible()
         armMeetingHotkey()
+        FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
         Self.log.notice("hotkey armed: \(self.dictation.hotkeyActive, privacy: .public)")
 
         // Load the model now rather than during the first dictation. Otherwise the user
@@ -213,6 +214,18 @@ final class AppServices {
     func changeMeetingHotkey(to hotkey: Hotkey?) {
         settings.meetingHotkey = hotkey
         armMeetingHotkey()
+        FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
+    }
+
+    func changeDictationHotkey(to hotkey: Hotkey) {
+        dictation.changeHotkey(to: hotkey)
+        FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
+    }
+
+    /// The system gets its fn key back. Called from `applicationWillTerminate`; a crash
+    /// skips it, and the next launch picks the marker up instead.
+    func willTerminate() {
+        FnKeyOwner.release()
     }
 
     private func watchForAccessibility() {

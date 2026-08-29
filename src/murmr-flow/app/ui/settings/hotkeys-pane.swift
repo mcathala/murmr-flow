@@ -129,13 +129,22 @@ struct HotkeysPane: View {
                 }
 
                 if isRecording {
-                    Text("Escape cancels. A letter on its own won't be accepted — it would "
-                         + "fire every time you typed it.")
+                    Text("Escape cancels. Modifiers can be combined — fn with ⇧, say. A "
+                         + "letter on its own won't be accepted; it would fire every time "
+                         + "you typed it.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                } else if let hotkey, let conflict = HotkeyMonitor.conflict(for: hotkey) {
-                    Text(conflict).font(.caption).foregroundStyle(.orange)
+                } else if let hotkey {
+                    if let conflict = HotkeyMonitor.conflict(for: hotkey) {
+                        Text(conflict).font(.caption).foregroundStyle(.orange)
+                    }
+                    if let warning = HotkeyMonitor.systemFnWarning(for: hotkey) {
+                        WarningRow(
+                            message: warning,
+                            action: ("Open Keyboard Settings", { HotkeyMonitor.openKeyboardSettings() })
+                        )
+                    }
                 }
             }
         }
@@ -158,7 +167,7 @@ struct HotkeysPane: View {
             }
 
             switch slot {
-            case .dictate: dictation.changeHotkey(to: captured)
+            case .dictate: services.changeDictationHotkey(to: captured)
             case .meeting: services.changeMeetingHotkey(to: captured)
             }
         }
