@@ -23,6 +23,22 @@ struct OnboardingTests {
         return OnboardingCoordinator(defaults: defaults) { world.satisfied.contains($0) }
     }
 
+    /// The person picks languages; the model follows. Only English alone gets the English
+    /// model — it is the better one for English, not a lesser one.
+    @Test("languages decide the model")
+    func languagesDecideTheModel() {
+        #expect(SpeechModel.covering(["English"]) == .parakeetV2)
+        #expect(SpeechModel.covering(["English", "French"]) == .parakeetV3)
+        #expect(SpeechModel.covering(["French"]) == .parakeetV3)
+        #expect(Array(SpeechModel.languageChoices.prefix(2)) == ["English", "French"])
+        #expect(SpeechModel.otherLanguages == SpeechModel.otherLanguages.sorted())
+        #expect(Set(SpeechModel.languageChoices) == Set(SpeechModel.parakeetV3.languages))
+        // Every language offered has a flag; a chip without one would look like a mistake.
+        for language in SpeechModel.languageChoices {
+            #expect(SpeechModel.flag(for: language) != nil, "\(language) has no flag")
+        }
+    }
+
     @Test("a fresh machine starts at the first question")
     func fresh() {
         let flow = make(World())
@@ -31,15 +47,44 @@ struct OnboardingTests {
         #expect(flow.step == .language)
     }
 
-    /// The model is already on disk, so the language question would be asking about a
-    /// download that isn't going to happen.
-    @Test("a satisfied step is not shown")
-    func startsAtFirstGap() {
+    /// A model on disk does not answer which languages the person dictates in — it only
+    /// makes the answer free. The question is asked whenever the flow runs.
+    @Test("the language question is asked even when a model is already on disk")
+    func languageAlwaysAsked() {
         let world = World()
         world.satisfied = [.language]
         let flow = make(world)
         flow.begin()
-        #expect(flow.step == .microphone)
+        #expect(flow.step == .language)
+        #expect(flow.total == 7)
+    }
+
+    /// A grant already made is a different matter: there is nothing to ask.
+    @Test("a satisfied permission step is not shown")
+    func startsAtFirstGap() {
+        let world = World()
+        world.satisfied = [.language, .microphone]
+        let flow = make(world)
+        flow.begin()
+        #expect(flow.step == .language)
+        flow.advance()
+        #expect(flow.step == .accessibility)
+        #expect(flow.total == 6)
+    }
+
+    /// The first page a person sees must say "1", whatever it is.
+    @Test("numbering counts the steps shown, not the steps that exist")
+    func numbering() {
+        let world = World()
+        world.satisfied = [.microphone]
+        let flow = make(world)
+        flow.begin()
+        #expect(flow.step == .language)
+        #expect(flow.position == 1)
+        #expect(flow.total == 6)
+        flow.advance()
+        #expect(flow.step == .accessibility)
+        #expect(flow.position == 2)
     }
 
     @Test("advancing skips over anything already met")
@@ -64,15 +109,32 @@ struct OnboardingTests {
         #expect(flow.isComplete)
     }
 
+    /// The two explanatory pages have no condition, so they are always walked through.
+    @Test("the explanation always follows the last thing set up, then the try")
+    func explanationThenTry() {
+        let world = World()
+        world.satisfied = [.language, .microphone]
+        let flow = make(world)
+        flow.begin()
+        flow.advance()
+        #expect(flow.step == .accessibility)
+        flow.advance()
+        #expect(flow.step == .howItWorks)
+        flow.advance()
+        #expect(flow.step == .underTheHood)
+        flow.advance()
+        #expect(flow.step == .style)
+        flow.advance()
+        #expect(flow.step == .tryIt)
+    }
+
     @Test("advancing past the last step finishes")
     func finishesAtEnd() {
         let world = World()
         world.satisfied = [.language, .microphone]
         let flow = make(world)
         flow.begin()
-        #expect(flow.step == .accessibility)
-        flow.advance()
-        #expect(flow.step == .tryIt)
+        while flow.step != .tryIt { flow.advance() }
         flow.advance()
         #expect(flow.isComplete)
     }

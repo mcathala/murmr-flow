@@ -147,6 +147,11 @@ final class DictationCoordinator {
     /// change under us, but the paste needs to land where the user was actually typing.
     private var targetApp: NSRunningApplication?
 
+    /// Whether the finished text is pasted where the cursor is. Off while onboarding's
+    /// try-it page is up: there is no field to paste into, the page shows the words
+    /// itself, and the paste would only swap the clipboard for nothing.
+    var deliversText = true
+
     /// True while meetings mode holds the microphone. Dictation stands down rather than
     /// opening a second input stream over the top of an hour-long recording.
     var isSuspended = false
@@ -331,14 +336,16 @@ final class DictationCoordinator {
 
             stage = .injecting
             var note = outcome.note
-            do {
-                try TextInjector.inject(outcome.text)
-            } catch {
-                // The text is on the clipboard either way — say so rather than
-                // pretending the dictation succeeded silently.
-                note = [note, error.localizedDescription]
-                    .compactMap { $0 }
-                    .joined(separator: " ")
+            if deliversText {
+                do {
+                    try TextInjector.inject(outcome.text)
+                } catch {
+                    // The text is on the clipboard either way — say so rather than
+                    // pretending the dictation succeeded silently.
+                    note = [note, error.localizedDescription]
+                        .compactMap { $0 }
+                        .joined(separator: " ")
+                }
             }
 
             lastRun = Run(

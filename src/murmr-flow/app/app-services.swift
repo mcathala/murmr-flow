@@ -86,8 +86,8 @@ final class AppServices {
             case .language: SpeechModelLoader.isDownloaded(speech.activeModel)
             case .microphone: permissions.microphone == .granted
             case .accessibility: permissions.accessibility == .granted
-            // The one step with nothing to check: it is there to be done, not verified.
-            case .tryIt: false
+            // Nothing to check: these are there to be read or done, not verified.
+            case .howItWorks, .underTheHood, .style, .tryIt: false
             }
         }
     }
@@ -98,6 +98,7 @@ final class AppServices {
     /// while the flow was covering it.
     func finishOnboarding() {
         onboarding.finish()
+        dictation.deliversText = true
         route = .home
     }
 
