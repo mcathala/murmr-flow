@@ -68,6 +68,24 @@ final class PermissionManager {
         startPolling()
     }
 
+    /// Puts the app in the Accessibility list and opens the pane — no dialog.
+    ///
+    /// An app is listed in that pane once TCC has been asked about it. Apple's dialog does
+    /// that, but it is a whole extra screen whose only useful button opens the pane we can
+    /// open ourselves. A single accessibility call asks TCC the same question quietly: it
+    /// is refused, the refusal is recorded, and the app appears in the list with its
+    /// toggle off — which is the state the user needs to see to flip it.
+    ///
+    /// `promptAccessibility()` stays as the fallback for a machine where this does not
+    /// list the app; the dialog is guaranteed to.
+    func requestAccessibility() {
+        var value: CFTypeRef?
+        _ = AXUIElementCopyAttributeValue(
+            AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &value
+        )
+        openAccessibilitySettings()
+    }
+
     // MARK: - Deep links
 
     func openAccessibilitySettings() {
