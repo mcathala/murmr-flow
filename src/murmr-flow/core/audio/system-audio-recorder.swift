@@ -25,8 +25,9 @@ final class SystemAudioRecorder: @unchecked Sendable {
         var errorDescription: String? {
             switch self {
             case .tapCreationFailed(let status):
-                "Could not capture system audio (error \(status)). Allow Murmr Flow "
-                    + "under Privacy & Security › System Audio Recording."
+                "Could not capture system audio (error \(status)). Turn on Murmr Flow "
+                    + "under Privacy & Security › Screen & System Audio Recording — only "
+                    + "the audio is taken, never your screen."
             case .aggregateDeviceFailed(let status):
                 "Could not set up the capture device (error \(status))."
             case .formatUnavailable:
@@ -81,6 +82,42 @@ final class SystemAudioRecorder: @unchecked Sendable {
     /// "not supported" rather than as a Core Audio error code.
     static var isSupported: Bool {
         if #available(macOS 14.2, *) { true } else { false }
+    }
+
+    // MARK: - Permission
+
+    /// Where a successful tap creation is remembered. macOS offers no way to *read* the
+    /// System Audio Recording grant — the only probe is creating a tap, and the first
+    /// attempt is also the request — so the app keeps the one trace it can: whether a tap
+    /// has ever been created on this install.
+    static let accessDefaultsKey = "permissions.systemAudio"
+
+    /// Whether meetings are known to be allowed to hear the system's audio. False means
+    /// "never proven", not "denied" — the difference only a probe can settle.
+    static var hasKnownAccess: Bool {
+        !isSupported || UserDefaults.standard.bool(forKey: accessDefaultsKey)
+    }
+
+    /// Asks for — or re-checks — the grant, with a throwaway tap destroyed the moment its
+    /// creation answers the question. The first call ever is what shows Apple's prompt,
+    /// so this must only run from a button the user pressed; once the grant is settled,
+    /// calling again re-checks silently.
+    static func probeAccess() -> Bool {
+        guard #available(macOS 14.2, *) else { return false }
+        let description = CATapDescription(monoGlobalTapButExcludeProcesses: [])
+        description.name = "Murmr Flow permission check"
+        description.isPrivate = true
+        description.muteBehavior = .unmuted
+
+        var id = AudioObjectID(kAudioObjectUnknown)
+        let status = AudioHardwareCreateProcessTap(description, &id)
+        guard status == noErr, id != kAudioObjectUnknown else {
+            UserDefaults.standard.removeObject(forKey: accessDefaultsKey)
+            return false
+        }
+        AudioHardwareDestroyProcessTap(id)
+        UserDefaults.standard.set(true, forKey: accessDefaultsKey)
+        return true
     }
 
     // MARK: - Lifecycle
@@ -205,8 +242,12 @@ final class SystemAudioRecorder: @unchecked Sendable {
         var id = AudioObjectID(kAudioObjectUnknown)
         let status = AudioHardwareCreateProcessTap(description, &id)
         guard status == noErr, id != kAudioObjectUnknown else {
+            // The grant was revoked or reset; forget the remembered yes, so onboarding's
+            // step comes back rather than being skipped on a machine that would fail.
+            UserDefaults.standard.removeObject(forKey: Self.accessDefaultsKey)
             throw RecorderError.tapCreationFailed(status)
         }
+        UserDefaults.standard.set(true, forKey: Self.accessDefaultsKey)
         tapID = id
     }
 

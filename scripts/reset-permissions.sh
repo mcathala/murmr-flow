@@ -36,6 +36,12 @@ for service in Microphone Accessibility ListenEvent PostEvent AudioCapture; do
     fi
 done
 
+# The app remembers a successful system-audio probe in its own defaults, because macOS
+# offers no way to read that grant. Resetting TCC without clearing the memory would make
+# onboarding skip a step that will then fail.
+defaults delete "$BUNDLE_ID" permissions.systemAudio >/dev/null 2>&1 || true
+printf '  \033[32m✓\033[0m %s\n' "remembered system-audio probe"
+
 echo
 printf 'Relaunch to see the prompts again:\n'
 printf '  open "/Applications/%s.app"\n\n' "$APP_NAME"

@@ -24,7 +24,14 @@ import Observation
 final class OnboardingCoordinator {
 
     enum Step: Int, CaseIterable, Sendable {
-        case language, microphone, accessibility, howItWorks, underTheHood, style, tryIt
+        // Declaration order is flow order: teach everything, then ask for everything.
+        // The reading pages — what happens to the audio, the two keys, the style — all
+        // come before a single grant is requested, so the privacy case has been made by
+        // the time anything asks to hear or control the computer. The three grants then
+        // stack in rising order of gravity, with Accessibility immediately before Try It,
+        // the step it unlocks.
+        case language, underTheHood, howItWorks, style, microphone, systemAudio,
+             accessibility, tryIt
 
         var number: Int { rawValue + 1 }
 
@@ -32,7 +39,7 @@ final class OnboardingCoordinator {
         /// have no condition that could already hold.
         var isSetup: Bool {
             switch self {
-            case .language, .microphone, .accessibility: true
+            case .language, .microphone, .systemAudio, .accessibility: true
             case .howItWorks, .underTheHood, .style, .tryIt: false
             }
         }

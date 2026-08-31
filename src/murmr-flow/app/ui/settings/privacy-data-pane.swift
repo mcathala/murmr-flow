@@ -71,7 +71,7 @@ struct PrivacyDataPane: View {
 
     @ViewBuilder
     private var permissionsBlock: some View {
-        if permissions.allGranted {
+        if permissions.allGranted, permissions.systemAudio == .granted {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 Text("All permissions granted.").font(.callout)
@@ -102,13 +102,25 @@ struct PrivacyDataPane: View {
                     )
                 )
             }
+            // The third of the three onboarding asks. It used to be unmentionable — no
+            // API to query — but the probe remembers its answer now, so there is
+            // something honest to show and a button that acts on it.
+            if permissions.systemAudio != .granted {
+                WarningRow(
+                    message: "System audio is off, so meeting notes only hear your side.",
+                    action: (
+                        permissions.systemAudio == .notDetermined ? "Ask" : "Open Settings",
+                        {
+                            if permissions.systemAudio == .notDetermined {
+                                Task { await permissions.requestSystemAudio() }
+                            } else {
+                                permissions.openSystemAudioSettings()
+                            }
+                        }
+                    )
+                )
+            }
         }
-
-        // System audio is deliberately not mentioned. It has no API to query, so there was
-        // never anything honest to show — and the line that used to say it would be asked
-        // for later was a promise about the future in a pane whose rule is that anything
-        // fine collapses to one line. `SystemAudioRecorder` already produces the real
-        // message at the moment it fails, which is the only place it can be acted on.
     }
 
     // MARK: - Where notes are saved

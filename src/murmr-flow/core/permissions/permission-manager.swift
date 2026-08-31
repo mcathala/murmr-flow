@@ -11,14 +11,19 @@ import Observation
 ///   - **Accessibility** — *cannot be prompted.* There is no API that grants it.
 ///     `AXIsProcessTrusted()` returns a bool and that is all you get, so the app must
 ///     deep-link to System Settings and poll for the state to flip.
-///
-/// System Audio Recording (meetings mode) arrives in v2.
+///   - **System Audio Recording** (meetings) — cannot even be *read*. The only probe is
+///     creating a tap, and the first attempt is also the request, so the state here is
+///     what the last probe proved — see `SystemAudioRecorder.probeAccess`.
 @MainActor
 @Observable
 final class PermissionManager {
 
     private(set) var microphone: PermissionState = .notDetermined
     private(set) var accessibility: PermissionState = .denied
+    /// Meetings only, so deliberately not part of `allGranted` — a dictation-only user
+    /// should never see a warning about a grant they have no use for.
+    private(set) var systemAudio: PermissionState =
+        SystemAudioRecorder.hasKnownAccess ? .granted : .notDetermined
 
     /// True once every permission dictation needs is granted.
     var allGranted: Bool { microphone == .granted && accessibility == .granted }
@@ -36,6 +41,23 @@ final class PermissionManager {
         // AXIsProcessTrusted() is the only way to read this. There is no
         // "notDetermined" state — either the app is in the Accessibility list or not.
         accessibility = AXIsProcessTrusted() ? .granted : .denied
+        // Never regresses here: a probe is the only thing that can say no, and a meeting
+        // succeeding says yes as a side effect.
+        if SystemAudioRecorder.hasKnownAccess { systemAudio = .granted }
+    }
+
+    /// Runs the throwaway-tap probe off the main thread — the first call ever shows
+    /// Apple's prompt and blocks on the answer, so it must come from a button press.
+    /// After a denial it re-checks silently, which is what lets onboarding notice a grant
+    /// made in System Settings.
+    func requestSystemAudio() async {
+        let granted = await Task.detached { SystemAudioRecorder.probeAccess() }.value
+        systemAudio = granted ? .granted : .denied
+    }
+
+    func openSystemAudioSettings() {
+        // The audio-only grant lives in the Screen & System Audio Recording pane.
+        open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
     }
 
     private static func microphoneState() -> PermissionState {
@@ -99,7 +121,28 @@ final class PermissionManager {
 
     private func open(_ urlString: String) {
         guard let url = URL(string: urlString) else { return }
-        NSWorkspace.shared.open(url)
+        // System Settings activates on whatever Space it was last used on, so opening a
+        // pane while it is running drags the user's whole desktop over to it — observed
+        // mid-onboarding, where it read as the app switching windows by itself. Quitting
+        // a running instance first makes it launch fresh on the current Space; it holds
+        // no state worth preserving.
+        //
+        // `forceTerminate`, not `terminate`: a polite quit is delivered as an Apple
+        // Event, which the hardened runtime refuses without the automation entitlement —
+        // tccd logs "kTCCServiceAppleEvents requires entitlement" and nothing quits, which
+        // is how the first version of this fix managed to fix nothing. The entitlement
+        // would cost its own "wants to control System Settings" prompt; a plain kill costs
+        // neither, and waits for the corpse before opening so the URL cannot reanimate it.
+        let running = NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.apple.systempreferences"
+        )
+        running.forEach { _ = $0.forceTerminate() }
+        Task { @MainActor in
+            for _ in 0..<10 where running.contains(where: { !$0.isTerminated }) {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // MARK: - Polling

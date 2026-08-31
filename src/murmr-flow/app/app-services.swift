@@ -86,6 +86,7 @@ final class AppServices {
             case .language: SpeechModelLoader.isDownloaded(speech.activeModel)
             case .microphone: permissions.microphone == .granted
             case .accessibility: permissions.accessibility == .granted
+            case .systemAudio: permissions.systemAudio == .granted
             // Nothing to check: these are there to be read or done, not verified.
             case .howItWorks, .underTheHood, .style, .tryIt: false
             }

@@ -230,7 +230,8 @@ struct MainWindow: View {
                 notes: services.notes,
                 meetings: services.meetings,
                 settings: services.settings,
-                prompts: services.prompts
+                prompts: services.prompts,
+                permissions: services.permissions
             )
         case .insights:
             InsightsView(history: services.history)

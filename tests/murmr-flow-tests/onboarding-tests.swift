@@ -56,7 +56,7 @@ struct OnboardingTests {
         let flow = make(world)
         flow.begin()
         #expect(flow.step == .language)
-        #expect(flow.total == 7)
+        #expect(flow.total == 8)
     }
 
     /// A grant already made is a different matter: there is nothing to ask.
@@ -68,8 +68,8 @@ struct OnboardingTests {
         flow.begin()
         #expect(flow.step == .language)
         flow.advance()
-        #expect(flow.step == .accessibility)
-        #expect(flow.total == 6)
+        #expect(flow.step == .underTheHood)
+        #expect(flow.total == 7)
     }
 
     /// The first page a person sees must say "1", whatever it is.
@@ -81,9 +81,9 @@ struct OnboardingTests {
         flow.begin()
         #expect(flow.step == .language)
         #expect(flow.position == 1)
-        #expect(flow.total == 6)
+        #expect(flow.total == 7)
         flow.advance()
-        #expect(flow.step == .accessibility)
+        #expect(flow.step == .underTheHood)
         #expect(flow.position == 2)
     }
 
@@ -95,7 +95,7 @@ struct OnboardingTests {
         flow.begin()
         #expect(flow.step == .language)
         flow.advance()
-        #expect(flow.step == .accessibility)
+        #expect(flow.step == .underTheHood)
     }
 
     /// A machine that already has the model and both grants — a developer's, or one where
@@ -103,27 +103,44 @@ struct OnboardingTests {
     @Test("an install that is already set up completes without being shown")
     func silentCompletion() {
         let world = World()
-        world.satisfied = [.language, .microphone, .accessibility]
+        world.satisfied = [.language, .microphone, .accessibility, .systemAudio]
         let flow = make(world)
         flow.begin()
         #expect(flow.isComplete)
     }
 
-    /// The two explanatory pages have no condition, so they are always walked through.
-    @Test("the explanation always follows the last thing set up, then the try")
+    /// System audio is a setup step like the other grants: a machine that lacks only it
+    /// still gets the flow, with the ask in the grants block after the teaching pages.
+    @Test("system audio is asked for, after the teaching pages")
+    func systemAudioStep() {
+        let world = World()
+        world.satisfied = [.language, .microphone, .accessibility]
+        let flow = make(world)
+        flow.begin()
+        #expect(!flow.isComplete)
+        #expect(flow.step == .language)
+        while flow.step != .systemAudio, flow.step != .tryIt { flow.advance() }
+        #expect(flow.step == .systemAudio)
+    }
+
+    /// Teach first, ask late: every reading page comes before a single grant is
+    /// requested, and Accessibility lands immediately before the step it unlocks.
+    @Test("the flow teaches, then asks, then tries")
     func explanationThenTry() {
         let world = World()
         world.satisfied = [.language, .microphone]
         let flow = make(world)
         flow.begin()
         flow.advance()
-        #expect(flow.step == .accessibility)
+        #expect(flow.step == .underTheHood)
         flow.advance()
         #expect(flow.step == .howItWorks)
         flow.advance()
-        #expect(flow.step == .underTheHood)
-        flow.advance()
         #expect(flow.step == .style)
+        flow.advance()
+        #expect(flow.step == .systemAudio)
+        flow.advance()
+        #expect(flow.step == .accessibility)
         flow.advance()
         #expect(flow.step == .tryIt)
     }
@@ -159,8 +176,7 @@ struct OnboardingTests {
         let world = World()
         let flow = make(world)
         flow.begin()
-        flow.advance()
-        #expect(flow.step == .microphone)
+        while flow.step != .microphone { flow.advance() }
 
         flow.noteProgress()
         #expect(!flow.isAdvancing)
