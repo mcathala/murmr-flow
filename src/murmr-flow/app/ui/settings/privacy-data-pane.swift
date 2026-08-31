@@ -45,7 +45,13 @@ struct PrivacyDataPane: View {
             SectionLabel(title: "Where notes are saved")
             notesFolder
 
-            SectionLabel(title: "Delete")
+            HStack(spacing: 10) {
+                SectionLabel(title: "History")
+                Button("Delete all", role: .destructive) { pending = .everything }
+                    .controlSize(.small)
+                    .disabled(isEmpty)
+                Spacer(minLength: 0)
+            }
             deletion
 
             SectionLabel(title: "About")
@@ -71,7 +77,7 @@ struct PrivacyDataPane: View {
 
     @ViewBuilder
     private var permissionsBlock: some View {
-        if permissions.allGranted {
+        if permissions.allGranted, permissions.systemAudio == .granted {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 Text("All permissions granted.").font(.callout)
@@ -102,13 +108,25 @@ struct PrivacyDataPane: View {
                     )
                 )
             }
+            // The third of the three onboarding asks. It used to be unmentionable — no
+            // API to query — but the probe remembers its answer now, so there is
+            // something honest to show and a button that acts on it.
+            if permissions.systemAudio != .granted {
+                WarningRow(
+                    message: "System audio is off, so meeting notes only hear your side.",
+                    action: (
+                        permissions.systemAudio == .notDetermined ? "Ask" : "Open Settings",
+                        {
+                            if permissions.systemAudio == .notDetermined {
+                                Task { await permissions.requestSystemAudio() }
+                            } else {
+                                permissions.openSystemAudioSettings()
+                            }
+                        }
+                    )
+                )
+            }
         }
-
-        // System audio is deliberately not mentioned. It has no API to query, so there was
-        // never anything honest to show — and the line that used to say it would be asked
-        // for later was a promise about the future in a pane whose rule is that anything
-        // fine collapses to one line. `SystemAudioRecorder` already produces the real
-        // message at the moment it fails, which is the only place it can be acted on.
     }
 
     // MARK: - Where notes are saved
@@ -132,55 +150,44 @@ struct PrivacyDataPane: View {
 
     // MARK: - Delete
 
-    /// Deleting one at a time is fine for a mistake and useless for a clear-out, so the
-    /// per-item controls stay and this exists alongside them. Each card names its own
-    /// count, which is why the two halves need no headings of their own.
-    @ViewBuilder
+    /// Two halves side by side, each naming its count and its fate — the one distinction
+    /// that matters is which half can come back, and one shared sentence kept muddling it.
+    /// The button lives up beside the section title; per-item deletion stays in Dictation
+    /// and Notetaker for the surgical case.
     private var deletion: some View {
+        HStack(spacing: 10) {
+            historyHalf(
+                count(history.dictations.count, "dictation"),
+                fate: "Deleted permanently — nowhere to recover them from.",
+                isEmpty: history.dictations.isEmpty,
+                delete: .dictations
+            )
+            historyHalf(
+                count(notes.notes.count, "note"),
+                fate: "Moved to the Trash, so they can come back.",
+                isEmpty: notes.notes.isEmpty,
+                delete: .notes
+            )
+        }
+    }
+
+    /// Each half keeps its own small Delete, so one kind can be cleared without the
+    /// other; the header's Delete all is the both-at-once.
+    private func historyHalf(
+        _ title: String, fate: String, isEmpty: Bool, delete: Pending
+    ) -> some View {
         Card {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(count(history.dictations.count, "dictation"))
-                        .font(.callout.weight(.medium))
-                    Text("Deleted permanently — a dictation has no file of its own, so "
-                         + "there is nowhere to recover it from.")
+                    Text(title).font(.callout.weight(.medium))
+                    Text(fate)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 0)
-                Button("Delete all") { pending = .dictations }
-                    .disabled(history.dictations.isEmpty)
-            }
-        }
-
-        Card {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(count(notes.notes.count, "note"))
-                        .font(.callout.weight(.medium))
-                    Text("Moved to the Trash, so you can put them back.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                Button("Delete all") { pending = .notes }
-                    .disabled(notes.notes.isEmpty)
-            }
-        }
-
-        Divider().padding(.vertical, 4)
-
-        Card {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Delete everything").font(.callout.weight(.medium))
-                    Text("Both, in one go. Settings and prompts are kept.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                Button("Delete everything", role: .destructive) { pending = .everything }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Delete") { pending = delete }
+                    .controlSize(.small)
                     .disabled(isEmpty)
             }
         }
@@ -218,7 +225,8 @@ struct PrivacyDataPane: View {
         case .notes:
             "The notes go to the Trash and can be put back from there."
         case .everything:
-            "Notes go to the Trash. The dictation history cannot be undone."
+            "Notes go to the Trash. The dictation history cannot be undone. Settings "
+                + "and prompts are kept."
         case nil:
             ""
         }

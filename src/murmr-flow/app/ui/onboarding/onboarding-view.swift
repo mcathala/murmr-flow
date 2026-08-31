@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// First launch, as seven screens in the main window with the sidebar out of the way.
@@ -68,15 +69,34 @@ struct OnboardingView: View {
         .task(id: step) {
             // The try-it box is the destination; nothing is pasted anywhere while it is up.
             dictation.deliversText = step != .tryIt
-            guard step == .microphone || step == .accessibility else { return }
+            guard step == .microphone || step == .accessibility || step == .systemAudio
+            else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
-                permissions.refresh()
+                // A denied system-audio grant flips in System Settings, which no
+                // notification announces — and once determined, the probe re-checks
+                // without prompting. The others only need their state re-read.
+                if step == .systemAudio, permissions.systemAudio == .denied {
+                    await permissions.requestSystemAudio()
+                } else {
+                    permissions.refresh()
+                }
                 onboarding.noteProgress()
+                // A grant made in System Settings leaves the user parked there. The
+                // moment it lands, fetch them back — but only from System Settings, the
+                // one place this flow sent them. The first version reclaimed focus from
+                // whatever was frontmost, and yanked the user out of their browser the
+                // instant a grant registered. Being in any other app is their choice.
+                if onboarding.isAdvancing,
+                   NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+                       == "com.apple.systempreferences" {
+                    NSApp.activate(ignoringOtherApps: true)
+                }
             }
         }
         .onChange(of: permissions.microphone) { onboarding.noteProgress() }
         .onChange(of: permissions.accessibility) { onboarding.noteProgress() }
+        .onChange(of: permissions.systemAudio) { onboarding.noteProgress() }
     }
 
     // MARK: - Words
@@ -86,6 +106,7 @@ struct OnboardingView: View {
         case .language: "Which languages do you speak?"
         case .microphone: "Allow the microphone"
         case .accessibility: "Turn on Accessibility"
+        case .systemAudio: "Let it hear the meeting"
         case .howItWorks: "How it works"
         case .underTheHood: "What\u{2019}s inside"
         case .style: "How should it sound?"
@@ -103,8 +124,14 @@ struct OnboardingView: View {
             return "Murmr Flow needs to hear you to turn speech into text. Everything stays "
                 + "on this Mac."
         case .accessibility:
-            return "This is what lets Murmr Flow type your words into your apps. Click the "
-                + "button, then turn on Murmr Flow in the list that opens."
+            return "One last permission: this is what lets \(settings.hotkey.displayName) "
+                + "work in any app, and what types your words where your cursor is. Click "
+                + "the button, then turn on Murmr Flow in the list that opens."
+        case .systemAudio:
+            return "Meeting notes have two sides: your microphone is \u{201C}You\u{201D}, and "
+                + "what this Mac plays is \u{201C}Them\u{201D}. macOS files this under "
+                + "\u{201C}Screen & System Audio Recording\u{201D}, but only the audio is "
+                + "taken — your screen stays yours."
         case .howItWorks:
             return "Two keys, one for each job."
         case .underTheHood:
@@ -178,6 +205,13 @@ struct OnboardingView: View {
                     )
                 }
             }
+        case .systemAudio:
+            permissionCard(
+                symbol: "speaker.wave.2.fill",
+                title: "System audio",
+                state: permissions.systemAudio,
+                level: permissions.systemAudio == .denied ? .bad : .waiting
+            )
         case .howItWorks:
             howItWorks
         case .underTheHood:
@@ -676,6 +710,20 @@ struct OnboardingView: View {
                     permissions.requestAccessibility()
                 }
             })
+        case .systemAudio:
+            switch permissions.systemAudio {
+            case .granted:
+                return ("Continue", { onboarding.advance() })
+            case .notDetermined:
+                return ("Allow system audio", {
+                    Task {
+                        await permissions.requestSystemAudio()
+                        onboarding.noteProgress()
+                    }
+                })
+            case .denied:
+                return ("Open System Settings", { permissions.openSystemAudioSettings() })
+            }
         case .howItWorks, .underTheHood, .style:
             return ("Continue", { onboarding.advance() })
         case .tryIt:

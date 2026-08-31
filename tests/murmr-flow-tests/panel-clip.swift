@@ -33,6 +33,9 @@ struct PanelClipTests {
         for (name, hexes) in Self.grounds {
             let model = PanelModel()
             model.set(.armed)
+            // The dark ground also carries the translate bubble, so the one state whose
+            // window is taller than its pill can be looked at.
+            if name == "dark" { model.translateOn = true }
             let size = model.size
 
             let ground = LinearGradient(

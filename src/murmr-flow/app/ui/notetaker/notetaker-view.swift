@@ -10,6 +10,7 @@ struct NotetakerView: View {
     let meetings: MeetingCoordinator
     let settings: SettingsStore
     let prompts: PromptStore
+    let permissions: PermissionManager
 
     /// A set, so several notes can be cleared out in one go. Deleting one at a time is
     /// fine for a mistake and useless for a clear-out.
@@ -112,18 +113,46 @@ struct NotetakerView: View {
                 LevelMeter(label: "Them", level: meetings.themLevel)
                 Button("Discard") { confirmingDiscard = true }
                     .controlSize(.small)
+            } else if case .failed(let message) = meetings.stage,
+                      message.contains("System Audio Recording") {
+                // The one failure with a door to open. The message already names the
+                // pane; this walks there.
+                Button("Open System Settings") { permissions.openSystemAudioSettings() }
+                    .controlSize(.small)
             } else if meetings.stage.isBusy {
                 ProgressView().controlSize(.small)
             } else if let note = prompts.notetakerPrompt, settings.notetakerCleanupEnabled {
-                Menu(note.name) {
+                translateMenu
+                Menu {
                     ForEach(prompts.presets) { preset in
                         Button(preset.name) { prompts.notetakerPromptID = preset.id }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles").font(.system(size: 10, weight: .medium))
+                        Text(note.name)
                     }
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
             }
         }
+    }
+
+    /// The language the note is written in, as a value beside the style's value. Lives
+    /// with the style menu because they are the same kind of promise — both need the
+    /// clean-up pass, which is why both hide when it is off.
+    private var translateMenu: some View {
+        TranslateMenu(
+            translates: Binding(
+                get: { settings.notetakerTranslates },
+                set: { settings.notetakerTranslates = $0 }
+            ),
+            language: Binding(
+                get: { settings.notetakerOutputLanguage },
+                set: { settings.notetakerOutputLanguage = $0 }
+            )
+        )
     }
 
     private var recordHeadline: String {

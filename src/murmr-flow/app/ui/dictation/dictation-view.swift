@@ -11,6 +11,8 @@ struct DictationView: View {
     let history: HistoryStore
     let prompts: PromptStore
 
+    private var settings: SettingsStore { dictation.settings }
+
     @State private var showingRaw = false
     /// A set, so a batch can go at once. Same reasoning as Notes: one-at-a-time is fine
     /// for a mistake and useless for a clear-out.
@@ -21,6 +23,15 @@ struct DictationView: View {
     var body: some View {
         PaneScroll {
             recordCard
+
+            // The menu offers the language whatever the state of clean-up, so the promise
+            // has to be kept honest here: without the LLM pass nothing translates.
+            if settings.dictationTranslates, !settings.cleanupEnabled {
+                WarningRow(
+                    message: "Translation happens in the AI clean-up, which is off — "
+                        + "you\u{2019}ll get your words as spoken."
+                )
+            }
 
             if selection.count > 1 {
                 SectionLabel(title: "\(selection.count) selected")
@@ -122,14 +133,35 @@ struct DictationView: View {
                 }
             }
         ) {
-            Menu(prompts.dictationPrompt.name) {
+            translateMenu
+            Menu {
                 ForEach(prompts.presets) { preset in
                     Button(preset.name) { prompts.dictationPromptID = preset.id }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "sparkles").font(.system(size: 10, weight: .medium))
+                    Text(prompts.dictationPrompt.name)
                 }
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
         }
+    }
+
+    /// The language the text lands in, as a value beside the style's value. The language
+    /// survives being switched off, so turning it back on is one click, not a search.
+    private var translateMenu: some View {
+        TranslateMenu(
+            translates: Binding(
+                get: { settings.dictationTranslates },
+                set: { settings.dictationTranslates = $0 }
+            ),
+            language: Binding(
+                get: { settings.dictationOutputLanguage },
+                set: { settings.dictationOutputLanguage = $0 }
+            )
+        )
     }
 
     private var headline: String {

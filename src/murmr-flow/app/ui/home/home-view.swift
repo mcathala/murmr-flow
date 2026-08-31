@@ -15,6 +15,14 @@ struct HomeView: View {
         PaneScroll {
             status
             if let trouble { WarningRow(message: trouble.message, action: trouble.action) }
+            // Not a fault — the app works without it — but the one setup step with no
+            // system prompt to surface it, so Home says it once, only while it is true.
+            if needsProvider {
+                WarningRow(
+                    message: "No AI provider yet — your words arrive exactly as spoken.",
+                    action: ("Set up", { services.openSettings(.aiCleanup) })
+                )
+            }
 
             SectionLabel(title: "Audio")
             AudioDevicesCard(services: services)
@@ -61,6 +69,13 @@ struct HomeView: View {
         // working key, and this chip is the one place that claim is made.
         case .untested: return providers.isUsable(providers.activeID) ? .waiting : .bad
         }
+    }
+
+    /// Clean-up is promised somewhere — a switch on, a style or a language picked in
+    /// onboarding — but no provider can deliver it.
+    private var needsProvider: Bool {
+        (services.settings.cleanupEnabled || services.settings.notetakerCleanupEnabled)
+            && !services.providers.isUsable(services.providers.activeID)
     }
 
     private var trouble: (message: String, action: (title: String, run: () -> Void))? {

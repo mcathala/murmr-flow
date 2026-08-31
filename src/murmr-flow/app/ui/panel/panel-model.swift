@@ -110,7 +110,38 @@ final class PanelModel {
     var hotkeyLabel: String?
 
     var promptName: String = "Default"
+    var notePromptName: String = "Meeting"
     var promptOptions: [(id: UUID, name: String)] = []
+
+    /// The meeting key, for the note-armed row. Nil reads as "no key set".
+    var meetingHotkeyLabel: String?
+
+    /// Whether the watcher behind those keys is actually running. The keys stay visible
+    /// either way — a blank where the bind should be reads as a bug — but an unarmed one
+    /// is dimmed, and says why.
+    var hotkeyArmed = false
+
+    /// The *active job's* output language — the bridge refills these when the mode
+    /// flips — as the chip and bubble show it ("EN"), plus the full name for tooltips,
+    /// and whether it currently applies. The language itself is chosen in the window;
+    /// the pill only flips it on and off.
+    var translateCode: String = "EN"
+    var translateLanguage: String = "English"
+    var translateOn = false
+
+    /// Whether the two bubbles — 文A language, ✦ style — ride the top edge. They are the
+    /// job's *settings*, floated above the row so the row keeps only facts and actions,
+    /// and so the settings stay visible mid-recording, which is exactly when "is this
+    /// coming out in English?" matters.
+    var showsBubbles: Bool {
+        switch phase {
+        case .armed, .dictating, .meeting: true
+        case .resting, .working, .failed: false
+        }
+    }
+
+    /// Height the bubble needs above the row.
+    static let bubbleReach: CGFloat = 24
 
     /// True once the user has hidden it. The key still works and still opens the panel —
     /// a global hotkey that fires invisibly is a trap.
@@ -134,6 +165,14 @@ final class PanelModel {
     /// Throw it away.
     var onDiscard: (@MainActor () -> Void)?
     var onPickPrompt: (@MainActor (NSPoint) -> Void)?
+    var onToggleTranslate: (@MainActor () -> Void)?
+
+    /// Which job the armed row offers. Flipped by the satellites; remembering it across
+    /// a hover is deliberate — the row you left is the row you get back.
+    func arm(_ mode: Mode) {
+        self.mode = mode
+        set(.armed)
+    }
 
     // MARK: - Transitions
 
@@ -180,14 +219,15 @@ final class PanelModel {
     /// The panel is sized from its state rather than laid out to a fixed frame, so it
     /// grows and shrinks between states instead of swapping content inside a box.
     var size: CGSize {
-        switch phase {
+        var size: CGSize = switch phase {
         case .resting:
             // Tall enough to hold a capsule centred on the shared centre line, plus room
             // for its shadow.
             CGSize(width: 62, height: 34)
         case .armed:
-            // The row, plus the satellite's reach mirrored on both sides.
-            CGSize(width: 268 + Self.satelliteReach * 2, height: 48)
+            // The row, plus the satellite's reach mirrored on both sides. Slim: with the
+            // two settings in orbit above, the row only holds facts and the start button.
+            CGSize(width: 240 + Self.satelliteReach * 2, height: 48)
         case .dictating:
             preview.isEmpty
                 ? CGSize(width: 330, height: 48)
@@ -199,6 +239,16 @@ final class PanelModel {
         case .failed:
             CGSize(width: 268, height: 48)
         }
+        // The bubbles ride above the row, so they are window height, not row height.
+        if showsBubbles { size.height += Self.bubbleReach }
+        return size
+    }
+
+    /// The pill itself, without the bubbles' headroom. The row must be laid out to this,
+    /// not to the window: filling the window made the capsule grow taller whenever the
+    /// bubbles appeared, swallowing the space they were supposed to float in.
+    var rowHeight: CGFloat {
+        size.height - (showsBubbles ? Self.bubbleReach : 0)
     }
 
     /// `0:04`, and `12:04` once a meeting runs long.

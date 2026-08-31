@@ -114,33 +114,28 @@ struct MainWindow: View {
         }
     }
 
-    /// Five rows, whichever level you are on.
-    ///
-    /// The list is **swapped**, not grown. Settings used to be four more rows under a
-    /// heading, which made the column eight long and put configuration ahead of the app in
-    /// the one place you navigate from. A disclosure group would not have fixed it: it
-    /// still shows nine rows once open, and it stays open.
-    ///
-    /// The level is **derived** from the route rather than stored, so there is no second
-    /// source of truth to keep in step and none of the navigation chrome this window went
-    /// to such lengths to remove — `.settings(_)` draws one list, anything else draws the
-    /// other. `AppServices.openSettings` is what remembers where to come back to.
+    /// The app's sections on top, Settings pinned to the bottom — where configuration
+    /// belongs: last, out of the way, and always in the same place. It used to swap the
+    /// whole list for its four panes, which made "where did Home go?" the price of
+    /// opening it; now the panes unfold above the gear, and the app's own rows never move.
     ///
     /// Selection is drawn by `SelectableRow`, not by `List`. The system highlight is
     /// `controlAccentColor` — a system-wide setting no app can override — so a selected row
     /// arrived bright blue in the middle of a navy and gold interface.
     private var sidebar: some View {
-        List {
-            if services.route.isSettings {
-                settingsLevel
-            } else {
+        VStack(spacing: 0) {
+            List {
                 topLevel
             }
+            .listStyle(.sidebar)
+            // Hidden, or `List` paints its own opaque sidebar material and the window ends
+            // up with a grey column beside a navy one.
+            .scrollContentBackground(.hidden)
+
+            settingsBlock
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
         }
-        .listStyle(.sidebar)
-        // Hidden, or `List` paints its own opaque sidebar material and the window ends up
-        // with a grey column beside a navy one.
-        .scrollContentBackground(.hidden)
     }
 
     @ViewBuilder
@@ -153,29 +148,35 @@ struct MainWindow: View {
             }
         }
 
-        // Not a `Route` of its own. There is no detail view for "Settings" — only for the
-        // sections inside it — so a case here would be a state that can never be drawn.
-        sidebarRow(
-            "Settings", symbol: "gearshape", isSelected: false, trailing: "chevron.right"
-        ) {
-            services.openSettings()
-        }
     }
 
+    /// The gear, and — while Settings is open — its four panes unfolded above it. Not a
+    /// `Route` of its own: there is no detail view for "Settings", only for the sections
+    /// inside it, so the gear either opens the level or puts you back where you were.
     @ViewBuilder
-    private var settingsLevel: some View {
-        // The way out, and the name of the level you are on. The chevron sits in the icon
-        // column, so the four labels below line up with it rather than starting further left.
-        sidebarRow("Settings", symbol: "chevron.left", isSelected: false, isTitle: true) {
-            services.closeSettings()
-        }
-
-        ForEach(SettingsPane.allCases) { pane in
+    private var settingsBlock: some View {
+        if services.route.isSettings {
+            VStack(spacing: 1) {
+                ForEach(SettingsPane.allCases) { pane in
+                    sidebarRow(
+                        pane.label, symbol: pane.symbol,
+                        isSelected: services.route == .settings(pane)
+                    ) {
+                        services.route = .settings(pane)
+                    }
+                }
+                sidebarRow(
+                    "Settings", symbol: "gearshape", isSelected: false,
+                    trailing: "chevron.down", isTitle: true
+                ) {
+                    services.closeSettings()
+                }
+            }
+        } else {
             sidebarRow(
-                pane.label, symbol: pane.symbol,
-                isSelected: services.route == .settings(pane)
+                "Settings", symbol: "gearshape", isSelected: false, trailing: "chevron.up"
             ) {
-                services.route = .settings(pane)
+                services.openSettings()
             }
         }
     }
@@ -230,7 +231,8 @@ struct MainWindow: View {
                 notes: services.notes,
                 meetings: services.meetings,
                 settings: services.settings,
-                prompts: services.prompts
+                prompts: services.prompts,
+                permissions: services.permissions
             )
         case .insights:
             InsightsView(history: services.history)

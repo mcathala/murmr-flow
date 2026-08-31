@@ -573,3 +573,62 @@ struct FlowLayout: Layout {
         }
     }
 }
+
+/// The translation setting shown as its **value**, never as a verb.
+///
+/// The style menu beside it shows "Default" — a value — and the first translate control
+/// said "Translate" — a command. A verb never changes, so nothing visibly changed when
+/// the state did, which is why on and off were illegible. Now the word itself flips
+/// ("Off" ⇄ "🇬🇧 English") and the 文A glyph answers "off *what*?" so the bare word is
+/// never ambiguous. Gold while it applies, like every other chosen thing in the app.
+struct TranslateMenu: View {
+    @Binding var translates: Bool
+    @Binding var language: String
+
+    private var selection: Binding<String?> {
+        Binding(
+            get: { translates ? language : nil },
+            set: { choice in
+                if let choice {
+                    language = choice
+                    translates = true
+                } else {
+                    translates = false
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        Menu {
+            // A Picker, not Buttons: the current choice gets its checkmark drawn by the
+            // system, which is the menu answering "which one is on?" before it is asked.
+            Picker("Output language", selection: selection) {
+                Text("Don't translate").tag(String?.none)
+                ForEach(OutputLanguage.choices, id: \.self) { choice in
+                    Text("\(OutputLanguage.flag(for: choice) ?? "") \(choice)")
+                        .tag(String?.some(choice))
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "translate")
+                    .font(.system(size: 10, weight: .medium))
+                Text(
+                    translates
+                        ? "\(OutputLanguage.flag(for: language) ?? "") \(language)"
+                        : "Off"
+                )
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .foregroundStyle(translates ? Theme.Palette.gold : Theme.Palette.muted)
+        .help(
+            translates
+                ? "Everything comes out in \(language) — pick \u{201C}Don't translate\u{201D} to turn it off"
+                : "Words come out as spoken — pick a language to translate"
+        )
+    }
+}

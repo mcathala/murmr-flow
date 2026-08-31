@@ -86,6 +86,7 @@ final class AppServices {
             case .language: SpeechModelLoader.isDownloaded(speech.activeModel)
             case .microphone: permissions.microphone == .granted
             case .accessibility: permissions.accessibility == .granted
+            case .systemAudio: permissions.systemAudio == .granted
             // Nothing to check: these are there to be read or done, not verified.
             case .howItWorks, .underTheHood, .style, .tryIt: false
             }
@@ -216,6 +217,14 @@ final class AppServices {
         settings.meetingHotkey = hotkey
         armMeetingHotkey()
         FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
+    }
+
+    /// Un-hides the pill. Wired to the app coming forward: hiding it is one click on the
+    /// ✕ satellite, so touching the app is the gesture that says "I want my controls
+    /// back" — without it, the only way to see the pill again was to start a recording.
+    func revealPanel() {
+        panel.model.reveal()
+        panel.apply()
     }
 
     func changeDictationHotkey(to hotkey: Hotkey) {

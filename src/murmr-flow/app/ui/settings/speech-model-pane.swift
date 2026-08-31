@@ -63,12 +63,14 @@ struct SpeechModelPane: View {
     private var testRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Text(dictation.isTestingSpeechModel
-                     ? "Listening — say anything, then press Stop."
-                     : "Say a few words and see what it hears.")
+                Text(testInvitation)
                     .font(.callout)
                 Spacer(minLength: 0)
-                Button(dictation.isTestingSpeechModel ? "Stop" : "Test") {
+                Button(
+                    dictation.isTestingSpeechModel
+                        ? "Stop"
+                        : isVerified ? "Test again" : "Test"
+                ) {
                     dictation.toggleSpeechModelTest()
                 }
                 .buttonStyle(.borderedProminent)
@@ -86,6 +88,29 @@ struct SpeechModelPane: View {
                 Text(failure).font(.caption).foregroundStyle(.orange)
             }
         }
+    }
+
+    private var isVerified: Bool {
+        speech.verification(for: speech.activeModel).isWorking
+    }
+
+    /// A model that has already proven itself — in onboarding's try-it, a real dictation,
+    /// or a test here — is not spoken to as if it never ran. Every working dictation
+    /// re-records the verification, so "last heard you" tracks real use, not just tests.
+    private var testInvitation: String {
+        if dictation.isTestingSpeechModel {
+            return "Listening — say anything, then press Stop."
+        }
+        if case .working(_, let date) = speech.verification(for: speech.activeModel) {
+            return "Working — last heard you \(Self.relative(date))."
+        }
+        return "Say a few words and see what it hears."
+    }
+
+    private static func relative(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     // MARK: - Alternatives
