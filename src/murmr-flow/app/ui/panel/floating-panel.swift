@@ -37,6 +37,12 @@ final class FloatingPanel {
 
     // MARK: - Lifecycle
 
+    /// Whether `window` is the pill itself — the one window whose clicks must not
+    /// resurrect a pill that is being hidden.
+    func owns(_ window: NSWindow?) -> Bool {
+        window != nil && window === panel
+    }
+
     func present() {
         if panel == nil { build() }
         apply()

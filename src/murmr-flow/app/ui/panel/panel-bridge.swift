@@ -40,6 +40,7 @@ final class PanelBridge {
         wireActions()
         refreshPrompts()
         refreshHotkey()
+        refreshTranslation()
 
         dictation.onStageChange = { [weak self] _ in self?.sync() }
 
@@ -102,9 +103,25 @@ final class PanelBridge {
             self.panel.apply()
         }
 
+        model.onToggleTranslate = { [weak self] in
+            guard let self else { return }
+            let settings = self.dictation.settings
+            if self.panel.model.mode == .note {
+                settings.notetakerTranslates.toggle()
+            } else {
+                settings.dictationTranslates.toggle()
+            }
+            self.refreshTranslation()
+            self.panel.apply()
+        }
+
         panel.onPromptChosen = { [weak self] id in
             guard let self else { return }
-            self.prompts.dictationPromptID = id
+            if self.panel.model.mode == .note {
+                self.prompts.notetakerPromptID = id
+            } else {
+                self.prompts.dictationPromptID = id
+            }
             self.refreshPrompts()
             self.panel.apply()
         }
@@ -112,15 +129,30 @@ final class PanelBridge {
 
     /// Kept in step with Settings, and nil when the watcher isn't running — the row must
     /// not show a key that cannot fire.
+    /// The keys stay visible whether or not the watcher runs — a blank where the bind
+    /// should be reads as a bug — but the view dims an unarmed one and says why.
     private func refreshHotkey() {
-        panel.model.hotkeyLabel = dictation.hotkeyActive
-            ? dictation.settings.hotkey.displayName
-            : nil
+        panel.model.hotkeyLabel = dictation.settings.hotkey.displayName
+        panel.model.meetingHotkeyLabel = dictation.settings.meetingHotkey?.displayName
+        panel.model.hotkeyArmed = dictation.hotkeyActive
     }
 
     private func refreshPrompts() {
         panel.model.promptOptions = prompts.presets.map { (id: $0.id, name: $0.name) }
         panel.model.promptName = prompts.dictationPrompt.name
+        panel.model.notePromptName = prompts.notetakerPrompt?.name ?? "As spoken"
+    }
+
+    /// Mirrors Settings for whichever job the pill is showing, so a change made in the
+    /// window shows in the pill — and the bubble always describes the active recording.
+    private func refreshTranslation() {
+        let settings = dictation.settings
+        let (on, language) = panel.model.mode == .note
+            ? (settings.notetakerTranslates, settings.notetakerOutputLanguage)
+            : (settings.dictationTranslates, settings.dictationOutputLanguage)
+        panel.model.translateOn = on
+        panel.model.translateLanguage = language
+        panel.model.translateCode = OutputLanguage.shortCode(for: language)
     }
 
     // MARK: - Sync
@@ -149,6 +181,9 @@ final class PanelBridge {
         case .idle, .saved:
             break
         }
+
+        // Whichever branch runs, the chips and bubble must describe the job it is about.
+        defer { refreshTranslation() }
 
         switch dictation.stage {
         case .recording:
@@ -228,7 +263,13 @@ final class PanelBridge {
         // the pointer between displays whether anything is running or not. A pill parked
         // on the other monitor is a pill you cannot reach.
         panel.followPointerIfNeeded()
+        let sizeBefore = panel.model.size
         refreshHotkey()
+        refreshTranslation()
+        // The bubble appearing or going changes the window's height even when the phase
+        // has not moved — a settings change in the window, or the satellite flipping the
+        // mode between two jobs with different translation states.
+        if panel.model.size != sizeBefore { panel.apply() }
 
         let model = panel.model
         var changedSize = false

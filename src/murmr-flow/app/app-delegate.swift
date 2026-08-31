@@ -19,6 +19,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppServices.shared.start(trigger: "didFinishLaunching")
         }
         presentMainWindow()
+
+        // Any click in the app's own windows brings a hidden pill back. The activation
+        // hook alone missed the second hide: the pill's ✕ lives on a non-activating
+        // panel, so the app never went inactive and "became active" never fired again.
+        // Clicks on the pill itself are excluded, or hiding it would instantly undo.
+        NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            Task { @MainActor in
+                let services = AppServices.shared
+                if !services.panel.owns(event.window) {
+                    services.revealPanel()
+                }
+            }
+            return event
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -31,6 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidBecomeActive(_ notification: Notification) {
         Task { @MainActor in
             AppServices.shared.armHotkeyIfPossible()
+            // Interacting with the app brings a hidden pill back: reaching for the window
+            // is the closest thing to asking where the controls went.
+            AppServices.shared.revealPanel()
         }
     }
 

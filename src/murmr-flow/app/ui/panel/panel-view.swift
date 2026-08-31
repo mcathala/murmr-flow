@@ -19,6 +19,14 @@ struct PanelView: View {
             Color.clear
             content
         }
+        .overlay(alignment: .top) {
+            if model.showsBubbles {
+                HStack(spacing: 8) {
+                    translateBubble
+                    promptBubble
+                }
+            }
+        }
         .frame(width: model.size.width, height: model.size.height)
         .contentShape(.rect)
         .onHover { model.hover($0) }
@@ -75,26 +83,69 @@ struct PanelView: View {
     private var armed: some View {
         row {
             HStack(spacing: 8) {
-                dictateButton
+                indicator
                 divider
-                appIcon
-                if let key = model.hotkeyLabel {
-                    Text(key)
-                        .font(Theme.Text.mono)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .glass(.thin, radius: Theme.Radius.inner, elevated: false)
-                        .foregroundStyle(.secondary)
+                if model.mode == .note {
+                    keycap(model.meetingHotkeyLabel)
+                } else {
+                    appIcon
+                    keycap(model.hotkeyLabel)
                 }
                 Spacer(minLength: 0)
-                promptChip
-                controls
+                // The primary action ends the row: the eye reads the row's facts
+                // left-to-right and lands here, on the thing it came to do — not on a
+                // button that makes the pill go away, which is what used to own this slot.
+                startButton
             }
         }
         .overlay(alignment: .leading) {
-            noteSatellite.offset(x: -PanelModel.satelliteReach)
+            leftSatellite.offset(x: -PanelModel.satelliteReach)
+        }
+        // In orbit, like the satellite opposite: in the row is the work, around it is
+        // meta. Dismissing the pill from inside the row was one fat-finger away from
+        // "stop", and the window was already widened on this side for symmetry.
+        .overlay(alignment: .trailing) {
+            satellite("xmark", size: 8, help: "Hide the pill") { model.onDiscard?() }
+                .offset(x: PanelModel.satelliteReach)
         }
         .frame(width: rowWidth)
+    }
+
+    @ViewBuilder
+    private func keycap(_ label: String?) -> some View {
+        if let label {
+            Text(label)
+                .font(Theme.Text.mono)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .glass(.thin, radius: Theme.Radius.inner, elevated: false)
+                .foregroundStyle(.secondary)
+                .opacity(model.hotkeyArmed ? 1 : 0.45)
+                .help(
+                    model.hotkeyArmed
+                        ? ""
+                        : "The key won\u{2019}t fire until Accessibility is granted"
+                )
+        }
+    }
+
+    /// Play, as the user reads it: start the job this row is set up for.
+    private var startButton: some View {
+        Button {
+            if model.mode == .note {
+                model.onToggleMeeting?()
+            } else {
+                model.onToggleDictation?()
+            }
+        } label: {
+            Image(systemName: "play.fill")
+                .font(.system(size: 10, weight: .bold))
+                .frame(width: 26, height: 26)
+                .glass(.thin, radius: 13, elevated: false)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Theme.Palette.gold)
+        .help(model.mode == .note ? "Start recording the meeting" : "Start dictating")
     }
 
     /// The row's own width, with the satellite's reach removed from both sides.
@@ -102,36 +153,35 @@ struct PanelView: View {
         model.size.width - PanelModel.satelliteReach * 2
     }
 
-    /// Starts a meeting. Present only while nothing is running: leaving a live
-    /// "start recording" button beside one that is already recording invites exactly one
-    /// kind of accident.
-    private var noteSatellite: some View {
-        Button {
-            model.onToggleMeeting?()
-        } label: {
-            Image(systemName: "text.document")
-                .font(.system(size: 12, weight: .medium))
+    /// Switches which job the row is set up for — it does not start anything. A meeting
+    /// used to begin on one click of this floating button; an hour of recording is not a
+    /// thing to start by accident, and dictation always got an armed row first. Now both do.
+    @ViewBuilder
+    private var leftSatellite: some View {
+        if model.mode == .note {
+            satellite("mic.fill", size: 12, help: "Set up a dictation") {
+                model.arm(.dictation)
+            }
+        } else {
+            satellite("text.document", size: 12, help: "Set up a meeting note") {
+                model.arm(.note)
+            }
+        }
+    }
+
+    private func satellite(
+        _ symbol: String, size: CGFloat, help: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: size, weight: .medium))
                 .frame(width: PanelModel.satelliteSize, height: PanelModel.satelliteSize)
                 // Same reason as the row: no shadow inside a window with no room for one.
                 .glass(.floating, radius: PanelModel.satelliteSize / 2, elevated: false)
         }
         .buttonStyle(.plain)
-        .help("Start recording a meeting")
-    }
-
-    /// The pill *is* the dictation control, so this is the primary action of the row.
-    private var dictateButton: some View {
-        Button {
-            model.onToggleDictation?()
-        } label: {
-            Image(systemName: "mic.fill")
-                .font(.system(size: 11, weight: .medium))
-                .frame(width: 24, height: 24)
-                .glass(.thin, radius: 12, elevated: false)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Theme.Palette.text)
-        .help("Start dictating")
+        .foregroundStyle(Theme.Palette.muted)
+        .help(help)
     }
 
     // MARK: - Open states
@@ -156,7 +206,6 @@ struct PanelView: View {
                         .font(Theme.Text.monoLarge)
                         .foregroundStyle(Theme.Palette.text)
                     Spacer(minLength: 0)
-                    promptChip
                     controls
                 }
             }
@@ -217,7 +266,8 @@ struct PanelView: View {
         content()
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity)
+            .frame(height: model.rowHeight)
             // `elevated: false` is load-bearing, not a preference. The window is exactly
             // the size of its contents, so a shadow drawn *inside* it spreads into the
             // transparent margins and is cut flat at the frame — a window's backing store
@@ -252,22 +302,66 @@ struct PanelView: View {
         }
     }
 
-    @ViewBuilder
-    private var promptChip: some View {
-        if model.mode == .dictation {
-            Button {
-                model.onPickPrompt?(NSEvent.mouseLocation)
-            } label: {
-                Text(model.promptName)
-                    .font(Theme.Text.small)
-                    .fixedSize()
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 3)
-                    .glass(.thin, radius: 20, elevated: false)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.Palette.muted)
+    /// The two settings, in orbit above the row — each shown as its value, never a verb.
+    /// 文A reads "Off" muted or the language code gold; one click flips it. The language
+    /// itself is picked in the window.
+    private var translateBubble: some View {
+        Button {
+            model.onToggleTranslate?()
+        } label: {
+            bubbleLabel(
+                symbol: "translate",
+                text: model.translateOn ? model.translateCode : "Off",
+                active: model.translateOn
+            )
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(model.translateOn ? Theme.Palette.gold : Theme.Palette.text)
+        .help(
+            model.translateOn
+                ? "Coming out in \(model.translateLanguage) — click to turn off"
+                : "Click to translate to \(model.translateLanguage)"
+        )
+    }
+
+    /// The active job's style, named by the app's own mark for AI clean-up.
+    private var promptBubble: some View {
+        Button {
+            model.onPickPrompt?(NSEvent.mouseLocation)
+        } label: {
+            bubbleLabel(
+                symbol: "sparkles",
+                text: model.mode == .note ? model.notePromptName : model.promptName,
+                active: false
+            )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Theme.Palette.text)
+        .help("Style — click to change")
+    }
+
+    private func bubbleLabel(symbol: String, text: String, active: Bool) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+                .font(.system(size: 9, weight: .semibold))
+            Text(text)
+                .font(Theme.Text.label)
+        }
+        .fixedSize()
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        // The pill's own material, not a translucent black: over a dark wallpaper the
+        // black wash disappeared and the bubbles with it.
+        .background {
+            if active { Capsule().fill(Theme.Palette.gold.opacity(0.2)) }
+        }
+        .glass(.floating, radius: 20, elevated: false)
+        .overlay(
+            Capsule().stroke(
+                active ? Theme.Palette.gold.opacity(0.7) : Theme.Palette.rim,
+                lineWidth: 1
+            )
+        )
     }
 
     /// Stop and discard, as separate controls with separate shapes — a square for

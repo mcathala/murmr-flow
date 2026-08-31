@@ -219,6 +219,14 @@ final class AppServices {
         FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
     }
 
+    /// Un-hides the pill. Wired to the app coming forward: hiding it is one click on the
+    /// ✕ satellite, so touching the app is the gesture that says "I want my controls
+    /// back" — without it, the only way to see the pill again was to start a recording.
+    func revealPanel() {
+        panel.model.reveal()
+        panel.apply()
+    }
+
     func changeDictationHotkey(to hotkey: Hotkey) {
         dictation.changeHotkey(to: hotkey)
         FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
