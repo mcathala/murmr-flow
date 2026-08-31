@@ -287,7 +287,10 @@ final class MeetingCoordinator {
             },
             config: providers.activeConfig,
             prompt: PromptLibrary(template: preset.template),
-            context: PromptLibrary.Context(transcript: ""),  // filled in per batch
+            context: PromptLibrary.Context(
+                transcript: "",  // filled in per batch
+                outputLanguage: settings.notetakerTargetLanguage
+            ),
             dictionary: dictionary.entries(usedIn: .notetaker)
         )
 

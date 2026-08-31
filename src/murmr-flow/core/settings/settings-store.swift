@@ -18,6 +18,10 @@ final class SettingsStore {
         static let pauseMedia = "dictation.pauseMedia"
         static let holdToTalk = "dictation.holdToTalk"
         static let inputDevice = "audio.inputDeviceUID"
+        static let dictationTranslates = "translate.dictation.on"
+        static let dictationLanguage = "translate.dictation.language"
+        static let notetakerTranslates = "translate.notetaker.on"
+        static let notetakerLanguage = "translate.notetaker.language"
     }
 
     private let defaults: UserDefaults
@@ -59,6 +63,12 @@ final class SettingsStore {
             defaults.object(forKey: Key.pauseMedia) as? Bool ?? true
         self.holdToTalk = defaults.object(forKey: Key.holdToTalk) as? Bool ?? true
         self.inputDeviceUID = defaults.string(forKey: Key.inputDevice)
+        self.dictationTranslates = defaults.bool(forKey: Key.dictationTranslates)
+        self.dictationOutputLanguage =
+            defaults.string(forKey: Key.dictationLanguage) ?? "English"
+        self.notetakerTranslates = defaults.bool(forKey: Key.notetakerTranslates)
+        self.notetakerOutputLanguage =
+            defaults.string(forKey: Key.notetakerLanguage) ?? "English"
     }
 
     // MARK: - Cleanup
@@ -122,6 +132,32 @@ final class SettingsStore {
     /// meeting key is press-to-toggle regardless — nobody holds a key for an hour.
     var holdToTalk: Bool {
         didSet { defaults.set(holdToTalk, forKey: Key.holdToTalk) }
+    }
+
+    // MARK: - Translation
+
+    /// Whether dictation output is translated, and into what. Two values, not one
+    /// optional: the toggle is flipped from the pill and the Dictation screen, and it
+    /// must come back on remembering the language it had.
+    var dictationTranslates: Bool {
+        didSet { defaults.set(dictationTranslates, forKey: Key.dictationTranslates) }
+    }
+    var dictationOutputLanguage: String {
+        didSet { defaults.set(dictationOutputLanguage, forKey: Key.dictationLanguage) }
+    }
+    /// What the clean-up is actually told, nil when translation is off.
+    var dictationTargetLanguage: String? {
+        dictationTranslates ? dictationOutputLanguage : nil
+    }
+
+    var notetakerTranslates: Bool {
+        didSet { defaults.set(notetakerTranslates, forKey: Key.notetakerTranslates) }
+    }
+    var notetakerOutputLanguage: String {
+        didSet { defaults.set(notetakerOutputLanguage, forKey: Key.notetakerLanguage) }
+    }
+    var notetakerTargetLanguage: String? {
+        notetakerTranslates ? notetakerOutputLanguage : nil
     }
 
     // MARK: - Audio

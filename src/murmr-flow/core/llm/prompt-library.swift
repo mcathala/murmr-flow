@@ -72,6 +72,8 @@ struct PromptLibrary {
         var hasMarkers = false
         var frontmostApp: String?
         var language: String?
+        /// Language to write the result in, or nil to keep the one that was spoken.
+        var outputLanguage: String?
     }
 
     func render(_ context: Context) -> String {
@@ -92,6 +94,16 @@ struct PromptLibrary {
         }
         if !output.contains("${transcript}") {
             output += "\n\nTranscript:\n${transcript}"
+        }
+        // Appended by the app, not written into the user's template: the language is a
+        // setting, and every style has to obey it. It must out-rank the template — the
+        // default prompt itself says "do not translate", which is right until the user
+        // asks for exactly that — so it says so.
+        if let outputLanguage = context.outputLanguage {
+            output += "\n\nWrite the result in \(outputLanguage). Whatever language was "
+                + "spoken, translate the words into \(outputLanguage), keeping the meaning, "
+                + "tone and structure. This overrides anything above about not translating "
+                + "or keeping the speaker's own words — only the language changes."
         }
         // Not a placeholder the user can move or delete: a dropped marker costs them the
         // exact text they asked for, and the fallback that catches it costs them the

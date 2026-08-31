@@ -336,7 +336,11 @@ final class DictationCoordinator {
                 prompt: PromptLibrary(template: prompts.dictationPrompt.template),
                 context: PromptLibrary.Context(
                     transcript: raw,
-                    frontmostApp: targetApp?.bundleIdentifier
+                    frontmostApp: targetApp?.bundleIdentifier,
+                    // The live preview stays in the spoken language; only the finished
+                    // text moves. Translating a half-sentence ten times a second would
+                    // cost latency to show something that is about to be replaced.
+                    outputLanguage: settings.dictationTargetLanguage
                 ),
                 dictionary: dictionary.entries(usedIn: .dictation)
             )
