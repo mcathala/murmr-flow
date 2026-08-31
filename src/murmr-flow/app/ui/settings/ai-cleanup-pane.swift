@@ -77,18 +77,24 @@ struct AICleanupPane: View {
 
     var body: some View {
         PaneScroll(title: "AI clean-up") {
-            SettingRow(title: "Clean up my dictation") {
-                Toggle("", isOn: $settings.cleanupEnabled).labelsHidden()
-            }
-
-            SettingRow(title: "Clean up meeting notes") {
-                Toggle("", isOn: $settings.notetakerCleanupEnabled).labelsHidden()
+            // One row, two checkboxes: the two switches were a whole row each for six
+            // words of difference, and the question is the same — which jobs go through
+            // the clean-up.
+            SettingRow(title: "Activate for") {
+                HStack(spacing: 16) {
+                    Toggle("Dictation", isOn: $settings.cleanupEnabled)
+                    Toggle("Meeting notes", isOn: $settings.notetakerCleanupEnabled)
+                }
+                .toggleStyle(.checkbox)
             }
 
             if isCleaningSomething, !providers.isUsable(providers.activeID) {
                 WarningRow(
                     message: "\(providers.activeEntry.displayName) isn't ready, so "
-                        + "\(Self.affected(settings)) will keep the raw transcript."
+                        + "\(Self.affected(settings)) will keep the raw transcript.",
+                    // The fix is on this very pane, one tab over — walk there rather
+                    // than describing the walk.
+                    action: ("Set up", { facet = .provider })
                 )
             }
 

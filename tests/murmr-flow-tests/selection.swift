@@ -113,8 +113,8 @@ struct SidebarSnapshotTests {
         // fit. "Voice transcription" truncated to "Voice transcri…" in the running app and
         // a snapshot with invented rows would never have shown it.
         //
-        // Both levels, because the sidebar swaps its list rather than growing one: five rows
-        // at the top, five in Settings, and either could be the one that overflows.
+        // Both states, because Settings is pinned to the bottom and unfolds in place: the
+        // closed column and the open one, and either could be the one that overflows.
         let top: [(String, String)] = MainWindow.Route.top.map { ($0.label, $0.symbol) }
         let settings: [(String, String)] = SettingsPane.allCases.map { ($0.label, $0.symbol) }
 
@@ -155,15 +155,22 @@ struct SidebarSnapshotTests {
         let view = HStack(spacing: 12) {
             column {
                 ForEach(top, id: \.0) { row($0.0, $0.1, selected: $0.0 == "Dictation") }
-                row("Settings", "gearshape", selected: false, trailing: "chevron.right")
+                Spacer(minLength: 40)
+                row("Settings", "gearshape", selected: false, trailing: "chevron.up")
             }
             column {
-                row("Settings", "chevron.left", selected: false, isTitle: true)
+                ForEach(top, id: \.0) { row($0.0, $0.1, selected: false) }
+                Spacer(minLength: 40)
                 ForEach(settings, id: \.0) {
                     row($0.0, $0.1, selected: $0.0 == "AI clean-up")
                 }
+                row(
+                    "Settings", "gearshape", selected: false,
+                    trailing: "chevron.down", isTitle: true
+                )
             }
         }
+        .frame(height: 420)
         .background(InkGround())
 
         let renderer = ImageRenderer(content: view.environment(\.colorScheme, .dark))

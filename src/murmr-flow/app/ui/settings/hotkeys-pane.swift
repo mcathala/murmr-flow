@@ -79,7 +79,8 @@ struct HotkeysPane: View {
             if !dictation.hotkeyActive {
                 WarningRow(
                     message: "Grant Accessibility, then restart Murmr Flow, or no hotkey "
-                        + "will fire."
+                        + "will fire.",
+                    action: ("Privacy & data", { services.openSettings(.privacyData) })
                 )
             }
         }
@@ -119,12 +120,6 @@ struct HotkeysPane: View {
                         }
                         Button(hotkey == nil ? "Set" : "Change") { start(slot) }
                             .controlSize(.small)
-                        if hotkey != nil, slot == .meeting {
-                            // Only the meeting bind can be cleared. Removing the dictation
-                            // key would leave the app's main action with no way to start.
-                            Button("Clear") { services.changeMeetingHotkey(to: nil) }
-                                .controlSize(.small)
-                        }
                     }
                 }
 
