@@ -460,6 +460,14 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     styleGroup(
                         title: "Dictation",
+                        translates: Binding(
+                            get: { settings.dictationTranslates },
+                            set: { settings.dictationTranslates = $0 }
+                        ),
+                        language: Binding(
+                            get: { settings.dictationOutputLanguage },
+                            set: { settings.dictationOutputLanguage = $0 }
+                        ),
                         options: dictationStyles.map { ($0.id, $0.name) },
                         selected: prompts.dictationPromptID,
                         summary: Self.summary(for: prompts.dictationPrompt)
@@ -469,6 +477,14 @@ struct OnboardingView: View {
 
                     styleGroup(
                         title: "Meeting notes",
+                        translates: Binding(
+                            get: { settings.notetakerTranslates },
+                            set: { settings.notetakerTranslates = $0 }
+                        ),
+                        language: Binding(
+                            get: { settings.notetakerOutputLanguage },
+                            set: { settings.notetakerOutputLanguage = $0 }
+                        ),
                         options: [(PromptStore.meetingPreset.id, PromptStore.meetingPreset.name),
                                   (nil, "As spoken")],
                         selected: prompts.notetakerPromptID,
@@ -476,8 +492,8 @@ struct OnboardingView: View {
                     ) { prompts.notetakerPromptID = $0 }
                 }
             }
-            Text("Styles need the AI clean-up set up in Settings. Until then, you get your "
-                 + "words exactly as spoken.")
+            Text("Styles and translation need the AI clean-up set up in Settings. Until "
+                 + "then, you get your words exactly as spoken.")
                 .font(Theme.Text.small)
                 .foregroundStyle(Theme.Palette.faint)
                 .fixedSize(horizontal: false, vertical: true)
@@ -492,13 +508,21 @@ struct OnboardingView: View {
 
     private func styleGroup(
         title: String,
+        translates: Binding<Bool>,
+        language: Binding<String>,
         options: [(id: UUID?, name: String)],
         selected: UUID?,
         summary: String?,
         choose: @escaping (UUID?) -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(Theme.Text.bodyStrong)
+            HStack(spacing: 8) {
+                Text(title).font(Theme.Text.bodyStrong)
+                Spacer(minLength: 0)
+                // The same value-menu Settings uses: translation is a per-job clean-up
+                // choice exactly like the style, so it is offered where the styles are.
+                TranslateMenu(translates: translates, language: language)
+            }
             FlowLayout(spacing: 6) {
                 ForEach(Array(options.enumerated()), id: \.offset) { _, option in
                     choiceChip(option.name, isOn: option.id == selected) { choose(option.id) }
