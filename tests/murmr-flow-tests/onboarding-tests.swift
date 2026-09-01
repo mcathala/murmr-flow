@@ -56,32 +56,32 @@ struct OnboardingTests {
         let flow = make(world)
         flow.begin()
         #expect(flow.step == .language)
-        #expect(flow.total == 8)
+        #expect(flow.total == 6)
     }
 
-    /// A grant already made is a different matter: there is nothing to ask.
-    @Test("a satisfied permission step is not shown")
+    /// System audio is the one ask with a page of its own, so it is the one page a
+    /// grant already made removes. The teaching pages stay whatever their cards say.
+    @Test("a satisfied system-audio ask is not shown")
     func startsAtFirstGap() {
         let world = World()
-        world.satisfied = [.language, .microphone]
+        world.satisfied = [.language, .systemAudio]
         let flow = make(world)
         flow.begin()
         #expect(flow.step == .language)
-        flow.advance()
-        #expect(flow.step == .underTheHood)
-        #expect(flow.total == 7)
+        #expect(flow.total == 5)
+        #expect(!flow.plan.contains(.systemAudio))
     }
 
     /// The first page a person sees must say "1", whatever it is.
     @Test("numbering counts the steps shown, not the steps that exist")
     func numbering() {
         let world = World()
-        world.satisfied = [.microphone]
+        world.satisfied = [.systemAudio]
         let flow = make(world)
         flow.begin()
         #expect(flow.step == .language)
         #expect(flow.position == 1)
-        #expect(flow.total == 7)
+        #expect(flow.total == 5)
         flow.advance()
         #expect(flow.step == .underTheHood)
         #expect(flow.position == 2)
@@ -90,12 +90,16 @@ struct OnboardingTests {
     @Test("advancing skips over anything already met")
     func advanceSkips() {
         let world = World()
-        world.satisfied = [.microphone]
         let flow = make(world)
         flow.begin()
-        #expect(flow.step == .language)
         flow.advance()
-        #expect(flow.step == .underTheHood)
+        flow.advance()
+        #expect(flow.step == .howItWorks)
+        // The grant lands from elsewhere while the flow is on an earlier page…
+        world.satisfied.insert(.systemAudio)
+        flow.advance()
+        // …and its page drops out of the plan rather than showing a done deal.
+        #expect(flow.step == .style)
     }
 
     /// A machine that already has the model and both grants — a developer's, or one where
@@ -103,44 +107,43 @@ struct OnboardingTests {
     @Test("an install that is already set up completes without being shown")
     func silentCompletion() {
         let world = World()
-        world.satisfied = [.language, .microphone, .accessibility, .systemAudio]
+        world.satisfied = [.language, .howItWorks, .systemAudio, .tryIt]
         let flow = make(world)
         flow.begin()
         #expect(flow.isComplete)
     }
 
-    /// System audio is a setup step like the other grants: a machine that lacks only it
-    /// still gets the flow, with the ask in the grants block after the teaching pages.
-    @Test("system audio is asked for, after the teaching pages")
+    /// A machine that lacks only system audio still gets the flow, and its ask comes
+    /// right after the page that introduces meetings.
+    @Test("system audio is asked for, right after the keys page")
     func systemAudioStep() {
         let world = World()
-        world.satisfied = [.language, .microphone, .accessibility]
+        world.satisfied = [.language, .howItWorks, .tryIt]
         let flow = make(world)
         flow.begin()
         #expect(!flow.isComplete)
         #expect(flow.step == .language)
-        while flow.step != .systemAudio, flow.step != .tryIt { flow.advance() }
+        flow.advance()
+        #expect(flow.step == .underTheHood)
+        flow.advance()
+        #expect(flow.step == .howItWorks)
+        flow.advance()
         #expect(flow.step == .systemAudio)
     }
 
-    /// Teach first, ask late: every reading page comes before a single grant is
-    /// requested, and Accessibility lands immediately before the step it unlocks.
-    @Test("the flow teaches, then asks, then tries")
+    /// Each ask lives with its explainer; the walk is the whole flow in order.
+    @Test("the flow teaches and asks together, then tries")
     func explanationThenTry() {
-        let world = World()
-        world.satisfied = [.language, .microphone]
-        let flow = make(world)
+        let flow = make(World())
         flow.begin()
         flow.advance()
         #expect(flow.step == .underTheHood)
         flow.advance()
         #expect(flow.step == .howItWorks)
         flow.advance()
-        #expect(flow.step == .style)
-        flow.advance()
         #expect(flow.step == .systemAudio)
         flow.advance()
-        #expect(flow.step == .accessibility)
+        #expect(flow.step == .style)
         flow.advance()
         #expect(flow.step == .tryIt)
     }
@@ -148,12 +151,29 @@ struct OnboardingTests {
     @Test("advancing past the last step finishes")
     func finishesAtEnd() {
         let world = World()
-        world.satisfied = [.language, .microphone]
+        world.satisfied = [.language]
         let flow = make(world)
         flow.begin()
         while flow.step != .tryIt { flow.advance() }
         flow.advance()
         #expect(flow.isComplete)
+    }
+
+    /// Going back re-reads; it never un-decides. And the first page has nothing behind it.
+    @Test("back walks the plan in reverse and stops at the start")
+    func back() {
+        let flow = make(World())
+        flow.begin()
+        #expect(flow.step == .language)
+        flow.back()
+        #expect(flow.step == .language)
+
+        flow.advance()
+        let second = flow.step
+        flow.advance()
+        flow.back()
+        #expect(flow.step == second)
+        #expect(flow.position == 2)
     }
 
     @Test("completion survives a relaunch")
@@ -176,15 +196,15 @@ struct OnboardingTests {
         let world = World()
         let flow = make(world)
         flow.begin()
-        while flow.step != .microphone { flow.advance() }
+        while flow.step != .systemAudio { flow.advance() }
 
         flow.noteProgress()
         #expect(!flow.isAdvancing)
 
-        world.satisfied.insert(.microphone)
+        world.satisfied.insert(.systemAudio)
         flow.noteProgress()
         #expect(flow.isAdvancing)
         // Still on the step for the beat that shows the tick; the move is deferred.
-        #expect(flow.step == .microphone)
+        #expect(flow.step == .systemAudio)
     }
 }

@@ -85,11 +85,14 @@ final class AppServices {
         onboarding = OnboardingCoordinator { step in
             switch step {
             case .language: SpeechModelLoader.isDownloaded(speech.activeModel)
-            case .microphone: permissions.microphone == .granted
-            case .accessibility: permissions.accessibility == .granted
+            // Pages that carry a grant are satisfied by it — which is what lets a fully
+            // set-up machine skip the whole flow. The microphone lives on Try It: the
+            // first dictation is the first thing that needs it.
+            case .howItWorks: permissions.accessibility == .granted
             case .systemAudio: permissions.systemAudio == .granted
+            case .tryIt: permissions.microphone == .granted
             // Nothing to check: these are there to be read or done, not verified.
-            case .howItWorks, .underTheHood, .style, .tryIt: false
+            case .underTheHood, .style: false
             }
         }
     }
