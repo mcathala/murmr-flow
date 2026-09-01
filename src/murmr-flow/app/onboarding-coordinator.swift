@@ -24,14 +24,12 @@ import Observation
 final class OnboardingCoordinator {
 
     enum Step: Int, CaseIterable, Sendable {
-        // Declaration order is flow order: teach everything, then ask for everything.
-        // The reading pages — what happens to the audio, the two keys, the style — all
-        // come before a single grant is requested, so the privacy case has been made by
-        // the time anything asks to hear or control the computer. The three grants then
-        // stack in rising order of gravity, with Accessibility immediately before Try It,
-        // the step it unlocks.
-        case language, underTheHood, howItWorks, style, microphone, systemAudio,
-             accessibility, tryIt
+        // Declaration order is flow order. Each permission is asked on the page that
+        // explains the thing that uses it: the microphone lives on "What's inside"
+        // (speech-to-text is what needs it), Accessibility lives on "How it works"
+        // (the keys are what it powers), and system audio keeps a small page of its
+        // own right after — Apple's scariest dialog earns its own beat.
+        case language, underTheHood, howItWorks, systemAudio, style, tryIt
 
         var number: Int { rawValue + 1 }
 
@@ -39,15 +37,16 @@ final class OnboardingCoordinator {
         /// have no condition that could already hold.
         var isSetup: Bool {
             switch self {
-            case .language, .microphone, .systemAudio, .accessibility: true
-            case .howItWorks, .underTheHood, .style, .tryIt: false
+            case .language, .howItWorks, .systemAudio, .tryIt: true
+            case .underTheHood, .style: false
             }
         }
 
-        /// Whether the step is left out once its condition holds. The language question is
-        /// not: it is about the person, not the download — a model already on disk only
-        /// means choosing it costs nothing — so it is asked whenever the flow runs at all.
-        var skipsWhenSatisfied: Bool { self != .language }
+        /// Whether the step is left out once its condition holds. Only the system-audio
+        /// ask is: the language question is about the person, not the download, and the
+        /// two teaching pages carry their permission as a card on the way through — a
+        /// granted microphone doesn't make "What's inside" less worth reading.
+        var skipsWhenSatisfied: Bool { self == .systemAudio }
     }
 
     /// Where completion is recorded. Public because `SettingsStore` reads it too: it is
@@ -116,6 +115,17 @@ final class OnboardingCoordinator {
             return
         }
         step = plan[index + 1]
+    }
+
+    /// One step towards the door. Anything that was decided stays decided — going back is
+    /// for re-reading a page, not for undoing — and a satisfied permission step simply
+    /// shows its tick and a Continue.
+    func back() {
+        advanceTask?.cancel()
+        advanceTask = nil
+        isAdvancing = false
+        guard let index = plan.firstIndex(of: step), index > 0 else { return }
+        step = plan[index - 1]
     }
 
     /// Checks the current step against the world and, if its condition now holds, moves on

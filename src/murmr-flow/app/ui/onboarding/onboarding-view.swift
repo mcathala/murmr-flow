@@ -37,6 +37,13 @@ struct OnboardingView: View {
     /// Whether the Accessibility pane has been opened once already from this step.
     @State private var askedForAccessibility = false
 
+    /// Which key is being re-recorded from the How-it-works cards, if either.
+    private enum RebindSlot { case dictation, meeting }
+    @State private var rebinding: RebindSlot?
+    @State private var rebindRecorder = HotkeyRecorder()
+    /// Which style group's example is open. One at a time: the page has a height budget.
+    @State private var previewing: String?
+
     /// Read once: the signature does not change while the process runs.
     private static let signing = SigningInfo.current()
 
@@ -69,10 +76,11 @@ struct OnboardingView: View {
         .task(id: step) {
             // The try-it box is the destination; nothing is pasted anywhere while it is up.
             dictation.deliversText = step != .tryIt
-            guard step == .microphone || step == .accessibility || step == .systemAudio
+            guard step == .howItWorks || step == .systemAudio || step == .tryIt
             else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
+                let hadAccessibility = permissions.accessibility == .granted
                 // A denied system-audio grant flips in System Settings, which no
                 // notification announces — and once determined, the probe re-checks
                 // without prompting. The others only need their state re-read.
@@ -81,21 +89,22 @@ struct OnboardingView: View {
                 } else {
                     permissions.refresh()
                 }
-                onboarding.noteProgress()
+                // Only the dedicated ask page advances itself; the teaching pages tick
+                // their card in place and leave the reading to the reader.
+                if step == .systemAudio { onboarding.noteProgress() }
                 // A grant made in System Settings leaves the user parked there. The
                 // moment it lands, fetch them back — but only from System Settings, the
-                // one place this flow sent them. The first version reclaimed focus from
-                // whatever was frontmost, and yanked the user out of their browser the
-                // instant a grant registered. Being in any other app is their choice.
-                if onboarding.isAdvancing,
+                // one place this flow sent them. Being in any other app is their choice.
+                let grantJustLanded =
+                    (!hadAccessibility && permissions.accessibility == .granted)
+                        || onboarding.isAdvancing
+                if grantJustLanded,
                    NSWorkspace.shared.frontmostApplication?.bundleIdentifier
                        == "com.apple.systempreferences" {
                     NSApp.activate(ignoringOtherApps: true)
                 }
             }
         }
-        .onChange(of: permissions.microphone) { onboarding.noteProgress() }
-        .onChange(of: permissions.accessibility) { onboarding.noteProgress() }
         .onChange(of: permissions.systemAudio) { onboarding.noteProgress() }
     }
 
@@ -104,9 +113,7 @@ struct OnboardingView: View {
     private var title: String {
         switch step {
         case .language: "Which languages do you speak?"
-        case .microphone: "Allow the microphone"
-        case .accessibility: "Turn on Accessibility"
-        case .systemAudio: "Let it hear the meeting"
+        case .systemAudio: "Let it hear the other side"
         case .howItWorks: "How it works"
         case .underTheHood: "What\u{2019}s inside"
         case .style: "How should it sound?"
@@ -120,24 +127,18 @@ struct OnboardingView: View {
             return "Pick every language you\u{2019}ll dictate in. Murmr Flow understands speech "
                 + "on your Mac itself — nothing is sent anywhere. The one-off download (about "
                 + "\(SpeechModel.parakeetV3.approximateSizeLabel)) starts when you continue."
-        case .microphone:
-            return "Murmr Flow needs to hear you to turn speech into text. Everything stays "
-                + "on this Mac."
-        case .accessibility:
-            return "One last permission: this is what lets \(settings.hotkey.displayName) "
-                + "work in any app, and what types your words where your cursor is. Click "
-                + "the button, then turn on Murmr Flow in the list that opens."
         case .systemAudio:
-            return "Meeting notes have two sides: your microphone is \u{201C}You\u{201D}, and "
-                + "what this Mac plays is \u{201C}Them\u{201D}. macOS files this under "
-                + "\u{201C}Screen & System Audio Recording\u{201D}, but only the audio is "
-                + "taken — your screen stays yours."
+            return "Murmr Flow needs to hear what this Mac plays — the other people in "
+                + "your meetings, calls, or videos."
         case .howItWorks:
             return "Two keys, one for each job."
         case .underTheHood:
-            return "Dictation and meeting notes both go through the same two steps."
+            return "What happens between what you say and what we write."
         case .style:
-            return "Pick a style for each. You can change it any time."
+            return "Two things to pick, for dictation and for meeting notes:\n"
+                + "\u{2022} Style — how the words are written.\n"
+                + "\u{2022} Language — what they come out in. Dictate in French, land in "
+                + "English; Off keeps the language you spoke."
         case .tryIt:
             let key = settings.hotkey.displayName
             return settings.holdToTalk
@@ -174,28 +175,29 @@ struct OnboardingView: View {
                 }
                 packLine
             }
-        case .microphone:
+        case .systemAudio:
             permissionCard(
-                symbol: "mic.fill",
-                title: "Microphone",
-                state: permissions.microphone,
-                level: permissions.microphone == .denied ? .bad : .waiting
+                symbol: "speaker.wave.2.fill",
+                title: "System audio",
+                state: permissions.systemAudio,
+                level: permissions.systemAudio == .denied ? .bad : .waiting
             )
-        case .accessibility:
+        case .howItWorks:
             VStack(alignment: .leading, spacing: 8) {
-                // "Not granted" is where every install starts, so it isn't drawn as a fault.
-                permissionCard(
+                howItWorks
+                // The permission, on the page that explains what it powers. State only:
+                // the ask itself lives in the footer, where every page's one action goes.
+                inlinePermission(
                     symbol: "accessibility",
                     title: "Accessibility",
+                    caption: "Murmr Flow needs access to your keyboard, so pressing "
+                        + "\(settings.hotkey.displayName) anywhere starts a dictation.",
                     state: permissions.accessibility,
-                    level: .waiting
+                    action: nil
                 )
-                // Developer builds only, and only once the pane has been opened and the
-                // grant still hasn't landed. An ad-hoc signature changes on every build and
-                // TCC keeps the previous build's entry, so the list shows a toggle already
-                // on while this build stays untrusted ("Failed to match existing code
-                // requirement" in tccd's log). Nothing a first-time user will ever see; the
-                // one person who does needs to be told what to click.
+                // Developer builds only: an ad-hoc signature changes every build, and TCC
+                // keeps the previous build's entry — the pane can show a toggle already on
+                // while this build stays untrusted.
                 if Self.signing.isAdHoc, askedForAccessibility,
                    permissions.accessibility != .granted {
                     WarningRow(
@@ -205,15 +207,6 @@ struct OnboardingView: View {
                     )
                 }
             }
-        case .systemAudio:
-            permissionCard(
-                symbol: "speaker.wave.2.fill",
-                title: "System audio",
-                state: permissions.systemAudio,
-                level: permissions.systemAudio == .denied ? .bad : .waiting
-            )
-        case .howItWorks:
-            howItWorks
         case .underTheHood:
             underTheHood
         case .style:
@@ -315,6 +308,44 @@ struct OnboardingView: View {
         }
     }
 
+    /// A permission living on a teaching page: what it is, why, its state, and the one
+    /// button — ticking in place rather than flipping the page, so the reading finishes.
+    private func inlinePermission(
+        symbol: String,
+        title: String,
+        caption: String,
+        state: PermissionState,
+        action: (title: String, run: () -> Void)?
+    ) -> some View {
+        Card {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 12) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 16))
+                        .frame(width: 22)
+                        .foregroundStyle(Theme.Palette.muted)
+                    Text(title).font(Theme.Text.bodyStrong)
+                    Spacer(minLength: 0)
+                    if state == .granted {
+                        StatusChip(title: "Allowed", level: .ok)
+                    } else if let action {
+                        Button(action.title, action: action.run)
+                            .controlSize(.small)
+                    } else {
+                        StatusChip(
+                            title: state.label,
+                            level: state == .denied ? .bad : .waiting
+                        )
+                    }
+                }
+                Text(caption)
+                    .font(Theme.Text.small)
+                    .foregroundStyle(Theme.Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private func permissionCard(
         symbol: String, title: String, state: PermissionState, level: StatusChip.Level
     ) -> some View {
@@ -343,6 +374,7 @@ struct OnboardingView: View {
             jobColumn(
                 symbol: "mic.fill",
                 title: "Dictation",
+                slot: .dictation,
                 key: settings.hotkey,
                 steps: settings.holdToTalk
                     ? [
@@ -358,7 +390,8 @@ struct OnboardingView: View {
             )
             jobColumn(
                 symbol: "person.2.wave.2",
-                title: "Meeting notes",
+                title: "Notetaker",
+                slot: .meeting,
                 key: settings.meetingHotkey,
                 steps: [
                     "Press once when the meeting starts.",
@@ -370,7 +403,7 @@ struct OnboardingView: View {
     }
 
     private func jobColumn(
-        symbol: String, title: String, key: Hotkey?, steps: [String]
+        symbol: String, title: String, slot: RebindSlot, key: Hotkey?, steps: [String]
     ) -> some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
@@ -381,12 +414,26 @@ struct OnboardingView: View {
                     Text(title).font(Theme.Text.bodyStrong)
                     Spacer(minLength: 0)
                 }
-                if let key {
-                    Keycap(text: key.displayName)
-                } else {
-                    Text("No key yet — set one in Settings › Hotkeys.")
-                        .font(Theme.Text.small)
-                        .foregroundStyle(Theme.Palette.faint)
+                // The key is changeable where it is introduced — sending someone who
+                // dislikes it off to Settings would be the flow admitting defeat.
+                HStack(spacing: 8) {
+                    if rebinding == slot {
+                        Text("Press a key…")
+                            .font(Theme.Text.small)
+                            .foregroundStyle(Theme.Palette.gold)
+                        Button("Cancel") {
+                            rebindRecorder.stop()
+                            rebinding = nil
+                        }
+                        .controlSize(.small)
+                    } else if let key {
+                        Keycap(text: key.displayName)
+                        Button("Change") { beginRebind(slot) }
+                            .controlSize(.small)
+                    } else {
+                        Button("Set a key") { beginRebind(slot) }
+                            .controlSize(.small)
+                    }
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
@@ -417,15 +464,16 @@ struct OnboardingView: View {
                     number: 1,
                     symbol: "waveform",
                     title: "Speech to text",
-                    detail: "On this Mac. Your voice never leaves it."
+                    detail: "What you say is transcribed into raw text, right here on "
+                        + "this Mac."
                 )
                 Divider()
                 infoRow(
                     number: 2,
                     symbol: "sparkles",
-                    title: "AI clean-up",
-                    detail: "Punctuation, filler words, your spellings — by an AI like "
-                        + "ChatGPT. Optional; only the text is sent, never the audio."
+                    title: "AI polishes the raw text",
+                    detail: "An AI cleans up what you said, applying the style you\u{2019}ll "
+                        + "pick next — and can translate it into any language."
                 )
             }
         }
@@ -460,6 +508,15 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     styleGroup(
                         title: "Dictation",
+                        input: Self.dictationExampleInput,
+                        translates: Binding(
+                            get: { settings.dictationTranslates },
+                            set: { settings.dictationTranslates = $0 }
+                        ),
+                        language: Binding(
+                            get: { settings.dictationOutputLanguage },
+                            set: { settings.dictationOutputLanguage = $0 }
+                        ),
                         options: dictationStyles.map { ($0.id, $0.name) },
                         selected: prompts.dictationPromptID,
                         summary: Self.summary(for: prompts.dictationPrompt)
@@ -469,6 +526,15 @@ struct OnboardingView: View {
 
                     styleGroup(
                         title: "Meeting notes",
+                        input: Self.meetingExampleInput,
+                        translates: Binding(
+                            get: { settings.notetakerTranslates },
+                            set: { settings.notetakerTranslates = $0 }
+                        ),
+                        language: Binding(
+                            get: { settings.notetakerOutputLanguage },
+                            set: { settings.notetakerOutputLanguage = $0 }
+                        ),
                         options: [(PromptStore.meetingPreset.id, PromptStore.meetingPreset.name),
                                   (nil, "As spoken")],
                         selected: prompts.notetakerPromptID,
@@ -476,8 +542,8 @@ struct OnboardingView: View {
                     ) { prompts.notetakerPromptID = $0 }
                 }
             }
-            Text("Styles need the AI clean-up set up in Settings. Until then, you get your "
-                 + "words exactly as spoken.")
+            Text("Styles and translation need the AI clean-up set up in Settings. Until "
+                 + "then, you get your words exactly as spoken.")
                 .font(Theme.Text.small)
                 .foregroundStyle(Theme.Palette.faint)
                 .fixedSize(horizontal: false, vertical: true)
@@ -492,26 +558,126 @@ struct OnboardingView: View {
 
     private func styleGroup(
         title: String,
+        input: String,
+        translates: Binding<Bool>,
+        language: Binding<String>,
         options: [(id: UUID?, name: String)],
         selected: UUID?,
         summary: String?,
         choose: @escaping (UUID?) -> Void
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(Theme.Text.bodyStrong)
-            FlowLayout(spacing: 6) {
-                ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                    choiceChip(option.name, isOn: option.id == selected) { choose(option.id) }
+        let name = options.first { $0.id == selected }?.name
+        let example = name.flatMap { Self.examples[$0] }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(title).font(Theme.Text.bodyStrong)
+                Spacer(minLength: 0)
+                // The same value-menu Settings uses: translation is a per-job clean-up
+                // choice exactly like the style, so it is offered where the styles are.
+                TranslateMenu(translates: translates, language: language)
+            }
+            HStack(spacing: 8) {
+                FlowLayout(spacing: 6) {
+                    ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                        choiceChip(option.name, isOn: option.id == selected) {
+                            choose(option.id)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+                if example != nil {
+                    Button(previewing == title ? "Hide" : "Preview") {
+                        previewing = previewing == title ? nil : title
+                    }
+                    .controlSize(.small)
                 }
             }
-            if let summary {
-                Text(summary)
-                    .font(Theme.Text.small)
-                    .foregroundStyle(Theme.Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+            // A worked example beats a description: the same short sentence every time,
+            // so styles compare against each other rather than against different inputs.
+            if previewing == title, let example {
+                // Translation wins over style in the example: one sentence per language
+                // is teachable and checkable; twenty-six languages times six styles is
+                // neither. The shape it demonstrates is the Default clean-up.
+                let output = translates.wrappedValue
+                    ? (Self.translatedExamples[language.wrappedValue] ?? example)
+                    : example
+                VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("You say:")
+                            .font(Theme.Text.label)
+                            .foregroundStyle(Theme.Palette.faint)
+                        Text("\u{201C}\(input)\u{201D}")
+                            .font(Theme.Text.small)
+                            .foregroundStyle(Theme.Palette.muted)
+                            .padding(.leading, 12)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("We write:")
+                            .font(Theme.Text.label)
+                            .foregroundStyle(Theme.Palette.faint)
+                        Text(output)
+                            .font(Theme.Text.small)
+                            .foregroundStyle(Theme.Palette.muted)
+                            .padding(.leading, 12)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
         }
     }
+
+    /// One generic sentence per job, per-style renderings out — hardcoded, because the
+    /// point is teaching the difference, not exercising the model on a screen that may
+    /// not have a provider yet. The two inputs carry the same content, which is what
+    /// lets one table of translations serve them both.
+    static let dictationExampleInput =
+        "uh so can we move the meeting to thursday and um also send me the report"
+    static let meetingExampleInput =
+        "so are we good to move the meeting to thursday yeah thursday works for me "
+        + "perfect and can you send me the report after the call sure will do"
+
+    /// The example sentence, cleaned and translated — hardcoded like the styles, one per
+    /// offered language, so picking a language in the 文A menu shows the promise being
+    /// kept rather than an English sentence under a French flag.
+    static let translatedExamples: [String: String] = [
+        "English": "Can we move the meeting to Thursday? And also send me the report.",
+        "French": "Peut-on déplacer la réunion à jeudi ? Et envoie-moi aussi le rapport.",
+        "German": "Können wir das Meeting auf Donnerstag verschieben? Und schick mir auch den Bericht.",
+        "Spanish": "¿Podemos mover la reunión al jueves? Y envíame también el informe.",
+        "Italian": "Possiamo spostare la riunione a giovedì? E mandami anche il report.",
+        "Portuguese": "Podemos mudar a reunião para quinta-feira? E envia-me também o relatório.",
+        "Dutch": "Kunnen we de meeting naar donderdag verplaatsen? En stuur me ook het rapport.",
+        "Swedish": "Kan vi flytta mötet till torsdag? Och skicka mig rapporten också.",
+        "Danish": "Kan vi flytte mødet til torsdag? Og send mig også rapporten.",
+        "Finnish": "Voisimmeko siirtää kokouksen torstaille? Ja lähetä minulle myös raportti.",
+        "Polish": "Czy możemy przenieść spotkanie na czwartek? I wyślij mi też raport.",
+        "Czech": "Můžeme přesunout schůzku na čtvrtek? A pošli mi také zprávu.",
+        "Slovak": "Môžeme presunúť stretnutie na štvrtok? A pošli mi aj správu.",
+        "Slovenian": "Lahko sestanek prestavimo na četrtek? In pošlji mi še poročilo.",
+        "Croatian": "Možemo li sastanak pomaknuti na četvrtak? I pošalji mi i izvještaj.",
+        "Hungarian": "Áttehetjük a megbeszélést csütörtökre? És küldd el nekem a jelentést is.",
+        "Romanian": "Putem muta ședința joi? Și trimite-mi și raportul.",
+        "Bulgarian": "Можем ли да преместим срещата за четвъртък? И ми изпрати и доклада.",
+        "Russian": "Можем перенести встречу на четверг? И пришли мне ещё отчёт.",
+        "Ukrainian": "Можемо перенести зустріч на четвер? І надішли мені ще звіт.",
+        "Greek": "Μπορούμε να μεταφέρουμε τη συνάντηση την Πέμπτη; Και στείλε μου και την αναφορά.",
+        "Estonian": "Kas saame koosoleku neljapäevale tõsta? Ja saada mulle ka aruanne.",
+        "Latvian": "Vai varam pārcelt sapulci uz ceturtdienu? Un atsūti man arī atskaiti.",
+        "Lithuanian": "Ar galime perkelti susitikimą į ketvirtadienį? Ir atsiųsk man ir ataskaitą.",
+        "Maltese": "Nistgħu nċaqilqu l-laqgħa għall-Ħamis? U ibgħatli wkoll ir-rapport.",
+        "Japanese": "会議を木曜日に変更できますか？あとレポートも送ってください。",
+    ]
+
+    static let examples: [String: String] = [
+        "Default": "Can we move the meeting to Thursday? And also send me the report.",
+        "Structure": "Two asks:\n– move the meeting to Thursday\n– send the report",
+        "Formal": "Could we move the meeting to Thursday? Please also send me the report.",
+        "Casual": "Can we push the meeting to Thursday? And send me the report too.",
+        "Meeting": "Decided: meeting moves to Thursday.\nTo-do: send the report.",
+        "As spoken": "so are we good to move the meeting to thursday yeah thursday works "
+            + "for me perfect and can you send me the report after the call sure will do",
+    ]
 
     /// One line per built-in, in the reader's terms. A custom prompt describes itself by
     /// its name.
@@ -537,6 +703,17 @@ struct OnboardingView: View {
     /// sentence. Nothing to type into, and the proof is the same.
     private var tryCard: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // The ask lives where the need does: this page is the first thing that
+            // listens. State only — the footer's primary button carries the ask.
+            if permissions.microphone != .granted {
+                inlinePermission(
+                    symbol: "mic.fill",
+                    title: "Microphone",
+                    caption: "Murmr Flow needs to hear you to turn speech into text.",
+                    state: permissions.microphone,
+                    action: nil
+                )
+            }
             Card(highlighted: dictation.stage.isRecording) {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
@@ -548,6 +725,12 @@ struct OnboardingView: View {
                         Button(dictation.stage.isRecording ? "Stop" : "Dictate") {
                             if dictation.stage.isRecording {
                                 Task { await dictation.endDictation() }
+                            } else if permissions.microphone == .notDetermined {
+                                // The same direction as the footer's Allow: asking is
+                                // what this click has to mean while there is no grant.
+                                Task { await permissions.requestMicrophone() }
+                            } else if permissions.microphone == .denied {
+                                permissions.openMicrophoneSettings()
                             } else {
                                 dictation.beginDictation()
                             }
@@ -657,7 +840,16 @@ struct OnboardingView: View {
 
     private var footer: some View {
         HStack(spacing: 12) {
-            if step.isSetup {
+            // Rereading the previous page must not cost a restart of the flow.
+            if onboarding.position > 1 {
+                Button("‹ Back") { onboarding.back() }
+                    .buttonStyle(.plain)
+                    .font(Theme.Text.body)
+                    .foregroundStyle(Theme.Palette.faint)
+            }
+            // Only while the primary button is an ask: once the grant is in (or on a
+            // page whose primary is already Continue), skipping means nothing.
+            if showsSkip {
                 Button("Skip for now") { skip() }
                     .buttonStyle(.plain)
                     .font(Theme.Text.body)
@@ -679,37 +871,6 @@ struct OnboardingView: View {
         switch step {
         case .language:
             return ("Continue", { choose(SpeechModel.covering(languages)) })
-        case .microphone:
-            switch permissions.microphone {
-            case .granted:
-                return ("Continue", { onboarding.advance() })
-            case .notDetermined:
-                return ("Allow microphone", {
-                    Task {
-                        await permissions.requestMicrophone()
-                        onboarding.noteProgress()
-                    }
-                })
-            case .denied:
-                return ("Open System Settings", { permissions.openMicrophoneSettings() })
-            }
-        case .accessibility:
-            if permissions.accessibility == .granted {
-                return ("Continue", { onboarding.advance() })
-            }
-            return ("Open System Settings", {
-                // Straight to the pane, with the app already listed — one step. Apple's
-                // dialog would do the listing too, but it is a screen of its own whose only
-                // useful button opens this same pane, so it is kept for a second click: the
-                // user saw the list without Murmr Flow in it, and the dialog is the way that
-                // is guaranteed to add it.
-                if askedForAccessibility {
-                    permissions.promptAccessibility()
-                } else {
-                    askedForAccessibility = true
-                    permissions.requestAccessibility()
-                }
-            })
         case .systemAudio:
             switch permissions.systemAudio {
             case .granted:
@@ -724,10 +885,34 @@ struct OnboardingView: View {
             case .denied:
                 return ("Open System Settings", { permissions.openSystemAudioSettings() })
             }
-        case .howItWorks, .underTheHood, .style:
+        case .howItWorks:
+            if permissions.accessibility == .granted {
+                return ("Continue", { onboarding.advance() })
+            }
+            return ("Open System Settings", {
+                // Straight to the pane, with the app already listed — one step. Apple's
+                // dialog is kept for a second click: it is the way that is guaranteed
+                // to add the app to the list.
+                if askedForAccessibility {
+                    permissions.promptAccessibility()
+                } else {
+                    askedForAccessibility = true
+                    permissions.requestAccessibility()
+                }
+            })
+        case .underTheHood, .style:
             return ("Continue", { onboarding.advance() })
         case .tryIt:
-            return ("Done", { services.finishOnboarding() })
+            switch permissions.microphone {
+            case .granted:
+                return ("Done", { services.finishOnboarding() })
+            case .notDetermined:
+                return ("Allow microphone", {
+                    Task { await permissions.requestMicrophone() }
+                })
+            case .denied:
+                return ("Open System Settings", { permissions.openMicrophoneSettings() })
+            }
         }
     }
 
@@ -739,11 +924,41 @@ struct OnboardingView: View {
         onboarding.advance()
     }
 
+    private func beginRebind(_ slot: RebindSlot) {
+        rebinding = slot
+        rebindRecorder.onFinish = { captured in
+            defer { rebinding = nil }
+            guard let captured else { return }
+            switch slot {
+            case .dictation:
+                // The two binds must not collide; a rejected capture just keeps the old key.
+                guard captured != settings.meetingHotkey else { return }
+                services.changeDictationHotkey(to: captured)
+            case .meeting:
+                guard captured != settings.hotkey else { return }
+                services.changeMeetingHotkey(to: captured)
+            }
+        }
+        rebindRecorder.start()
+    }
+
     /// Skipping the language question keeps the default and downloads that: leaving with
     /// no model at all would make the last screen a dead end.
+    private var showsSkip: Bool {
+        switch step {
+        case .language: true
+        case .howItWorks: permissions.accessibility != .granted
+        case .systemAudio: permissions.systemAudio != .granted
+        case .tryIt: permissions.microphone != .granted
+        case .underTheHood, .style: false
+        }
+    }
+
     private func skip() {
         if step == .language {
             choose(speech.activeModel)
+        } else if step == .tryIt {
+            services.finishOnboarding()
         } else {
             onboarding.advance()
         }
