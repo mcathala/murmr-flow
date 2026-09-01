@@ -75,7 +75,8 @@ struct SettingsPaneView: View {
             PrivacyDataPane(
                 permissions: services.permissions,
                 notes: services.notes,
-                history: services.history
+                history: services.history,
+                updates: services.updates
             )
         }
     }

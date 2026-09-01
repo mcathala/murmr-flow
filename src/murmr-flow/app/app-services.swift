@@ -33,6 +33,7 @@ final class AppServices {
     /// `SettingsStore`s would not see each other's changes.
     let settings = SettingsStore()
     let history = HistoryStore()
+    let updates = UpdateChecker()
     let notes = NoteStore()
     let prompts = PromptStore()
     let providers = ProviderStore()
@@ -164,6 +165,7 @@ final class AppServices {
 
         armHotkeyIfPossible()
         armMeetingHotkey()
+        Task { await updates.checkIfStale() }
         FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
         Self.log.notice("hotkey armed: \(self.dictation.hotkeyActive, privacy: .public)")
 

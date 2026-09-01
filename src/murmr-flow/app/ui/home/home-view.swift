@@ -17,6 +17,12 @@ struct HomeView: View {
             if let trouble { WarningRow(message: trouble.message, action: trouble.action) }
             // Not a fault — the app works without it — but the one setup step with no
             // system prompt to surface it, so Home says it once, only while it is true.
+            if let update = services.updates.available {
+                WarningRow(
+                    message: "Murmr Flow \(update.version) is out.",
+                    action: ("Download", { NSWorkspace.shared.open(update.url) })
+                )
+            }
             if needsProvider {
                 WarningRow(
                     message: "No AI provider yet — your words arrive exactly as spoken.",

@@ -28,6 +28,7 @@ struct PrivacyDataPane: View {
     let permissions: PermissionManager
     let notes: NoteStore
     let history: HistoryStore
+    let updates: UpdateChecker
 
     private enum Pending: Identifiable {
         case dictations, notes, everything
@@ -55,9 +56,16 @@ struct PrivacyDataPane: View {
             deletion
 
             SectionLabel(title: "About")
-            Text("Murmr Flow \(Self.version)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Text("Murmr Flow \(Self.version)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                updateStatus
+                Button("Check for updates") { Task { await updates.check() } }
+                    .controlSize(.small)
+                    .disabled(updates.status == .checking)
+            }
         }
         // A single confirmation for all three, because they differ only in what they name.
         .confirmationDialog(
@@ -246,6 +254,25 @@ struct PrivacyDataPane: View {
 
     private func count(_ number: Int, _ noun: String) -> String {
         "\(number) \(noun)\(number == 1 ? "" : "s")"
+    }
+
+    /// One phrase, only after the button was pressed — the row is not a status board.
+    @ViewBuilder
+    private var updateStatus: some View {
+        switch updates.status {
+        case .idle:
+            EmptyView()
+        case .checking:
+            ProgressView().controlSize(.small)
+        case .upToDate:
+            Text("Up to date").font(.caption).foregroundStyle(.secondary)
+        case .available(let version, let url):
+            Button("Get \(version)") { NSWorkspace.shared.open(url) }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+        case .failed(let message):
+            Text(message).font(.caption).foregroundStyle(.orange)
+        }
     }
 
     // MARK: - About
