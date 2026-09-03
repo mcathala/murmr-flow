@@ -135,7 +135,7 @@ struct OnboardingView: View {
         case .underTheHood:
             return "What happens between what you say and what we write."
         case .style:
-            return "Two things to pick, for dictation and for meeting notes:\n"
+            return "Two things to pick, for Dictation and for the Notetaker:\n"
                 + "\u{2022} Style — how the words are written.\n"
                 + "\u{2022} Language — what they come out in. Dictate in French, land in "
                 + "English; Off keeps the language you spoke."
@@ -525,7 +525,7 @@ struct OnboardingView: View {
                     Divider()
 
                     styleGroup(
-                        title: "Meeting notes",
+                        title: "Notetaker",
                         input: Self.meetingExampleInput,
                         translates: Binding(
                             get: { settings.notetakerTranslates },

@@ -163,7 +163,7 @@ struct PanelView: View {
                 model.arm(.dictation)
             }
         } else {
-            satellite("text.document", size: 12, help: "Set up a meeting note") {
+            satellite("text.document", size: 12, help: "Set up the Notetaker") {
                 model.arm(.note)
             }
         }

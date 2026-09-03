@@ -63,7 +63,9 @@ struct AICleanupPane: View {
         var title: String {
             switch self {
             case .provider: "Provider"
-            case .prompts: "Prompts"
+            // "Styles" to the user — onboarding and the pill both taught that word; the
+            // things being styles is how they are chosen, prompts is how they are made.
+            case .prompts: "Styles"
             case .dictionary: "Dictionary"
             }
         }
@@ -83,7 +85,7 @@ struct AICleanupPane: View {
             SettingRow(title: "Activate for") {
                 HStack(spacing: 16) {
                     Toggle("Dictation", isOn: $settings.cleanupEnabled)
-                    Toggle("Meeting notes", isOn: $settings.notetakerCleanupEnabled)
+                    Toggle("Notetaker", isOn: $settings.notetakerCleanupEnabled)
                 }
                 .toggleStyle(.checkbox)
             }
