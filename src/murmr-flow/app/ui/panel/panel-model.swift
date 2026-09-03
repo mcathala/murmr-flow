@@ -97,9 +97,6 @@ final class PanelModel {
     var youLevel: Float = 0
     var themLevel: Float = 0
 
-    /// Words as they are recognised. Empty until the first pass lands.
-    var preview: String = ""
-
     /// Where the text will go. Knowing this *before* speaking is the point — otherwise
     /// you find out afterwards, from the wrong window.
     var targetAppName: String?
@@ -229,15 +226,15 @@ final class PanelModel {
             // two settings in orbit above, the row only holds facts and the start button.
             CGSize(width: 240 + Self.satelliteReach * 2, height: 48)
         case .dictating:
-            preview.isEmpty
-                ? CGSize(width: 330, height: 48)
-                : CGSize(width: 452, height: 90)
+            // Content-hugging: icon, app, waveform, clock, two controls, no dead middle.
+            CGSize(width: 250, height: 48)
         case .working:
             CGSize(width: 232, height: 48)
         case .meeting:
             CGSize(width: 368, height: 48)
         case .failed:
-            CGSize(width: 268, height: 48)
+            // The message and the way out — the two-word failure needs no mode icon.
+            CGSize(width: 210, height: 48)
         }
         // The bubbles ride above the row, so they are window height, not row height.
         if showsBubbles { size.height += Self.bubbleReach }

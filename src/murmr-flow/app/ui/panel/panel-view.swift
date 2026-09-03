@@ -186,28 +186,22 @@ struct PanelView: View {
 
     // MARK: - Open states
 
+    /// No live transcript here, on purpose. Reading your own words as they are guessed
+    /// pulls attention mid-sentence and shows the roughest draft the pipeline ever has;
+    /// the waveform and the clock say "heard, running" without inviting proofreading.
+    /// The words land where the cursor is — that is the reveal.
     private var dictating: some View {
         row {
-            VStack(alignment: .leading, spacing: 6) {
-                if !model.preview.isEmpty {
-                    Text(model.preview)
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Palette.text)
-                        .lineLimit(2)
-                        .truncationMode(.head)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                HStack(spacing: 8) {
-                    indicator
-                    divider
-                    appIcon
-                    Waveform(level: model.micLevel)
-                    Text(model.clock)
-                        .font(Theme.Text.monoLarge)
-                        .foregroundStyle(Theme.Palette.text)
-                    Spacer(minLength: 0)
-                    controls
-                }
+            HStack(spacing: 8) {
+                indicator
+                divider
+                appIcon
+                Waveform(level: model.micLevel)
+                Text(model.clock)
+                    .font(Theme.Text.monoLarge)
+                    .foregroundStyle(Theme.Palette.text)
+                Spacer(minLength: 0)
+                controls
             }
         }
     }
@@ -244,8 +238,6 @@ struct PanelView: View {
     private func failed(_ failure: PanelModel.Failure) -> some View {
         row {
             HStack(spacing: 8) {
-                indicator
-                divider
                 Text(failure.message)
                     .font(Theme.Text.bodyStrong)
                     .foregroundStyle(Theme.Palette.gold)

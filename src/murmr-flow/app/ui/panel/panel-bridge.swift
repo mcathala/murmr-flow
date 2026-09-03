@@ -7,9 +7,9 @@ import Foundation
 /// about windows; the panel takes state and knows nothing about audio. Everything that
 /// would otherwise be a reference from one to the other lives here.
 ///
-/// Stage changes push immediately. The values that move continuously — timer, levels,
-/// preview — are polled while something is running, because a callback per audio buffer
-/// would rebuild the view far more often than a screen can show.
+/// Stage changes push immediately. The values that move continuously — timer, levels —
+/// are polled while something is running, because a callback per audio buffer would
+/// rebuild the view far more often than a screen can show.
 @MainActor
 final class PanelBridge {
 
@@ -192,13 +192,9 @@ final class PanelBridge {
             model.set(.dictating)
 
         case .transcribing:
-            model.preview = ""
             model.set(.working("Transcribing…"))
 
         case .cleaning:
-            // The live text goes when tidying starts. Keeping it visible while the model
-            // rewrites it invites a comparison the panel is too small to host.
-            model.preview = ""
             model.set(.working("Cleaning up…"))
 
         case .injecting:
@@ -216,11 +212,9 @@ final class PanelBridge {
             // because otherwise the only clue is that they read a little rougher.
             if let run = dictation.lastRun, run.id != reportedRunID {
                 reportedRunID = run.id
-                model.preview = ""
-                model.set(run.usedRawFallback ? .failed(.aiProvider) : .resting)
+                    model.set(run.usedRawFallback ? .failed(.aiProvider) : .resting)
             } else if model.phase.isBusy {
-                model.preview = ""
-                model.set(.resting)
+                    model.set(.resting)
             }
         }
 
@@ -272,16 +266,11 @@ final class PanelBridge {
         if panel.model.size != sizeBefore { panel.apply() }
 
         let model = panel.model
-        var changedSize = false
 
         switch model.phase {
         case .dictating:
-            let hadPreview = !model.preview.isEmpty
             model.elapsed = dictation.elapsed
             model.micLevel = dictation.micLevel
-            model.preview = dictation.preview
-            // Gaining or losing the preview line changes how tall the panel has to be.
-            changedSize = hadPreview != !model.preview.isEmpty
 
         case .meeting:
             model.elapsed = meetings.elapsed
@@ -291,8 +280,6 @@ final class PanelBridge {
         default:
             return
         }
-
-        if changedSize { panel.apply() }
     }
 
     func stop() {

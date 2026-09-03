@@ -65,7 +65,6 @@ struct PanelSnapshotTests {
             model.youLevel = 0.003       // a quiet room: should light nothing
             model.themLevel = 0.08       // audio actually playing
             if phase == .meeting { model.mode = .note }
-            if phase == .dictating { model.preview = "okay so I want to see that" }
 
             let renderer = ImageRenderer(
                 content: PanelView(model: model).environment(\.colorScheme, .dark)
