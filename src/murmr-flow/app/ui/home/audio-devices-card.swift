@@ -104,7 +104,8 @@ struct AudioDevicesCard: View {
                 .foregroundStyle(Theme.Palette.muted)
                 .frame(width: 16)
 
-            Text("Output").font(Theme.Text.bodyStrong)
+            // "Speaker", as people call the thing — "Output" is the audio stack's word.
+            Text("Speaker").font(Theme.Text.bodyStrong)
 
             Spacer(minLength: 8)
 
@@ -119,7 +120,7 @@ struct AudioDevicesCard: View {
                     }
                 }
             } label: {
-                Text(devices.currentOutput?.name ?? "No output").lineLimit(1)
+                Text(devices.currentOutput?.name ?? "No speaker").lineLimit(1)
             }
             .menuStyle(.borderlessButton)
             .frame(maxWidth: 190, alignment: .trailing)
