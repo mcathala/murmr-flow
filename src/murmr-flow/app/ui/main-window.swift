@@ -80,6 +80,8 @@ struct MainWindow: View {
         .animation(.easeInOut(duration: 0.3), value: services.onboarding.isComplete)
         // One ground behind everything, so no layout state leaves a strip unpainted.
         .background(InkGround())
+        // Zero-size, draws nothing: it is here to hear which window it ends up in.
+        .background(WindowChrome().frame(width: 0, height: 0))
         .font(Theme.Text.body)
         .foregroundStyle(Theme.Palette.text)
         .tint(Theme.Palette.gold)

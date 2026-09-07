@@ -91,23 +91,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return windows.first { $0.canBecomeMain && $0.title != "Settings" }
     }
 
-    /// Ink commits, and `.preferredColorScheme(.dark)` only reaches what SwiftUI draws.
-    ///
-    /// The title bar's background, the toolbar, and the rounded platter AppKit parks behind
-    /// a toolbar item are all AppKit's own, and they resolve against the *window's*
-    /// appearance. Without this they follow the system setting, so on a Mac in Light Mode
-    /// they came out pale grey against a navy window — which is what made the strip above
-    /// the sidebar read as a different panel, and the sidebar toggle as a grey pill. The
-    /// floating panel already sets this, for the same reason.
+    /// The window's AppKit dressing lives with the view — see `WindowChrome`, which also
+    /// catches the windows SwiftUI makes later. Kept here so the first window is dressed
+    /// before it is ordered front, rather than a frame after.
     @MainActor
     private static func makeDark(_ window: NSWindow) {
-        window.appearance = NSAppearance(named: .darkAqua)
-        // Nothing of ours draws up there, so let the window's own ground fill the title bar
-        // rather than having AppKit paint a second surface that then has to match it.
-        window.titlebarAppearsTransparent = true
-        // The sidebar draws the name itself, with the mark in front — see `SidebarHeader`.
-        // The title string stays: it is how this window is found.
-        window.titleVisibility = .hidden
+        WindowChrome.dress(window)
     }
 
     /// macOS restores the last window position, which may be on a display that is no
