@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<!-- Generated from murmr-m.icon.svg for the macOS icon grid: the 824-pt squircle Apple
+     leaves 100 pt of margin around, so the icon sits at the same size as its neighbours. -->
+<rect x="100" y="100" width="824" height="824" rx="185" fill="#04101F"/>
+<g transform="translate(100,100) scale(0.8046875)">
+<rect x="207" y="223" width="90" height="550" rx="45" fill="#EBCE83"/>
+<rect x="337" y="340" width="90" height="270" rx="45" fill="#EBCE83"/>
+<rect x="467" y="450" width="90" height="220" rx="45" fill="#EBCE83"/>
+<rect x="597" y="340" width="90" height="270" rx="45" fill="#EBCE83"/>
+<rect x="727" y="223" width="90" height="550" rx="45" fill="#EBCE83"/>
+</g>
+</svg>
