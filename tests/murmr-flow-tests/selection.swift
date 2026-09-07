@@ -145,7 +145,11 @@ struct SidebarSnapshotTests {
         }
 
         func column(@ViewBuilder _ rows: () -> some View) -> some View {
-            VStack(alignment: .leading, spacing: 2) { rows() }
+            VStack(alignment: .leading, spacing: 2) {
+                // The real header, at a title bar's height, so the mark is seen here too.
+                SidebarHeader().frame(height: 28)
+                rows()
+            }
                 // The sidebar's default width, so a label that does not fit shows here too.
                 .frame(width: 198)
                 .padding(.vertical, 8)

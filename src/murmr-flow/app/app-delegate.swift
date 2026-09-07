@@ -105,6 +105,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Nothing of ours draws up there, so let the window's own ground fill the title bar
         // rather than having AppKit paint a second surface that then has to match it.
         window.titlebarAppearsTransparent = true
+        // The sidebar draws the name itself, with the mark in front — see `SidebarHeader`.
+        // The title string stays: it is how this window is found.
+        window.titleVisibility = .hidden
     }
 
     /// macOS restores the last window position, which may be on a display that is no
