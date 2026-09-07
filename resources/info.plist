@@ -11,6 +11,10 @@
 	<key>CFBundleExecutable</key>
 	<string>MurmrFlow</string>
 
+	<!-- The mark: see resources/brand/README.md. Built into the bundle by build.sh. -->
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+
 	<!-- PERMANENT. TCC keys permission grants off this. Changing it silently resets
 	     every permission for every user. -->
 	<key>CFBundleIdentifier</key>
