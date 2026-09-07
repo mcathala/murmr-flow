@@ -45,21 +45,34 @@ struct MurmrFlowApp: App {
         MenuBarExtra {
             MenuBarContent(services: services)
         } label: {
-            Image(systemName: menuBarSymbol)
+            menuBarLabel
         }
         .menuBarExtraStyle(.window)
     }
 
     /// The icon carries the state, since the menu bar is often all that's visible.
-    private var menuBarSymbol: String {
+    ///
+    /// It is the mark in every state it can express — ready, dimmed for the hotkey being
+    /// off, red while dictating, a dot for a missing grant — so the thing in the menu bar is
+    /// the same thing as the app icon and the panel's meter. Two states swap to a symbol: a
+    /// meeting being recorded, which must not be mistaken for dictation, and the pipeline
+    /// working, which the mark has no face for.
+    @ViewBuilder
+    private var menuBarLabel: some View {
         let dictation = services.dictation
         // A meeting outranks everything: it is the one thing that can be running with no
         // other sign of it on screen.
-        if services.meetings.stage.isRecording { return "record.circle.fill" }
-        if dictation.stage.isRecording { return "waveform.circle.fill" }
-        if dictation.stage.isBusy { return "ellipsis.circle.fill" }
-        if !services.permissions.allGranted { return "exclamationmark.circle" }
-        return dictation.hotkeyActive ? "waveform.circle" : "waveform.circle.badge.xmark"
+        if services.meetings.stage.isRecording {
+            Image(systemName: "record.circle.fill")
+        } else if dictation.stage.isRecording {
+            Image(nsImage: MurmrMark.menuBarImage(.recording))
+        } else if dictation.stage.isBusy {
+            Image(systemName: "ellipsis.circle.fill")
+        } else if !services.permissions.allGranted {
+            Image(nsImage: MurmrMark.menuBarImage(.permissionMissing))
+        } else {
+            Image(nsImage: MurmrMark.menuBarImage(dictation.hotkeyActive ? .ready : .hotkeyOff))
+        }
     }
 
     /// Renamed from "panel", which now means the floating panel — one name for two very
