@@ -100,6 +100,15 @@ cp resources/fonts/*.ttf "$APP/Contents/Resources/Fonts/"
 cp resources/fonts/*-OFL.txt "$APP/Contents/Resources/Fonts/"
 
 # ---------------------------------------------------------------------------
+# App icon
+# ---------------------------------------------------------------------------
+# Built by its own script, cached on the SVG's hash — see that script. Info.plist names it
+# via CFBundleIconFile. Without it, Finder, the permission prompts and the Privacy lists
+# all showed the generic blank-app icon.
+./scripts/build-icon.sh
+cp ".build/icon/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+
+# ---------------------------------------------------------------------------
 # Vendored mediaremote-adapter
 # ---------------------------------------------------------------------------
 # Built by its own script, which caches on a source hash — see that script and

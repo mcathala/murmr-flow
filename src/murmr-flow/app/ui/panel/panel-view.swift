@@ -387,26 +387,38 @@ struct PanelView: View {
 }
 
 /// A live level, drawn as bars rather than a number.
+///
+/// The bars are the mark's: at rest they sit at the M, and speech pushes the inner three
+/// up toward the stems. So the logo is not a sticker on the panel — it is what the meter
+/// looks like when nobody is talking.
 private struct Waveform: View {
     let level: Float
-    private static let bars = 11
+    private static let rest = MurmrMark.relativeHeights
+    private static let height: CGFloat = 20
+    private static let scale = height / MurmrMark.bounds.height
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<Self.bars, id: \.self) { index in
+        HStack(spacing: (MurmrMark.pitch - MurmrMark.barWidth) * Self.scale) {
+            ForEach(0..<Self.rest.count, id: \.self) { index in
                 Capsule()
                     .fill(Theme.Palette.gold)
-                    .frame(width: 2.5, height: height(index))
+                    .frame(width: MurmrMark.barWidth * Self.scale, height: height(index))
             }
         }
-        .frame(height: 20)
+        .frame(height: Self.height)
         .animation(.easeOut(duration: 0.08), value: level)
     }
 
-    /// Loudest in the middle, so the shape reads as a voice rather than a bar chart.
+    /// How much of the way to the stems each bar goes at full level. Less toward the
+    /// middle, so loud speech is a nearly full block with a trace of the V left in it
+    /// rather than five identical bars — a meter that has stopped saying anything.
+    private static let reach: [CGFloat] = [1, 0.9, 0.8, 0.9, 1]
+
+    /// Each bar rises from its resting height toward the full height as the level rises;
+    /// the stems are already there, so only the letter moves.
     private func height(_ index: Int) -> CGFloat {
-        let centre = Double(Self.bars - 1) / 2
-        let falloff = 1 - abs(Double(index) - centre) / (centre + 1)
-        return 3 + 15 * AudioLevel.normalised(level) * falloff
+        let rest = Self.rest[index]
+        let room = (1 - rest) * Self.reach[index]
+        return Self.height * (rest + room * CGFloat(AudioLevel.normalised(level)))
     }
 }

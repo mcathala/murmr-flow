@@ -764,7 +764,7 @@ struct OnboardingView: View {
                 WarningRow(
                     message: "Accessibility is off, so the key won\u{2019}t work yet — use the "
                         + "button for now.",
-                    action: ("Open Settings", { permissions.openAccessibilitySettings() })
+                    action: ("Allow", { permissions.openAccessibilitySettings() })
                 )
             }
 

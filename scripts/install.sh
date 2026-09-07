@@ -54,5 +54,5 @@ bold "Launching…"
 open "$DEST"
 
 echo
-printf 'Look for the waveform icon in the menu bar.\n'
+printf 'Look for the M in the menu bar.\n'
 printf 'Verify signing:  ./scripts/verify-signing.sh\n'

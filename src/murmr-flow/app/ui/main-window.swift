@@ -123,18 +123,27 @@ struct MainWindow: View {
     /// `controlAccentColor` — a system-wide setting no app can override — so a selected row
     /// arrived bright blue in the middle of a navy and gold interface.
     private var sidebar: some View {
-        VStack(spacing: 0) {
-            List {
-                topLevel
-            }
-            .listStyle(.sidebar)
-            // Hidden, or `List` paints its own opaque sidebar material and the window ends
-            // up with a grey column beside a navy one.
-            .scrollContentBackground(.hidden)
+        // The header takes the title bar's own height, read from the safe area rather than
+        // assumed, so it sits exactly where AppKit's title did whatever this macOS makes the
+        // bar. Only the stack below ignores the inset; the reader keeps it so it can be read.
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                SidebarHeader()
+                    .frame(height: proxy.safeAreaInsets.top)
 
-            settingsBlock
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
+                List {
+                    topLevel
+                }
+                .listStyle(.sidebar)
+                // Hidden, or `List` paints its own opaque sidebar material and the window
+                // ends up with a grey column beside a navy one.
+                .scrollContentBackground(.hidden)
+
+                settingsBlock
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+            }
+            .ignoresSafeArea(edges: .top)
         }
     }
 
@@ -241,4 +250,28 @@ struct MainWindow: View {
         }
     }
 
+}
+
+/// The window's name with the mark in front of it, in the title bar's row.
+///
+/// Drawn by the app rather than AppKit — the system title is hidden in `AppDelegate` — so
+/// the mark can sit beside the name. Most Mac apps leave their face to the Dock; this one
+/// has no Dock icon, so the window is where it has to show it.
+struct SidebarHeader: View {
+    /// Clear of the traffic lights, which end near 80 pt on this macOS. The name then
+    /// lands within a few points of where AppKit drew the title.
+    static let leading: CGFloat = 92
+
+    var body: some View {
+        HStack(spacing: 8) {
+            MurmrMarkShape()
+                .fill(Theme.Palette.gold)
+                .frame(width: 15, height: 15)
+            Text("Murmr Flow")
+                .font(Theme.Text.bodyStrong)
+                .foregroundStyle(Theme.Palette.text)
+        }
+        .padding(.leading, Self.leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }

@@ -88,7 +88,7 @@ struct HomeView: View {
         if services.permissions.accessibility != .granted {
             return (
                 "Accessibility is off, so your hotkey won't fire.",
-                ("Open Settings", { services.permissions.openAccessibilitySettings() })
+                ("Allow", { services.permissions.openAccessibilitySettings() })
             )
         }
         if !services.dictation.hotkeyActive {

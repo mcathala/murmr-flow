@@ -94,18 +94,26 @@ struct PrivacyDataPane: View {
                     .controlSize(.small)
             }
         } else {
+            // One word on every button — what the person is here to do — whatever the
+            // route: the system prompt while it can still be asked, System Settings after a
+            // refusal. "Ask" and "Open Settings" named the mechanism and made three rows
+            // with the same goal look like three different chores.
             if permissions.accessibility != .granted {
+                // Short: the icon, the section and the button already say most of it. The
+                // clipboard fallback is explained where it happens, not here.
                 WarningRow(
-                    message: "Accessibility is off, so dictation copies to the "
-                        + "clipboard instead of inserting it.",
-                    action: ("Open Settings", { permissions.openAccessibilitySettings() })
+                    message: "Accessibility is off. The hotkey won\u{2019}t fire.",
+                    action: ("Allow", { permissions.openAccessibilitySettings() })
                 )
             }
             if permissions.microphone != .granted {
+                // Same shape as the other rows: what is off, then what that costs you.
                 WarningRow(
-                    message: "The microphone isn't available.",
+                    message: permissions.microphone == .notDetermined
+                        ? "Microphone not allowed yet. Nothing can be heard."
+                        : "Microphone is off. Nothing can be heard.",
                     action: (
-                        permissions.microphone == .notDetermined ? "Ask" : "Open Settings",
+                        "Allow",
                         {
                             if permissions.microphone == .notDetermined {
                                 Task { await permissions.requestMicrophone() }
@@ -121,9 +129,9 @@ struct PrivacyDataPane: View {
             // something honest to show and a button that acts on it.
             if permissions.systemAudio != .granted {
                 WarningRow(
-                    message: "System audio is off, so meeting notes only hear your side.",
+                    message: "System audio is off. The Notetaker hears only you.",
                     action: (
-                        permissions.systemAudio == .notDetermined ? "Ask" : "Open Settings",
+                        "Allow",
                         {
                             if permissions.systemAudio == .notDetermined {
                                 Task { await permissions.requestSystemAudio() }
