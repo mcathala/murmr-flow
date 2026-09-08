@@ -45,6 +45,11 @@ actor LLMClient {
     struct Completion: Sendable {
         let text: String
         let latency: TimeInterval
+        /// Token counts as the provider reports them, when it does. Prompt tokens are the
+        /// cost of the prompt's wording on every single clean-up, which is why they are
+        /// worth knowing.
+        var promptTokens: Int?
+        var completionTokens: Int?
     }
 
     // MARK: - Request / response shapes
@@ -71,7 +76,17 @@ actor LLMClient {
             }
             let message: Message
         }
+        struct Usage: Decodable {
+            let prompt_tokens: Int?
+            let completion_tokens: Int?
+        }
         let choices: [Choice]
+        let usage: Usage?
+    }
+
+    private struct Reply {
+        let text: String
+        let usage: Response.Usage?
     }
 
     private struct ErrorEnvelope: Decodable {
@@ -110,8 +125,8 @@ actor LLMClient {
         let started = clock.now
 
         do {
-            let text = try await send(body, to: url, key: key, timeout: timeout)
-            return Completion(text: text, latency: (clock.now - started).seconds)
+            let reply = try await send(body, to: url, key: key, timeout: timeout)
+            return completion(reply, since: started, clock)
         } catch ClientError.http(let status, let responseBody) where status == 400
             && mentionsReasoningParameter(responseBody)
         {
@@ -119,9 +134,20 @@ actor LLMClient {
             // Retry once without them rather than failing the dictation.
             body.reasoning_effort = nil
             body.include_reasoning = nil
-            let text = try await send(body, to: url, key: key, timeout: timeout)
-            return Completion(text: text, latency: (clock.now - started).seconds)
+            let reply = try await send(body, to: url, key: key, timeout: timeout)
+            return completion(reply, since: started, clock)
         }
+    }
+
+    private func completion(
+        _ reply: Reply, since started: ContinuousClock.Instant, _ clock: ContinuousClock
+    ) -> Completion {
+        Completion(
+            text: reply.text,
+            latency: (clock.now - started).seconds,
+            promptTokens: reply.usage?.prompt_tokens,
+            completionTokens: reply.usage?.completion_tokens
+        )
     }
 
     private func send(
@@ -129,7 +155,7 @@ actor LLMClient {
         to url: URL,
         key: String,
         timeout: TimeInterval
-    ) async throws -> String {
+    ) async throws -> Reply {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = timeout
@@ -169,7 +195,7 @@ actor LLMClient {
         let text = Self.stripLeakedReasoning(raw)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw ClientError.emptyCompletion }
-        return text
+        return Reply(text: text, usage: decoded.usage)
     }
 
     // MARK: - Defensive cleanup
