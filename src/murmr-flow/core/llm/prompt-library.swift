@@ -9,23 +9,10 @@ struct PromptLibrary {
 
     static let defaultsKey = "cleanupPrompt"
 
-    /// Deliberately narrow instructions. The job is punctuation, capitalization and
-    /// filler removal — not rewriting. A model given licence to "improve" the text will
-    /// quietly change the user's meaning.
-    static let defaultCleanupPrompt = """
-        You clean up dictated speech. Rewrite the transcript below applying only these \
-        changes:
-
-        - Fix punctuation and capitalization.
-        - Remove filler words (um, uh, like, you know) and false starts.
-        - Break into paragraphs where the speaker clearly changed topic.
-
-        Do not rephrase, summarize, translate, answer questions, or add anything. Keep \
-        the speaker's own words and meaning. If the transcript is already clean, return \
-        it unchanged.
-
-        Reply with the cleaned text only — no preamble, no quotes, no explanation.
-        """
+    /// The Default preset's wording. Deliberately narrow: the job is punctuation,
+    /// capitalization and filler removal, not rewriting — a model given licence to
+    /// "improve" the text will quietly change the user's meaning.
+    static let defaultCleanupPrompt = ShippedPrompts.standard
 
     var template: String
 

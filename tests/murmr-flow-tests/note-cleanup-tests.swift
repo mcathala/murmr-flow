@@ -355,6 +355,82 @@ struct PromptPresetTests {
         #expect(prompts.preset(id: PromptStore.meetingPreset.id) != nil)
     }
 
+    @Test("a built-in nobody edited follows the wording we ship now")
+    func upgradesUntouchedBuiltIns() {
+        let store = defaults()
+        // Word for word the Default of an earlier version, as it sat in stored JSON.
+        let old = """
+            [{"id":"8B1F0C4A-0000-4000-A000-000000000001","name":"Default",
+              "template":"You clean up dictated speech. Rewrite the transcript below applying only these changes:\\n\\n- Fix punctuation and capitalization.\\n- Remove filler words (um, uh, like, you know) and false starts.\\n- Break into paragraphs where the speaker clearly changed topic.\\n\\nDo not rephrase, summarize, translate, answer questions, or add anything. Keep the speaker's own words and meaning. If the transcript is already clean, return it unchanged.\\n\\nReply with the cleaned text only — no preamble, no quotes, no explanation.\\n",
+              "isBuiltIn":true},
+             {"id":"8B1F0C4A-0000-4000-A000-000000000003","name":"Formal",
+              "template":"Be formal, my way.","isBuiltIn":true}]
+            """
+        store.set(Data(old.utf8), forKey: "prompts.presets")
+        store.set(true, forKey: "prompts.strippedPlaceholders")
+
+        let prompts = PromptStore(defaults: store)
+        #expect(prompts.dictationPrompt.template == ShippedPrompts.standard)
+        // An edited one is the user's.
+        let formal = prompts.presets.first { $0.name == "Formal" }
+        #expect(formal?.template == "Be formal, my way.")
+    }
+
+    @Test("every shipped prompt keeps the shared rules and ends with the output contract")
+    func shippedPromptsShareTheirSkeleton() {
+        for preset in PromptStore.builtIns {
+            #expect(preset.template.contains("RULE ZERO"), "\(preset.name)")
+            #expect(preset.template.contains("CORRECTIONS —"), "\(preset.name)")
+            #expect(preset.template.contains("CONVERT —"), "\(preset.name)")
+            #expect(preset.template.contains("OUTPUT —"), "\(preset.name)")
+            #expect(!preset.template.contains("\\("), "\(preset.name) has an unrendered interpolation")
+        }
+    }
+
+    @Test("a deleted built-in stays deleted, and Casual leaves on its own if untouched")
+    func deletesBuiltIns() {
+        let store = defaults()
+        var prompts = PromptStore(defaults: store)
+        let count = prompts.presets.count
+        #expect(!prompts.presets.contains { $0.name == "Casual" })
+        #expect(prompts.presets.contains { $0.name == "Notes" })
+
+        let formal = prompts.presets.first { $0.name == "Formal" }!
+        prompts.delete(formal)
+        #expect(prompts.presets.count == count - 1)
+
+        prompts = PromptStore(defaults: store)
+        #expect(!prompts.presets.contains { $0.id == formal.id })
+
+        // Down to one, it cannot go.
+        while prompts.presets.count > 1 { prompts.delete(prompts.presets[0]) }
+        prompts.delete(prompts.presets[0])
+        #expect(prompts.presets.count == 1)
+        #expect(prompts.dictationPrompt.id == prompts.presets[0].id)
+    }
+
+    @Test("an install with Meeting and an edited Casual comes up with Notes and Casual as its own")
+    func retiresAndRenames() {
+        let store = defaults()
+        let stored = """
+            [{"id":"8B1F0C4A-0000-4000-A000-000000000005","name":"Meeting",
+              "template":"You tidy the transcript of a spoken conversation, turn by turn.\\n\\n- Fix punctuation, capitalization and obvious mis-transcriptions.\\n- Remove filler words (um, uh, like, you know), false starts and repeated words.\\n- Leave every substantive point in place, in the speaker's own words.\\n\\nDo not summarise, rephrase, translate, or add anything. Do not move what one person said onto another speaker's turn, and do not answer questions in the transcript — they were asked of somebody in the room, not of you. A turn that is already clean is returned unchanged.\\n",
+              "isBuiltIn":true},
+             {"id":"8B1F0C4A-0000-4000-A000-000000000004","name":"Casual",
+              "template":"My relaxed one.","isBuiltIn":true}]
+            """
+        store.set(Data(stored.utf8), forKey: "prompts.presets")
+        store.set(true, forKey: "prompts.strippedPlaceholders")
+
+        let prompts = PromptStore(defaults: store)
+        let notes = prompts.preset(id: PromptStore.meetingPreset.id)
+        #expect(notes?.name == "Notes")
+        #expect(notes?.template == ShippedPrompts.meeting)
+        let casual = prompts.presets.first { $0.name == "Casual" }
+        #expect(casual?.isBuiltIn == false)
+        #expect(prompts.notetakerPrompt?.name == "Notes")
+    }
+
     @Test("no shipped prompt shows template syntax")
     func builtInsAreReadable() {
         for preset in PromptStore.builtIns {
@@ -399,7 +475,7 @@ struct PromptPresetTests {
     func noteModeHasAPrompt() {
         let prompts = PromptStore(defaults: defaults())
         #expect(prompts.notetakerPromptID == PromptStore.meetingPreset.id)
-        #expect(prompts.notetakerPrompt?.name == "Meeting")
+        #expect(prompts.notetakerPrompt?.name == "Notes")
     }
 
     @Test("deleting the prompt Notetaker used falls back rather than leaving nothing")

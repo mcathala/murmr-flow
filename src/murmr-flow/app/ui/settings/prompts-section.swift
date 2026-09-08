@@ -7,8 +7,9 @@ import SwiftUI
 /// keeps its own file because it is 150 lines of editor, not because it is a separate
 /// subject.
 ///
-/// The assignment is shown as a badge *on the prompt* rather than as two dropdowns
-/// elsewhere, so the whole arrangement reads in one look.
+/// The assignment is shown *on the prompt* — one toggle per mode on every row — rather
+/// than as two dropdowns elsewhere, so the whole arrangement reads in one look and
+/// changes in one click.
 struct PromptsSection: View {
 
     let prompts: PromptStore
@@ -47,28 +48,40 @@ struct PromptsSection: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Text(preset.name).font(.callout.weight(.semibold))
-                    if prompts.dictationPromptID == preset.id {
-                        Badge(text: "Dictation", symbol: "mic.fill")
-                    }
-                    if prompts.notetakerPromptID == preset.id {
-                        Badge(text: "Notetaker", symbol: "text.document")
-                    }
                     Spacer(minLength: 0)
-                    Button(isOpen ? "Done" : "Edit") {
-                        selected = isOpen ? nil : preset.id
-                    }
-                    .controlSize(.small)
+
+                    // Which mode uses this prompt, and the way to change it, in one control
+                    // per mode on every row. The lit one reads as a badge; the others are a
+                    // click away. Nothing turns a mode's prompt *off* here — clean-up has
+                    // its own switch — so clicking the lit one does nothing.
+                    AssignmentToggle(
+                        title: "Dictation", symbol: "mic.fill",
+                        isOn: prompts.dictationPromptID == preset.id
+                    ) { prompts.dictationPromptID = preset.id }
+                    AssignmentToggle(
+                        title: "Notetaker", symbol: "text.document",
+                        isOn: prompts.notetakerPromptID == preset.id
+                    ) { prompts.notetakerPromptID = preset.id }
+
+                    Button(isOpen ? "Done" : "Edit") { toggle(preset) }
+                        .controlSize(.small)
                 }
+                // The whole header opens the editor, not only the button: the row is the
+                // thing you want to edit, and a 40-point target at its far end is not.
+                // The toggles are buttons, so their taps never reach this gesture.
+                .contentShape(Rectangle())
+                .onTapGesture { toggle(preset) }
 
                 // Only the open one shows its instructions — five prompts expanded at
                 // once would be a wall, and you only ever edit one at a time. So a closed
-                // row is a name and its badges. It used to carry a one-line description
-                // as well, which meant three fields to fill in to write a prompt and a
-                // second place claiming what it did; the prompt itself says that, in more
-                // detail and without going stale.
+                // row is a name and its assignments.
                 if isOpen { editor(preset) }
             }
         }
+    }
+
+    private func toggle(_ preset: PromptPreset) {
+        selected = selected == preset.id ? nil : preset.id
     }
 
     private func editor(_ preset: PromptPreset) -> some View {
@@ -79,42 +92,42 @@ struct PromptsSection: View {
                 .font(.callout)
                 .frame(height: 22)
                 .scrollDisabled(true)
+                .scrollContentBackground(.hidden)
                 .padding(.horizontal, 4)
                 .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 6))
 
+            // A fixed height that scrolls, not a box that grows with the text. The shipped
+            // prompts run to seventy lines; grown to fit, one of them fills the window and
+            // the list of prompts, the Reset button and the way out all leave the screen.
+            // Sized to show a whole section at once, and set in the app's mono at reading
+            // size rather than the system's at 11, which turned prose into a listing.
             TextEditor(text: templateBinding(preset))
-                .font(.system(size: 11, design: .monospaced))
-                .frame(minHeight: 150)
-                .padding(.horizontal, 4)
+                .font(Theme.Text.monoLarge)
+                .lineSpacing(3)
+                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .frame(height: 340)
                 .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: 6))
 
+            // The ways out of an edit you regret. Reset appears only once a built-in has
+            // drifted from our wording; Delete is there for every prompt, ours included,
+            // except the last one standing. Duplicate is gone — New prompt starts from plain
+            // instructions, which is a better start than a copy.
             HStack(spacing: 8) {
-                Button("Use for Dictation") { prompts.dictationPromptID = preset.id }
-                    .controlSize(.small)
-                    .disabled(prompts.dictationPromptID == preset.id)
-
-                Button("Use for Notetaker") { prompts.notetakerPromptID = preset.id }
-                    .controlSize(.small)
-                    .disabled(prompts.notetakerPromptID == preset.id)
-
                 Spacer(minLength: 0)
-
-                Button("Duplicate") {
-                    let copy = prompts.duplicate(preset)
-                    selected = copy.id
-                }
-                .controlSize(.small)
-
-                if preset.isBuiltIn {
+                if let shipped = PromptStore.shipped(preset), shipped != preset {
                     Button("Reset") { prompts.reset(preset) }
                         .controlSize(.small)
-                } else {
-                    Button("Delete") {
-                        selected = nil
-                        prompts.delete(preset)
-                    }
-                    .controlSize(.small)
+                        .help("Put the wording we ship back")
                 }
+                Button("Delete") {
+                    selected = nil
+                    prompts.delete(preset)
+                }
+                .controlSize(.small)
+                .foregroundStyle(Theme.Palette.danger)
+                .disabled(!prompts.canDelete(preset))
             }
         }
     }
@@ -157,5 +170,40 @@ struct Badge: View {
         .padding(.vertical, 2)
         .overlay(Capsule().stroke(.tint, lineWidth: 1))
         .foregroundStyle(.tint)
+    }
+}
+
+/// A mode's claim on a prompt: lit when this prompt is the one it uses.
+///
+/// Both modes are named on every row, at one width, so the two make a column that lines
+/// up down the list and the eye can read it as a table: which prompt, which mode. The lit
+/// one is the `Badge` — same capsule, same gold; the others are the same words, quiet.
+/// Icons alone were tried first, and a row of unlit circles beside one gold chip read as
+/// clutter rather than as a control.
+struct AssignmentToggle: View {
+    let title: String
+    let symbol: String
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: { if !isOn { action() } }) {
+            HStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 8))
+                Text(title).font(.caption2.weight(.medium))
+            }
+            .frame(width: 84, height: 20)
+            .foregroundStyle(isOn ? Theme.Palette.gold : Theme.Palette.faint)
+            .background(
+                Capsule().fill(isOn ? Theme.Palette.gold.opacity(0.10) : Color.white.opacity(0.04))
+            )
+            .overlay(
+                Capsule().stroke(isOn ? Theme.Palette.gold : Color.clear, lineWidth: 1)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(isOn ? "Used for \(title)" : "Use for \(title)")
+        .accessibilityLabel(isOn ? "Used for \(title)" : "Use for \(title)")
     }
 }

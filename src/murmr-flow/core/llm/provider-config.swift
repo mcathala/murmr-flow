@@ -16,7 +16,12 @@ struct ProviderConfig: Sendable, Equatable {
     /// Keychain account holding this provider's API key.
     var keychainAccount: String { KeychainStore.account(forProvider: providerID) }
 
-    var apiKey: String? { KeychainStore.read(account: keychainAccount) }
+    var apiKey: String? { apiKeyOverride ?? KeychainStore.read(account: keychainAccount) }
+
+    /// A key handed in directly, for tooling that runs outside the app — the prompt
+    /// evaluation, for one — where the app's Keychain item may not be reachable. The
+    /// app itself never sets it.
+    var apiKeyOverride: String? = nil
 
     /// Endpoint for chat completions, tolerating a trailing slash in `baseURL`.
     var chatCompletionsURL: URL? {
