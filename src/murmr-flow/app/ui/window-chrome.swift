@@ -53,5 +53,9 @@ struct WindowChrome: NSViewRepresentable {
         // The sidebar draws the name itself, with the mark in front — see `SidebarHeader`.
         // The title string stays: it is how this window is found.
         window.titleVisibility = .hidden
+        // Opened from the menu bar while the window sits on another Space, macOS would
+        // otherwise switch the whole screen over to it. The window comes to the user
+        // instead: the menu bar is where they are, so that is where the app should be.
+        window.collectionBehavior.insert(.moveToActiveSpace)
     }
 }
