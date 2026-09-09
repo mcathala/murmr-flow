@@ -105,7 +105,7 @@ struct PrivacyDataPane: View {
                 // clipboard fallback is explained where it happens, not here.
                 WarningRow(
                     message: "Accessibility is off. The hotkey won\u{2019}t fire.",
-                    action: ("Allow", { permissions.openAccessibilitySettings() })
+                    action: ("Allow", { permissions.requestAccessibility() })
                 )
             }
             if permissions.microphone != .granted {

@@ -124,7 +124,7 @@ struct MainWindow: View {
                 if permissions.accessibility != .granted {
                     WarningRow(
                         message: "Accessibility is off, so your hotkey won\u{2019}t fire.",
-                        action: ("Allow", { permissions.openAccessibilitySettings() })
+                        action: ("Allow", { permissions.requestAccessibility() })
                     )
                 }
                 if permissions.microphone != .granted {

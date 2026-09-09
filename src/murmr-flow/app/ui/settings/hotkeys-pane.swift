@@ -81,7 +81,7 @@ struct HotkeysPane: View {
                 if services.permissions.accessibility != .granted {
                     WarningRow(
                         message: "Accessibility is off, so no hotkey will fire.",
-                        action: ("Allow", { services.permissions.openAccessibilitySettings() })
+                        action: ("Allow", { services.permissions.requestAccessibility() })
                     )
                 } else {
                     WarningRow(
