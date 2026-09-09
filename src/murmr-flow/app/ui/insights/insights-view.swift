@@ -9,19 +9,21 @@ import SwiftUI
 struct InsightsView: View {
 
     let history: HistoryStore
+    /// Holds the window and the typing speed, so both survive leaving the pane. Seven
+    /// days is the default because a week is the unit people actually think in.
+    @Bindable var settings: SettingsStore
 
-    /// How far back the figures reach. Seven days is the default because a week is the
-    /// unit people actually think in.
-    @State private var windowDays = 7
-    @State private var typingSpeed = Insights.defaultTypingWordsPerMinute
     @State private var editingTypingSpeed = false
+
+    private var windowDays: Int { settings.insightsWindowDays }
+    private var typingSpeed: Double { settings.typingWordsPerMinute }
 
     var body: some View {
         PaneScroll {
             HStack(spacing: 10) {
                 Text("Insights").font(.title2.weight(.semibold))
                 Spacer(minLength: 0)
-                Picker("", selection: $windowDays) {
+                Picker("", selection: $settings.insightsWindowDays) {
                     Text("7 days").tag(7)
                     Text("30 days").tag(30)
                 }
@@ -62,7 +64,7 @@ struct InsightsView: View {
                 Spacer(minLength: 0)
                 if editingTypingSpeed {
                     Stepper(
-                        value: $typingSpeed, in: 20...120, step: 5
+                        value: $settings.typingWordsPerMinute, in: 20...120, step: 5
                     ) {
                         Text("\(Int(typingSpeed))").font(.callout.monospacedDigit())
                     }

@@ -22,6 +22,8 @@ final class SettingsStore {
         static let dictationLanguage = "translate.dictation.language"
         static let notetakerTranslates = "translate.notetaker.on"
         static let notetakerLanguage = "translate.notetaker.language"
+        static let insightsWindowDays = "insights.windowDays"
+        static let typingWordsPerMinute = "insights.typingWordsPerMinute"
     }
 
     private let defaults: UserDefaults
@@ -69,6 +71,10 @@ final class SettingsStore {
         self.notetakerTranslates = defaults.bool(forKey: Key.notetakerTranslates)
         self.notetakerOutputLanguage =
             defaults.string(forKey: Key.notetakerLanguage) ?? "English"
+        self.insightsWindowDays = defaults.object(forKey: Key.insightsWindowDays) as? Int ?? 7
+        self.typingWordsPerMinute =
+            defaults.object(forKey: Key.typingWordsPerMinute) as? Double
+            ?? Insights.defaultTypingWordsPerMinute
     }
 
     // MARK: - Cleanup
@@ -126,10 +132,6 @@ final class SettingsStore {
         didSet { defaults.set(pauseMediaWhileDictating, forKey: Key.pauseMedia) }
     }
 
-    /// Hold the key to talk, or press once to start and once to stop. Hold is the default,
-    /// as in Wispr Flow: a dictation is a sentence or two, letting go is the natural way to
-    /// say "done", and a key that is held cannot be forgotten in the on position. The
-    /// meeting key is press-to-toggle regardless — nobody holds a key for an hour.
     /// "Hold ⌥" or "Press ⌥" — the one phrase every surface uses for the key, so the
     /// menu bar, Home and the Dictation card cannot disagree with the toggle below them.
     /// They did: three of them said "Hold" whatever this was set to.
@@ -137,8 +139,25 @@ final class SettingsStore {
         "\(holdToTalk ? "Hold" : "Press") \(hotkey.displayName)"
     }
 
+    /// Hold the key to talk, or press once to start and once to stop. Hold is the default,
+    /// as in Wispr Flow: a dictation is a sentence or two, letting go is the natural way to
+    /// say "done", and a key that is held cannot be forgotten in the on position. The
+    /// meeting key is press-to-toggle regardless — nobody holds a key for an hour.
     var holdToTalk: Bool {
         didSet { defaults.set(holdToTalk, forKey: Key.holdToTalk) }
+    }
+
+    // MARK: - Insights
+
+    /// How far back Insights reaches, and the typing speed "Time saved" is measured
+    /// against. Both were view state and forgot themselves on every visit, so a figure
+    /// set to your own speed went back to the default the next time you looked.
+    var insightsWindowDays: Int {
+        didSet { defaults.set(insightsWindowDays, forKey: Key.insightsWindowDays) }
+    }
+
+    var typingWordsPerMinute: Double {
+        didSet { defaults.set(typingWordsPerMinute, forKey: Key.typingWordsPerMinute) }
     }
 
     // MARK: - Translation

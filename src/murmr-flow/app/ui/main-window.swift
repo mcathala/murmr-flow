@@ -275,7 +275,7 @@ struct MainWindow: View {
                 permissions: services.permissions
             )
         case .insights:
-            InsightsView(history: services.history)
+            InsightsView(history: services.history, settings: services.settings)
         case .settings(let pane):
             SettingsPaneView(pane: pane, services: services)
         }
