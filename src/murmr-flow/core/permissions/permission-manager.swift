@@ -101,11 +101,35 @@ final class PermissionManager {
     /// `promptAccessibility()` stays as the fallback for a machine where this does not
     /// list the app; the dialog is guaranteed to.
     func requestAccessibility() {
+        dropStaleAccessibilityEntries()
         var value: CFTypeRef?
         _ = AXUIElementCopyAttributeValue(
             AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &value
         )
         openAccessibilitySettings()
+    }
+
+    /// Ad-hoc builds only. TCC tells one build from the next by its code hash, and an
+    /// ad-hoc hash changes on every build — so the Accessibility list fills with rows for
+    /// builds that no longer exist, all named Murmr Flow, and the toggle the person flips
+    /// belongs to one of them. That was a real afternoon lost: switched off, switched on,
+    /// still "Not granted". Clearing our own bundle's entries first means the one row that
+    /// appears is this build's. A signed build never has the problem and is left alone;
+    /// `tccutil` needs no privileges for the calling app's own identifier.
+    private func dropStaleAccessibilityEntries() {
+        guard SigningInfo.current().isAdHoc,
+              let bundleID = Bundle.main.bundleIdentifier else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", "Accessibility", bundleID]
+        process.standardOutput = nil
+        process.standardError = nil
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            // Nothing lost: the warning row in onboarding still explains the manual way.
+        }
     }
 
     // MARK: - Deep links
