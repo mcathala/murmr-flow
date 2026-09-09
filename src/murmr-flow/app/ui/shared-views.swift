@@ -149,7 +149,9 @@ struct DetailGrid<Content: View>: View {
     }
 }
 
-/// A dot and a word. Green means tested and working — not merely configured.
+/// A dot and a word. Green means tested and working — not merely configured. Red means
+/// something to fix; it was gold, which is the colour the app gives to the *chosen* thing,
+/// so a broken provider and a selected style lit the same way.
 struct StatusChip: View {
     enum Level {
         case ok, waiting, bad
@@ -158,7 +160,7 @@ struct StatusChip: View {
             switch self {
             case .ok: Theme.Palette.ok
             case .waiting: Theme.Palette.faint
-            case .bad: Theme.Palette.gold
+            case .bad: Theme.Palette.danger
             }
         }
     }

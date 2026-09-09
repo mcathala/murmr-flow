@@ -46,9 +46,11 @@ struct PrivacyDataPane: View {
             SectionLabel(title: "Where notes are saved")
             notesFolder
 
+            // Named for both things the button takes: it used to sit under "History"
+            // and only the dialog admitted the notes went too.
             HStack(spacing: 10) {
-                SectionLabel(title: "History")
-                Button("Delete all", role: .destructive) { pending = .everything }
+                SectionLabel(title: "History & notes")
+                Button("Delete everything", role: .destructive) { pending = .everything }
                     .controlSize(.small)
                     .disabled(isEmpty)
                 Spacer(minLength: 0)

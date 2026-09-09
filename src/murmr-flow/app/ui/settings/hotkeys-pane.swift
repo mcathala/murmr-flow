@@ -35,9 +35,7 @@ struct HotkeysPane: View {
                 slot: .dictate,
                 title: "Dictation",
                 hotkey: settings.hotkey,
-                subtitle: dictation.hotkeyActive
-                    ? nil
-                    : "The hotkey watcher isn't running, so this won't fire."
+                subtitle: nil
             )
 
             bindCard(
@@ -45,7 +43,7 @@ struct HotkeysPane: View {
                 title: "Notetaker",
                 hotkey: settings.meetingHotkey,
                 subtitle: settings.meetingHotkey == nil
-                    ? "Not set — meetings start from the panel or the window."
+                    ? "No key. Notes start from the pill or the window."
                     : nil
             )
 
@@ -76,12 +74,22 @@ struct HotkeysPane: View {
                 .labelsHidden()
             }
 
+            // Said once, here at the bottom, with a verb on the button. The Dictation
+            // card's subtitle used to say it too, and the button was named after the pane
+            // it went to rather than what it did.
             if !dictation.hotkeyActive {
-                WarningRow(
-                    message: "Grant Accessibility, then restart Murmr Flow, or no hotkey "
-                        + "will fire.",
-                    action: ("Privacy & data", { services.openSettings(.privacyData) })
-                )
+                if services.permissions.accessibility != .granted {
+                    WarningRow(
+                        message: "Accessibility is off, so no hotkey will fire.",
+                        action: ("Allow", { services.permissions.openAccessibilitySettings() })
+                    )
+                } else {
+                    WarningRow(
+                        message: "The hotkey watcher isn\u{2019}t running. Quit and reopen "
+                            + "Murmr Flow.",
+                        action: ("Quit and reopen", { services.relaunch() })
+                    )
+                }
             }
         }
         .onDisappear { stopRecording() }
@@ -120,6 +128,13 @@ struct HotkeysPane: View {
                         }
                         Button(hotkey == nil ? "Set" : "Change") { start(slot) }
                             .controlSize(.small)
+                        // The Notetaker key is optional — the store keeps "cleared" as a
+                        // state of its own — but there was no control that cleared it.
+                        if slot == .meeting, hotkey != nil {
+                            Button("Clear") { services.changeMeetingHotkey(to: nil) }
+                                .controlSize(.small)
+                                .help("Start Notetaker only from the pill or the window")
+                        }
                     }
                 }
 
@@ -132,13 +147,22 @@ struct HotkeysPane: View {
                         .fixedSize(horizontal: false, vertical: true)
                 } else if let hotkey {
                     if let conflict = HotkeyMonitor.conflict(for: hotkey) {
-                        Text(conflict).font(.caption).foregroundStyle(.orange)
+                        WarningRow(message: conflict)
                     }
                     if let warning = HotkeyMonitor.systemFnWarning(for: hotkey) {
                         WarningRow(
                             message: warning,
                             action: ("Open Keyboard Settings", { HotkeyMonitor.openKeyboardSettings() })
                         )
+                    } else if hotkey.usesFn {
+                        // The app takes the 🌐 key's system job for itself while fn is a
+                        // hotkey. Done silently until now; the person deserves to know
+                        // where their emoji picker went.
+                        Text("While fn is your hotkey, its usual job — emoji, switching "
+                             + "input sources — is paused.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }

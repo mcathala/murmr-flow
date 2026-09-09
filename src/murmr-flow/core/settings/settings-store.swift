@@ -130,6 +130,13 @@ final class SettingsStore {
     /// as in Wispr Flow: a dictation is a sentence or two, letting go is the natural way to
     /// say "done", and a key that is held cannot be forgotten in the on position. The
     /// meeting key is press-to-toggle regardless — nobody holds a key for an hour.
+    /// "Hold ⌥" or "Press ⌥" — the one phrase every surface uses for the key, so the
+    /// menu bar, Home and the Dictation card cannot disagree with the toggle below them.
+    /// They did: three of them said "Hold" whatever this was set to.
+    var hotkeyPhrase: String {
+        "\(holdToTalk ? "Hold" : "Press") \(hotkey.displayName)"
+    }
+
     var holdToTalk: Bool {
         didSet { defaults.set(holdToTalk, forKey: Key.holdToTalk) }
     }

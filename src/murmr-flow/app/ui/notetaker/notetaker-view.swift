@@ -98,7 +98,8 @@ struct NotetakerView: View {
         RecordCard(
             title: recordHeadline,
             subtitle: recordSubhead,
-            buttonTitle: meetings.stage.isRecording ? "Stop" : "Start meeting",
+            // "Notetaker", the sidebar's word — the same thing had four names.
+            buttonTitle: meetings.stage.isRecording ? "Stop" : "Start Notetaker",
             buttonSymbol: meetings.stage.isRecording ? "stop.fill" : "record.circle.fill",
             isActive: meetings.stage.isRecording,
             // Busy but not recording means transcribing: there is nothing useful to stop
@@ -121,20 +122,33 @@ struct NotetakerView: View {
                     .controlSize(.small)
             } else if meetings.stage.isBusy {
                 ProgressView().controlSize(.small)
-            } else if let note = prompts.notetakerPrompt, settings.notetakerCleanupEnabled {
-                translateMenu
-                Menu {
-                    ForEach(prompts.presets) { preset in
-                        Button(preset.name) { prompts.notetakerPromptID = preset.id }
+            } else {
+                // Same as the Dictation card: the two settings stay in view with clean-up
+                // off, dimmed, with the switch beside them. Hiding them here while the
+                // other card showed them live was the one difference between the twins.
+                HStack(spacing: 12) {
+                    translateMenu
+                    Menu {
+                        ForEach(prompts.presets) { preset in
+                            Button(preset.name) { prompts.notetakerPromptID = preset.id }
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "sparkles").font(.system(size: 10, weight: .medium))
+                            Text(prompts.notetakerPrompt?.name ?? "As spoken")
+                        }
                     }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "sparkles").font(.system(size: 10, weight: .medium))
-                        Text(note.name)
-                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
+                .opacity(settings.notetakerCleanupEnabled ? 1 : 0.45)
+                .disabled(!settings.notetakerCleanupEnabled)
+
+                if !settings.notetakerCleanupEnabled {
+                    Button("Turn on") { settings.notetakerCleanupEnabled = true }
+                        .controlSize(.small)
+                        .help("Write notes with the AI")
+                }
             }
         }
     }
@@ -178,6 +192,8 @@ struct NotetakerView: View {
             message
         case .transcribing:
             "This runs faster than the meeting did — a moment for a long one."
+        case .idle, .saved where !settings.notetakerCleanupEnabled:
+            "Clean-up is off. Notes are saved exactly as transcribed."
         default:
             "Your microphone is \u{201C}You\u{201D}; everything this Mac plays is \u{201C}Them\u{201D}."
         }

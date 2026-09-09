@@ -87,7 +87,7 @@ struct MenuBarContent: View {
         return .init(
             tone: .ready,
             title: "Ready",
-            detail: "Hold \(dictation.settings.hotkey.displayName) to dictate"
+            detail: "\(dictation.settings.hotkeyPhrase) to dictate"
         )
     }
 
