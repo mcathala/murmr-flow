@@ -150,6 +150,10 @@ struct OnboardingView: View {
                 + "\u{2022} Language — what they come out in. Dictate in French, land in "
                 + "English; Off keeps the language you spoke."
         case .connectAI:
+            if providers.activeState.verification.isWorking {
+                return "\(providers.activeEntry.displayName) is connected and answering. "
+                    + "Keep it, or pick another one here."
+            }
             return "It turns raw speech into clean text: punctuation, your style, "
                 + "translation. Pick one, paste its key, and we check it right away."
         case .withoutAI:
@@ -568,11 +572,12 @@ struct OnboardingView: View {
                             get: { settings.notetakerOutputLanguage },
                             set: { settings.notetakerOutputLanguage = $0 }
                         ),
-                        options: [(PromptStore.meetingPreset.id, PromptStore.meetingPreset.name),
-                                  (nil, "As spoken")],
+                        // Notes only. "As spoken" was offered here once and taken out:
+                        // raw notes are what the app does *without* the AI, not a style.
+                        options: [(PromptStore.meetingPreset.id, PromptStore.meetingPreset.name)],
                         selected: prompts.notetakerPromptID,
                         summary: prompts.notetakerPrompt.map(Self.summary) ?? "Saved exactly as transcribed."
-                    ) { prompts.notetakerPromptID = $0 }
+                    ) { prompts.notetakerPromptID = $0 ?? prompts.notetakerPromptID }
                 }
             }
             Text(styleFootnote)
@@ -585,11 +590,11 @@ struct OnboardingView: View {
     /// Says where the AI stands, because without it the choices above do nothing. Three
     /// readings: it is the next page, it is already connected, or it was never set up.
     private var styleFootnote: String {
-        if onboarding.plan.contains(.connectAI) {
-            return "You\u{2019}ll connect the AI on the next screen."
-        }
         if providers.activeState.verification.isWorking {
             return "Your AI is connected, so these apply from the first dictation."
+        }
+        if onboarding.plan.contains(.connectAI) {
+            return "You\u{2019}ll connect the AI on the next screen."
         }
         return "Styles and translation need the AI clean-up set up in Settings. Until "
             + "then, you get your words exactly as spoken."
@@ -890,9 +895,7 @@ struct OnboardingView: View {
         "Structure": "Two asks:\n– move the meeting to Thursday\n– send the report",
         "Formal": "Could we move the meeting to Thursday? Please also send me the report.",
         "Casual": "Can we push the meeting to Thursday? And send me the report too.",
-        "Meeting": "Decided: meeting moves to Thursday.\nTo-do: send the report.",
-        "As spoken": "so are we good to move the meeting to thursday yeah thursday works "
-            + "for me perfect and can you send me the report after the call sure will do",
+        "Notes": "Decided: meeting moves to Thursday.\nTo-do: send the report.",
     ]
 
     /// One line per built-in, in the reader's terms. A custom prompt describes itself by
@@ -904,7 +907,7 @@ struct OnboardingView: View {
             "Structure": "Rambling turned into paragraphs and lists.",
             "Formal": "Polished, professional wording.",
             "Casual": "Relaxed and conversational.",
-            "Meeting": "Who said what, decisions, and to-dos.",
+            "Notes": "Who said what, decisions, and to-dos.",
         ][preset.name]
     }
 

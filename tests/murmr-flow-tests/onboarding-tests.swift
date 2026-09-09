@@ -150,16 +150,16 @@ struct OnboardingTests {
         #expect(flow.step == .tryIt)
     }
 
-    /// An endpoint already proved to work has nothing to be connected, so its page goes
-    /// the way a granted system-audio ask does.
-    @Test("a working AI is not asked for")
-    func connectedAISkipped() {
+    /// A provider that already works is shown, not skipped: the page is where you see
+    /// "Working" beside the one you will use, and where you could pick another.
+    @Test("a working AI is still shown")
+    func connectedAIShown() {
         let world = World()
         world.satisfied = [.connectAI]
         let flow = make(world)
         flow.begin()
-        #expect(flow.total == 6)
-        #expect(!flow.plan.contains(.connectAI))
+        #expect(flow.total == 7)
+        #expect(flow.plan.contains(.connectAI))
     }
 
     /// Declining once is a question, not a skip: the pause shares the AI page's number,

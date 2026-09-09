@@ -54,12 +54,14 @@ final class OnboardingCoordinator {
             }
         }
 
-        /// Whether the step is left out once its condition holds. The system-audio ask
-        /// is, and so is the AI: an endpoint already proved to work has nothing to be
-        /// connected. The language question is about the person, not the download, and
-        /// the two teaching pages carry their permission as a card on the way through —
-        /// a granted microphone doesn't make "What's inside" less worth reading.
-        var skipsWhenSatisfied: Bool { self == .systemAudio || self == .connectAI }
+        /// Whether the step is left out once its condition holds. Only the system-audio
+        /// ask is. The language question is about the person, not the download; the two
+        /// teaching pages carry their permission as a card on the way through — a granted
+        /// microphone doesn't make "What's inside" less worth reading — and the AI page
+        /// stays even when a provider already works, because seeing "Working" beside the
+        /// one you will be using is the point of the page, and because a working key is
+        /// not always the one you want.
+        var skipsWhenSatisfied: Bool { self == .systemAudio }
 
         /// Only reached by declining the AI, never by walking forward.
         var isBranch: Bool { self == .withoutAI || self == .microphone }
