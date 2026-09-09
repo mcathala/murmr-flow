@@ -29,9 +29,15 @@ struct WindowChrome: NSViewRepresentable {
             // mechanism can be confirmed rather than guessed. The guard keeps it from
             // observing its own change.
             titleWatch = window.observe(\.titleVisibility, options: [.new]) { window, _ in
-                guard window.titleVisibility != .hidden else { return }
-                WindowChrome.log.notice("title shown again by the scene; hiding it")
-                WindowChrome.dress(window)
+                // KVO calls back on the thread that changed the value, which for a window
+                // is the main thread — but the closure is typed `Sendable`, and the 6.1
+                // compiler on CI (unlike 6.3 here) will not let it touch main-actor state
+                // without being told that is where it runs.
+                MainActor.assumeIsolated {
+                    guard window.titleVisibility != .hidden else { return }
+                    WindowChrome.log.notice("title shown again by the scene; hiding it")
+                    WindowChrome.dress(window)
+                }
             }
         }
     }
