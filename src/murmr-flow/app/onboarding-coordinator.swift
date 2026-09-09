@@ -29,24 +29,45 @@ final class OnboardingCoordinator {
         // (speech-to-text is what needs it), Accessibility lives on "How it works"
         // (the keys are what it powers), and system audio keeps a small page of its
         // own right after — Apple's scariest dialog earns its own beat.
-        case language, underTheHood, howItWorks, systemAudio, style, tryIt
+        //
+        // The AI comes right before the proof: "Try it" is the first dictation, and a
+        // dictation without the AI is the raw one. Two of the cases are a branch rather
+        // than steps — `withoutAI` is the pause shown to someone who skips the AI, and
+        // `microphone` is what replaces Try it when they skip it twice, so the one
+        // permission the app cannot live without is still asked for.
+        case language, underTheHood, howItWorks, systemAudio, style, connectAI, withoutAI,
+             tryIt, microphone
 
         var number: Int { rawValue + 1 }
 
         /// The steps that change something on the machine. The rest explain or prove, and
         /// have no condition that could already hold.
+        ///
+        /// The AI is not one of them, on purpose: a machine with the model and every grant
+        /// runs the app, and a missing provider is Home's warning row to make, not a
+        /// reason to walk someone through six pages again. Nor is the microphone page:
+        /// Try it already stands for that grant, and this page only ever replaces it.
         var isSetup: Bool {
             switch self {
             case .language, .howItWorks, .systemAudio, .tryIt: true
-            case .underTheHood, .style: false
+            case .underTheHood, .style, .connectAI, .withoutAI, .microphone: false
             }
         }
 
-        /// Whether the step is left out once its condition holds. Only the system-audio
-        /// ask is: the language question is about the person, not the download, and the
-        /// two teaching pages carry their permission as a card on the way through — a
-        /// granted microphone doesn't make "What's inside" less worth reading.
-        var skipsWhenSatisfied: Bool { self == .systemAudio }
+        /// Whether the step is left out once its condition holds. The system-audio ask
+        /// is, and so is the AI: an endpoint already proved to work has nothing to be
+        /// connected. The language question is about the person, not the download, and
+        /// the two teaching pages carry their permission as a card on the way through —
+        /// a granted microphone doesn't make "What's inside" less worth reading.
+        var skipsWhenSatisfied: Bool { self == .systemAudio || self == .connectAI }
+
+        /// Only reached by declining the AI, never by walking forward.
+        var isBranch: Bool { self == .withoutAI || self == .microphone }
+
+        /// Whether the step counts towards "Step x of y". The pause after a skip shares
+        /// the number of the page it interrupts: it is a question about that page, not a
+        /// page of its own.
+        var isCounted: Bool { self != .withoutAI }
     }
 
     /// Where completion is recorded. Public because `SettingsStore` reads it too: it is
@@ -64,11 +85,19 @@ final class OnboardingCoordinator {
     /// The steps this run will show, in order — everything not already satisfied when it
     /// began. Numbering comes from here, not from `Step`: a first page that read "Step 2 of
     /// 6" because the model happened to be on disk already made the flow look broken.
-    private(set) var plan: [Step] = Step.allCases
+    private(set) var plan: [Step] = Step.allCases.filter { !$0.isBranch }
 
-    /// "Step 1 of 5" — this step's place among the ones actually shown.
-    var position: Int { (plan.firstIndex(of: step) ?? 0) + 1 }
-    var total: Int { plan.count }
+    /// "Step 1 of 5" — this step's place among the ones actually shown. The uncounted
+    /// pause reports the number of the page before it.
+    var position: Int {
+        let index = plan.firstIndex(of: step) ?? 0
+        return plan[...index].filter(\.isCounted).count
+    }
+    var total: Int { plan.filter(\.isCounted).count }
+
+    /// Whether the AI was declined, once or twice. The view reads it to word the last
+    /// pages honestly: a Try it reached this way has no clean-up to show off.
+    var declinedAI: Bool { plan.contains(.withoutAI) || plan.contains(.microphone) }
 
     /// True for the beat between a step's condition being met and the next step appearing,
     /// so the tick is seen rather than the screen simply changing under the user.
@@ -98,15 +127,40 @@ final class OnboardingCoordinator {
             finish()
             return
         }
-        plan = Step.allCases.filter { !$0.skipsWhenSatisfied || !isSatisfied($0) }
+        plan = Step.allCases.filter {
+            !$0.isBranch && (!$0.skipsWhenSatisfied || !isSatisfied($0))
+        }
         step = plan[0]
+    }
+
+    // MARK: - Declining the AI
+
+    /// "Skip for now" on the AI page. Not a skip yet: one page says what it costs and
+    /// asks once more, with the same number as the page it interrupts.
+    func declineAI() {
+        guard step == .connectAI, let index = plan.firstIndex(of: .connectAI) else { return }
+        cancelAdvance()
+        if !plan.contains(.withoutAI) { plan.insert(.withoutAI, at: index + 1) }
+        step = .withoutAI
+    }
+
+    /// The second no. Try it goes — a first dictation with nothing to polish it is not
+    /// the proof the page promises — and the microphone, which Try it was carrying, gets
+    /// a page of its own so the app can still hear. Already granted, that page drops out
+    /// too and the flow finishes.
+    func continueWithoutAI() {
+        guard step == .withoutAI else { return }
+        cancelAdvance()
+        if let index = plan.firstIndex(of: .tryIt) {
+            plan[index] = .microphone
+        }
+        plan.removeAll { $0 == .microphone && isSatisfied(.microphone) }
+        advance()
     }
 
     /// Moves to the next step whose condition isn't met yet, or finishes after the last.
     func advance() {
-        advanceTask?.cancel()
-        advanceTask = nil
-        isAdvancing = false
+        cancelAdvance()
         // A step planned but since satisfied — a grant made from elsewhere while the flow
         // was on an earlier page — drops out, so the count stays honest.
         plan.removeAll { $0.rawValue > step.rawValue && $0.skipsWhenSatisfied && isSatisfied($0) }
@@ -120,12 +174,21 @@ final class OnboardingCoordinator {
     /// One step towards the door. Anything that was decided stays decided — going back is
     /// for re-reading a page, not for undoing — and a satisfied permission step simply
     /// shows its tick and a Continue.
+    ///
+    /// The one exception is the pause after declining the AI: leaving it backwards *is*
+    /// undoing the decline, so the pause leaves the plan with you.
     func back() {
+        cancelAdvance()
+        guard let index = plan.firstIndex(of: step), index > 0 else { return }
+        let previous = plan[index - 1]
+        if step == .withoutAI { plan.remove(at: index) }
+        step = previous
+    }
+
+    private func cancelAdvance() {
         advanceTask?.cancel()
         advanceTask = nil
         isAdvancing = false
-        guard let index = plan.firstIndex(of: step), index > 0 else { return }
-        step = plan[index - 1]
     }
 
     /// Checks the current step against the world and, if its condition now holds, moves on

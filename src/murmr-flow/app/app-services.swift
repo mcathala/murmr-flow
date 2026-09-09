@@ -82,17 +82,21 @@ final class AppServices {
         // stored property has been set, and this one is being set.
         let permissions = self.permissions
         let speech = self.speech
+        let providers = self.providers
         onboarding = OnboardingCoordinator { step in
             switch step {
             case .language: SpeechModelLoader.isDownloaded(speech.activeModel)
             // Pages that carry a grant are satisfied by it — which is what lets a fully
             // set-up machine skip the whole flow. The microphone lives on Try It: the
-            // first dictation is the first thing that needs it.
+            // first dictation is the first thing that needs it. Or on its own page, when
+            // Try it was given up along with the AI.
             case .howItWorks: permissions.accessibility == .granted
             case .systemAudio: permissions.systemAudio == .granted
-            case .tryIt: permissions.microphone == .granted
+            case .tryIt, .microphone: permissions.microphone == .granted
+            // Connected means proved: a pasted key that never answered is not one.
+            case .connectAI: providers.activeState.verification.isWorking
             // Nothing to check: these are there to be read or done, not verified.
-            case .underTheHood, .style: false
+            case .underTheHood, .style, .withoutAI: false
             }
         }
     }
