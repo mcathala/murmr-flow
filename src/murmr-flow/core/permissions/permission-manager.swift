@@ -101,7 +101,13 @@ final class PermissionManager {
     /// `promptAccessibility()` stays as the fallback for a machine where this does not
     /// list the app; the dialog is guaranteed to.
     func requestAccessibility() {
-        dropStaleAccessibilityEntries()
+        if dropStaleAccessibilityEntries() {
+            // After a reset the quiet ask does not put the app back in the list — seen
+            // once, with the row simply gone. Apple's dialog always does, so take it.
+            promptAccessibility()
+            openAccessibilitySettings()
+            return
+        }
         var value: CFTypeRef?
         _ = AXUIElementCopyAttributeValue(
             AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &value
@@ -116,9 +122,10 @@ final class PermissionManager {
     /// still "Not granted". Clearing our own bundle's entries first means the one row that
     /// appears is this build's. A signed build never has the problem and is left alone;
     /// `tccutil` needs no privileges for the calling app's own identifier.
-    private func dropStaleAccessibilityEntries() {
+    @discardableResult
+    private func dropStaleAccessibilityEntries() -> Bool {
         guard SigningInfo.current().isAdHoc,
-              let bundleID = Bundle.main.bundleIdentifier else { return }
+              let bundleID = Bundle.main.bundleIdentifier else { return false }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
         process.arguments = ["reset", "Accessibility", bundleID]
@@ -127,8 +134,10 @@ final class PermissionManager {
         do {
             try process.run()
             process.waitUntilExit()
+            return process.terminationStatus == 0
         } catch {
             // Nothing lost: the warning row in onboarding still explains the manual way.
+            return false
         }
     }
 
