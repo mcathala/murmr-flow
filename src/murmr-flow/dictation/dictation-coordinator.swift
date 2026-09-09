@@ -133,21 +133,26 @@ final class DictationCoordinator {
     let settings: SettingsStore
     let loader: SpeechModelLoader
 
-    private let recorder = MicRecorder()
+    private let recorder: any MicRecording
 
     /// Optional so the convenience initialiser used by tests need not build one.
     private let devices: AudioDeviceStore?
     /// Shared with meetings mode, so only one copy of the ~600 MB model is resident and
     /// the two never run inference over each other's decoder state.
-    private let transcriber: TranscriptionService
+    private let transcriber: any Transcribing
     let history: HistoryStore
     let prompts: PromptStore
     let providers: ProviderStore
     let dictionary: DictionaryStore
     let speech: SpeechModelStore
-    private let cleanup = CleanupService()
+    private let cleanup: any Cleaning
     private let hotkey = HotkeyMonitor()
-    private let media = MediaPlaybackController()
+    private let media: any MediaPausing
+    /// How finished text reaches the app in front. The real one pastes; a test's reads.
+    private let inject: @MainActor (String) throws -> Void
+    /// Tests only: the fake transcriber needs no model files, so the "is the model on
+    /// disk" gate would otherwise refuse every dictation before it began.
+    private let assumeModelsLoaded: Bool
     private static let mediaLog = Logger(subsystem: "app.murmr.MurmrFlow", category: "media")
     private var tickTask: Task<Void, Never>?
     private var previewTask: Task<Void, Never>?
@@ -172,14 +177,24 @@ final class DictationCoordinator {
     init(
         settings: SettingsStore = SettingsStore(),
         loader: SpeechModelLoader = SpeechModelLoader(),
-        transcriber: TranscriptionService = TranscriptionService(),
+        transcriber: any Transcribing = TranscriptionService(),
         history: HistoryStore = HistoryStore(),
         prompts: PromptStore = PromptStore(),
         providers: ProviderStore = ProviderStore(),
         speech: SpeechModelStore = SpeechModelStore(),
         dictionary: DictionaryStore = DictionaryStore(),
-        devices: AudioDeviceStore? = nil
+        devices: AudioDeviceStore? = nil,
+        recorder: any MicRecording = MicRecorder(),
+        cleanup: any Cleaning = CleanupService(),
+        media: any MediaPausing = MediaPlaybackController(),
+        inject: @escaping @MainActor (String) throws -> Void = TextInjector.inject,
+        assumeModelsLoaded: Bool = false
     ) {
+        self.recorder = recorder
+        self.cleanup = cleanup
+        self.media = media
+        self.inject = inject
+        self.assumeModelsLoaded = assumeModelsLoaded
         self.settings = settings
         self.loader = loader
         self.transcriber = transcriber
@@ -238,7 +253,7 @@ final class DictationCoordinator {
         // Refuse rather than downloading mid-dictation. Loading is kicked off at launch,
         // so this only fires if that hasn't finished — and holding the key through a
         // ~600 MB download would look like the app had hung.
-        if loader.models == nil {
+        if loader.models == nil, !assumeModelsLoaded {
             // A fast load deliberately shows no busy state, so check the flag too.
             if loader.isPreparing {
                 stage = .failed(.speechModel, "The speech model is still getting ready.")
@@ -361,7 +376,8 @@ final class DictationCoordinator {
                     // cost latency to show something that is about to be replaced.
                     outputLanguage: settings.dictationTargetLanguage
                 ),
-                dictionary: dictionary.entries(usedIn: .dictation)
+                dictionary: dictionary.entries(usedIn: .dictation),
+                timeout: CleanupService.dictationTimeout
             )
 
             stage = .injecting
@@ -369,7 +385,7 @@ final class DictationCoordinator {
             var insertionFailed = false
             if deliversText {
                 do {
-                    try TextInjector.inject(outcome.text)
+                    try inject(outcome.text)
                 } catch {
                     // The text is on the clipboard either way — say so rather than
                     // pretending the dictation succeeded silently.
@@ -527,7 +543,8 @@ final class DictationCoordinator {
                 frontmostApp: record.targetBundleID,
                 outputLanguage: settings.dictationTargetLanguage
             ),
-            dictionary: dictionary.entries(usedIn: .dictation)
+            dictionary: dictionary.entries(usedIn: .dictation),
+            timeout: CleanupService.dictationTimeout
         )
 
         guard !outcome.usedRawFallback else {
@@ -591,7 +608,9 @@ final class DictationCoordinator {
                 transcript: probe,
                 config: config,
                 prompt: PromptLibrary(template: prompts.dictationPrompt.template),
-                context: PromptLibrary.Context(transcript: probe)
+                context: PromptLibrary.Context(transcript: probe),
+                dictionary: [],
+                timeout: CleanupService.dictationTimeout
             )
 
             // `clean` never throws by design — it falls back to the raw text and says why.

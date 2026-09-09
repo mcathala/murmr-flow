@@ -154,7 +154,7 @@ struct PrivacyDataPane: View {
     private var notesFolder: some View {
         Card {
             HStack(spacing: 10) {
-                Text(NoteStore.folder.path(percentEncoded: false))
+                Text(notes.folder.path(percentEncoded: false))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)

@@ -140,27 +140,41 @@ final class MeetingCoordinator {
     var onRecordingChange: (@MainActor (Bool) -> Void)?
 
     private let loader: SpeechModelLoader
-    private let transcriber: TranscriptionService
+    private let transcriber: any Transcribing
     private let notes: NoteStore
     private let settings: SettingsStore
     private let prompts: PromptStore
     private let providers: ProviderStore
     private let dictionary: DictionaryStore
-    private let devices: AudioDeviceStore
-    private let recorder = MeetingRecorder()
-    private let cleanup = CleanupService()
+    private let devices: AudioDeviceStore?
+    private let recorder: any MeetingRecording
+    private let cleanup: any Cleaning
+    /// Reads a recorded stream back as samples. The real one opens a wav file; a test's
+    /// hands back whatever the fake recorder "recorded".
+    private let readSamples: @Sendable (URL) throws -> [Float]
+    /// Tests only: the fake transcriber needs no model files, so the "is the model on
+    /// disk" gate would otherwise refuse every meeting before it began.
+    private let assumeModelsLoaded: Bool
     private var tickTask: Task<Void, Never>?
 
     init(
         loader: SpeechModelLoader,
-        transcriber: TranscriptionService,
+        transcriber: any Transcribing,
         notes: NoteStore,
         settings: SettingsStore,
         prompts: PromptStore,
         providers: ProviderStore,
         dictionary: DictionaryStore,
-        devices: AudioDeviceStore
+        devices: AudioDeviceStore?,
+        recorder: any MeetingRecording = MeetingRecorder(),
+        cleanup: any Cleaning = CleanupService(),
+        readSamples: @escaping @Sendable (URL) throws -> [Float] = AudioFileReader.samples(at:),
+        assumeModelsLoaded: Bool = false
     ) {
+        self.recorder = recorder
+        self.cleanup = cleanup
+        self.readSamples = readSamples
+        self.assumeModelsLoaded = assumeModelsLoaded
         self.loader = loader
         self.transcriber = transcriber
         self.notes = notes
@@ -188,7 +202,7 @@ final class MeetingCoordinator {
 
         // Refuse rather than downloading mid-meeting. Otherwise the user records for an
         // hour and only then discovers there is no model to transcribe it with.
-        guard loader.models != nil else {
+        guard loader.models != nil || assumeModelsLoaded else {
             stage = .failed(.speechModel, modelNotReadyMessage())
             if !loader.isPreparing { Task { await loader.prepare() } }
             return
@@ -197,7 +211,7 @@ final class MeetingCoordinator {
         do {
             // Read the choice at the moment of recording rather than holding it, so
             // picking a different microphone takes effect on the very next take.
-            recorder.inputDeviceID = devices.selectedInputDeviceID
+            recorder.inputDeviceID = devices?.selectedInputDeviceID
             try recorder.start()
             elapsed = 0
             stage = .recording
@@ -225,8 +239,8 @@ final class MeetingCoordinator {
             // Each side is read on its own. One stream can legitimately be empty — a
             // meeting where you never spoke, or a muted microphone — and that must not
             // cost the other half of the transcript.
-            let yourSamples = (try? AudioFileReader.samples(at: recording.you)) ?? []
-            let theirSamples = (try? AudioFileReader.samples(at: recording.them)) ?? []
+            let yourSamples = (try? readSamples(recording.you)) ?? []
+            let theirSamples = (try? readSamples(recording.them)) ?? []
             guard !yourSamples.isEmpty || !theirSamples.isEmpty else {
                 throw RecordingError.noAudio
             }
@@ -323,7 +337,8 @@ final class MeetingCoordinator {
                 transcript: "",  // filled in per batch
                 outputLanguage: settings.notetakerTargetLanguage
             ),
-            dictionary: dictionary.entries(usedIn: .notetaker)
+            dictionary: dictionary.entries(usedIn: .notetaker),
+            timeout: CleanupService.noteTimeout
         )
 
         guard !outcome.usedRawFallback else { return (transcript, outcome.note) }
