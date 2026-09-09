@@ -1,0 +1,29 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: swift test
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Build
+        run: swift build --arch arm64
+
+      # The snapshot suites only render when MURMR_SNAPSHOT_DIR is set, so a plain run is
+      # the behavioural tests alone — no PNGs, no dependence on this runner's fonts.
+      - name: Test
+        run: swift test --arch arm64
