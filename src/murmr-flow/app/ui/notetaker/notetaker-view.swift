@@ -49,6 +49,10 @@ struct NotetakerView: View {
                 anchor = first
             }
         }
+        // A rename typed for one note must not open on the next: without this, starting
+        // to rename A and clicking B showed B in edit mode holding A's title, and Save
+        // gave B that title.
+        .onChange(of: selection) { renaming = nil }
         .onChange(of: meetings.stage) { _, stage in
             // A meeting that just finished should appear without being asked for.
             if stage == .saved {
