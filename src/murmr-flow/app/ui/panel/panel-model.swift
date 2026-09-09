@@ -32,12 +32,15 @@ final class PanelModel {
         case meeting
         /// Transcribing, tidying, writing a note — one row, one label.
         case working(String)
+        /// Something worth a sentence that is not a fault — nothing was heard, say. Quiet,
+        /// and gone by itself a moment later; the bridge clears it.
+        case notice(String)
         case failed(Failure)
 
         var isBusy: Bool {
             switch self {
             case .dictating, .meeting, .working: true
-            case .resting, .armed, .failed: false
+            case .resting, .armed, .notice, .failed: false
             }
         }
 
@@ -61,8 +64,9 @@ final class PanelModel {
             case .armed, .failed:
                 // Nothing was started, or it already ended — discard just dismisses.
                 Controls(stop: false, discard: true)
-            case .resting, .working:
-                // Mid-transcription there is nothing useful to stop *into*.
+            case .resting, .working, .notice:
+                // Mid-transcription there is nothing useful to stop *into*; a notice
+                // leaves on its own.
                 Controls()
             }
         }
@@ -73,17 +77,30 @@ final class PanelModel {
         var discard = false
     }
 
-    /// The whole failure vocabulary. Which half broke is all you need in the moment; the
+    /// The whole failure vocabulary. Which part broke is all you need in the moment; the
     /// detail belongs on Home, where there is room for it.
+    ///
+    /// Two of these name a permission rather than a component, because that is what the
+    /// person can act on: a meeting that heard nothing is a system-audio grant, and text
+    /// that could not be typed is on the clipboard already — the row says how to get it.
     enum Failure: Equatable {
         case speechModel
         case aiProvider
+        case systemAudio
+        case insertion
 
         var message: String {
             switch self {
             case .speechModel: "Speech model failed"
             case .aiProvider: "AI provider failed"
+            case .systemAudio: "System audio isn\u{2019}t allowed"
+            case .insertion: "Couldn\u{2019}t type here. Copied — press ⌘V"
             }
+        }
+
+        /// The insertion line is a sentence, not a verdict, and needs the room.
+        var width: CGFloat {
+            self == .insertion ? 300 : 210
         }
     }
 
@@ -133,7 +150,7 @@ final class PanelModel {
     var showsBubbles: Bool {
         switch phase {
         case .armed, .dictating, .meeting: true
-        case .resting, .working, .failed: false
+        case .resting, .working, .notice, .failed: false
         }
     }
 
@@ -232,9 +249,11 @@ final class PanelModel {
             CGSize(width: 232, height: 48)
         case .meeting:
             CGSize(width: 368, height: 48)
-        case .failed:
+        case .notice:
+            CGSize(width: 200, height: 48)
+        case .failed(let failure):
             // The message and the way out — the two-word failure needs no mode icon.
-            CGSize(width: 210, height: 48)
+            CGSize(width: failure.width, height: 48)
         }
         // The bubbles ride above the row, so they are window height, not row height.
         if showsBubbles { size.height += Self.bubbleReach }

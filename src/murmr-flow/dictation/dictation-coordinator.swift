@@ -77,9 +77,17 @@ final class DictationCoordinator {
         let finalText: String
         let usedRawFallback: Bool
         let note: String?
+        /// The text never reached the app in front — Accessibility gone, a secure field,
+        /// a window that refused it. It is on the clipboard regardless; this is what lets
+        /// the pill say so.
+        let insertionFailed: Bool
         let targetApp: String?
         let timing: Timing
     }
+
+    /// How many dictations ended with nothing said. A count rather than a flag because
+    /// the pill has to tell the second one from the first; nothing else reads it.
+    private(set) var nothingHeardCount = 0
 
     private(set) var stage: Stage = .idle {
         didSet {
@@ -319,6 +327,7 @@ final class DictationCoordinator {
                 // Nothing was said. Deliberately *not* an early return: this used to
                 // `return` here, which skipped restoring paused music — so holding the
                 // key without speaking left playback paused for good.
+                nothingHeardCount += 1
                 stage = .idle
                 await restoreMedia()
                 return
@@ -350,12 +359,14 @@ final class DictationCoordinator {
 
             stage = .injecting
             var note = outcome.note
+            var insertionFailed = false
             if deliversText {
                 do {
                     try TextInjector.inject(outcome.text)
                 } catch {
                     // The text is on the clipboard either way — say so rather than
                     // pretending the dictation succeeded silently.
+                    insertionFailed = true
                     note = [note, error.localizedDescription]
                         .compactMap { $0 }
                         .joined(separator: " ")
@@ -367,6 +378,7 @@ final class DictationCoordinator {
                 finalText: outcome.text,
                 usedRawFallback: outcome.usedRawFallback,
                 note: note?.isEmpty == true ? nil : note,
+                insertionFailed: insertionFailed,
                 targetApp: targetApp?.localizedName,
                 timing: Timing(
                     audioDuration: transcription.audioDuration,

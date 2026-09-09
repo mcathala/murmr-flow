@@ -23,6 +23,9 @@ final class PanelBridge {
     /// The last run we already reacted to, so a fallback notice is shown once and not
     /// again on every idle tick.
     private var reportedRunID: UUID?
+    /// The last empty dictation the pill spoke about, so each one is mentioned once.
+    private var reportedNothingHeard = 0
+    private var noticeTask: Task<Void, Never>?
 
     init(
         panel: FloatingPanel,
@@ -206,25 +209,47 @@ final class PanelBridge {
         case .idle:
             // No success state. The text appearing in your document *is* the confirmation;
             // announcing it would be the app taking credit for something already visible.
+            // Nor is a clean-up that fell back to the raw transcript a failure: the words
+            // landed, and the rougher read is the whole of the difference.
             //
-            // The exception is cleanup having fallen back to the raw transcript. That is
-            // not a failed dictation — the words still landed — but it is worth saying,
-            // because otherwise the only clue is that they read a little rougher.
+            // Two things *are* said. Text that could not be typed into the app in front
+            // is on the clipboard, and the person has to be told, or the dictation
+            // simply vanished. And a dictation that heard nothing looks exactly like a
+            // key that never fired — so the pill says which, for a moment.
             if let run = dictation.lastRun, run.id != reportedRunID {
                 reportedRunID = run.id
-                    model.set(run.usedRawFallback ? .failed(.aiProvider) : .resting)
+                model.set(run.insertionFailed ? .failed(.insertion) : .resting)
+            } else if dictation.nothingHeardCount != reportedNothingHeard {
+                reportedNothingHeard = dictation.nothingHeardCount
+                show(notice: "Didn\u{2019}t hear anything", for: .seconds(2))
             } else if model.phase.isBusy {
-                    model.set(.resting)
+                model.set(.resting)
             }
         }
 
         panel.apply()
     }
 
+    /// A notice is a moment, not a state: it clears itself unless something else has
+    /// taken the pill over in the meantime.
+    private func show(notice: String, for duration: Duration) {
+        panel.model.set(.notice(notice))
+        noticeTask?.cancel()
+        noticeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: duration)
+            guard let self, !Task.isCancelled,
+                  case .notice = self.panel.model.phase else { return }
+            self.panel.model.set(.resting)
+            self.panel.apply()
+        }
+    }
+
     private static func failure(for message: String) -> PanelModel.Failure {
-        // The panel's whole vocabulary is two lines: which half broke. Anything mentioning
-        // the provider or a key is the AI provider; everything else is the speech model.
+        // Which part broke, read off the message until the coordinators carry a typed
+        // kind. System audio first: its messages also mention "recording" and "audio",
+        // and used to fall through to the speech model, which had nothing to do with it.
         let lowered = message.lowercased()
+        if lowered.contains("system audio") { return .systemAudio }
         let cleanupWords = ["key", "provider", "api", "clean", "model responded", "http"]
         return cleanupWords.contains(where: lowered.contains) ? .aiProvider : .speechModel
     }

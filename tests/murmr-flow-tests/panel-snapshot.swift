@@ -138,7 +138,8 @@ struct PanelWindowTests {
 
         for phase in [
             PanelModel.Phase.resting, .armed, .dictating, .meeting,
-            .working("Cleaning up…"), .failed(.aiProvider),
+            .working("Cleaning up…"), .notice("Didn\u{2019}t hear anything"),
+            .failed(.aiProvider), .failed(.insertion),
         ] {
             panel.model.set(phase)
             #expect(
