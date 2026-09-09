@@ -25,13 +25,18 @@ import SwiftUI
 /// **The tab bar is not gated, though the tabs are.** Everything here used to collapse to
 /// one sentence with both switches off, which was right while everything here needed a
 /// provider. The dictionary's exact replacements do not — they are local string work — so
-/// hiding that tab would hide a feature that still works. Provider and Prompts say they are
-/// off instead.
+/// hiding that tab would hide a feature that still works. Provider says it is off; Styles
+/// still lists the styles, dimmed, so two tabs never show one identical sentence.
 ///
 /// **One rule for the providers: nothing changes the active one except a button that says
 /// so.** The previous version made tapping a row to look at it the same action as putting
 /// it into service, so adding a key to a second endpoint took the working one out of use —
 /// and because verification was a single global flag, coming back meant testing again.
+///
+/// **And one rule for testing: there is no Test button.** Every change that could alter
+/// the answer — a key saved, a model picked, an endpoint typed — runs the test itself, so
+/// the badge is always a claim about what is configured now. The one manual test left is
+/// the badge when it reads "Not working": for a network that blinked, not for a change.
 ///
 /// Everything a provider knows now lives with that provider: endpoint, model and whether
 /// it has been proved. Editing one leaves the other alone.
@@ -50,7 +55,30 @@ struct AICleanupPane: View {
     /// predictable; coming back to whichever tab you left three days ago is not.
     @State private var facet: Facet = .provider
 
+    /// Which text field has the keyboard, so leaving one can run the test the way
+    /// pressing Return does. Typing does not: a test per keystroke would be a request per
+    /// keystroke.
+    @FocusState private var focused: Field?
+
+    /// Providers whose endpoint or model changed since their last test. Leaving the field
+    /// tests these and only these; tabbing through an untouched field runs nothing.
+    @State private var dirty: Set<String> = []
+
+    /// The key about to be removed, so the row can ask first. Notes ask; a key that took a
+    /// trip to a console to get deserves the same.
+    @State private var removingKeyFor: String?
+
     private var providers: ProviderStore { dictation.providers }
+
+    private enum Field: Hashable {
+        case baseURL(String), model(String)
+
+        var providerID: String {
+            switch self {
+            case .baseURL(let id), .model(let id): id
+            }
+        }
+    }
 
     /// The three groups. Named `Facet` rather than `Group` or `Tab`, both of which are
     /// SwiftUI's.
@@ -79,15 +107,30 @@ struct AICleanupPane: View {
 
     var body: some View {
         PaneScroll(title: "AI clean-up") {
-            // One row, two checkboxes: the two switches were a whole row each for six
-            // words of difference, and the question is the same — which jobs go through
-            // the clean-up.
+            // One row, two pills: the same control the style rows use to say which job
+            // a prompt is for, so the pane reads as one table — this row is the header.
+            // The difference is that these switch *off* too; a lit style pill does not.
             SettingRow(title: "Activate for") {
-                HStack(spacing: 16) {
-                    Toggle("Dictation", isOn: $settings.cleanupEnabled)
-                    Toggle("Notetaker", isOn: $settings.notetakerCleanupEnabled)
+                HStack(spacing: 8) {
+                    AssignmentToggle(
+                        title: "Dictation", symbol: "mic.fill",
+                        isOn: settings.cleanupEnabled,
+                        togglesOff: true,
+                        help: (on: "Turn off for dictation", off: "Clean up dictation")
+                    ) { settings.cleanupEnabled.toggle() }
+                    AssignmentToggle(
+                        title: "Notetaker", symbol: "text.document",
+                        isOn: settings.notetakerCleanupEnabled,
+                        togglesOff: true,
+                        help: (on: "Turn off for Notetaker", off: "Clean up Notetaker")
+                    ) { settings.notetakerCleanupEnabled.toggle() }
+                    // Invisible, the width of the rows' Edit button, so the two pills sit
+                    // in the same column as the ones below them.
+                    Button("Edit") {}
+                        .controlSize(.small)
+                        .hidden()
+                        .accessibilityHidden(true)
                 }
-                .toggleStyle(.checkbox)
             }
 
             if isCleaningSomething, !providers.isUsable(providers.activeID) {
@@ -121,17 +164,43 @@ struct AICleanupPane: View {
                 if isCleaningSomething {
                     PromptsSection(prompts: prompts)
                 } else {
+                    // The list stays, dimmed: what the styles are is worth seeing before
+                    // deciding to switch clean-up on. Editing them can wait until it is.
                     switchedOff
+                    PromptsSection(prompts: prompts)
+                        .opacity(0.45)
+                        .disabled(true)
                 }
             case .dictionary:
                 DictionarySection(dictionary: dictionary, cleanupIsOn: isCleaningSomething)
             }
         }
+        .onChange(of: focused) { before, _ in
+            // Leaving a field is the commit, the same as Return. Only a field that was
+            // actually edited runs the test.
+            guard let before, dirty.contains(before.providerID) else { return }
+            retest(before.providerID)
+        }
+        .confirmationDialog(
+            "Remove this key?",
+            isPresented: Binding(
+                get: { removingKeyFor != nil }, set: { if !$0 { removingKeyFor = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let id = removingKeyFor { try? providers.deleteKey(for: id) }
+                removingKeyFor = nil
+            }
+            Button("Cancel", role: .cancel) { removingKeyFor = nil }
+        } message: {
+            Text("Clean-up through this provider stops until a key is added again.")
+        }
     }
 
     private var switchedOff: some View {
-        Text("Dictation and meeting notes both keep the raw transcript. No provider, no "
-             + "key, no network.")
+        Text("Dictation and Notetaker both keep the raw transcript. No provider, no key, "
+             + "no network.")
             .font(.callout)
             .foregroundStyle(.secondary)
     }
@@ -140,9 +209,9 @@ struct AICleanupPane: View {
     /// affected when only notes are.
     private static func affected(_ settings: SettingsStore) -> String {
         switch (settings.cleanupEnabled, settings.notetakerCleanupEnabled) {
-        case (true, true): "dictation and meeting notes"
+        case (true, true): "dictation and Notetaker"
         case (true, false): "dictation"
-        default: "meeting notes"
+        default: "Notetaker"
         }
     }
 
@@ -153,25 +222,23 @@ struct AICleanupPane: View {
         return Card(highlighted: isActive) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
-                    Monogram(name: entry.displayName)
+                    ProviderMark(entry: entry)
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(entry.displayName).font(.callout.weight(.semibold))
-                        Text(providers.state(for: entry.id).model.isEmpty
-                             ? "No model set"
-                             : providers.state(for: entry.id).model)
+                        Text(subtitle(for: entry))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
 
-                    badge(for: entry.id)
+                    ProviderBadge(id: entry.id, providers: providers, dictation: dictation)
                     Spacer(minLength: 0)
 
                     // Never activates. Opening the editor for a provider you are not
                     // using is exactly the case the old pane made impossible.
                     Button(isOpen ? "Done" : (isActive ? "Edit" : "Set up")) {
-                        editing = isOpen ? nil : entry.id
+                        toggle(entry.id)
                     }
                     .controlSize(.small)
 
@@ -185,38 +252,29 @@ struct AICleanupPane: View {
                                   : "Add a key and a model first")
                     }
                 }
+                // The whole header opens the editor, the same gesture as a style row:
+                // the row is the thing you want to open, and a 40-point target at its far
+                // end is not. The buttons are buttons, so their taps never reach this.
+                .contentShape(Rectangle())
+                .onTapGesture { toggle(entry.id) }
 
                 if isOpen { editor(entry) }
             }
         }
     }
 
-    /// Three states, not two. Having a key is progress, and it used to look identical to
-    /// having none.
-    @ViewBuilder
-    private func badge(for id: String) -> some View {
-        if dictation.testingProviderID == id {
-            StatusChip(title: "Testing", level: .waiting)
-        } else {
-            switch providers.state(for: id).verification {
-            case .working(let latency, _):
-                StatusChip(
-                    title: "Working · \(String(format: "%.1fs", latency))", level: .ok
-                )
-            case .failed:
-                StatusChip(title: "Not working", level: .bad)
-            case .untested:
-                if providers.isUsable(id) {
-                    StatusChip(title: "Not tested", level: .waiting)
-                } else {
-                    StatusChip(
-                        title: ProviderCatalog.entry(id: id).requiresKey && !providers.hasKey(id)
-                            ? "No key" : "Not set up",
-                        level: .bad
-                    )
-                }
-            }
-        }
+    private func toggle(_ id: String) {
+        editing = editing == id ? nil : id
+    }
+
+    /// The model in use, or what the row is for when nothing is set yet. Custom says
+    /// what kind of server it takes, since its name no longer does.
+    private func subtitle(for entry: ProviderCatalog.Entry) -> String {
+        let model = providers.state(for: entry.id).model
+        if !model.isEmpty { return model }
+        return entry.requiresCustomBaseURL
+            ? "Your own server: Ollama, LM Studio, vLLM…"
+            : "No model set"
     }
 
     // MARK: - Editor
@@ -229,16 +287,39 @@ struct AICleanupPane: View {
             Divider()
 
             if entry.requiresCustomBaseURL {
+                // What kind of server this takes, before the field that takes it. The
+                // provider's name used to carry this as "(OpenAI-compatible)", which named
+                // the protocol without saying what it meant or what happens otherwise.
+                Text(ProviderCatalog.customExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 LabeledContent("Endpoint") {
-                    TextField("https://…", text: binding(\.baseURL, for: entry.id))
+                    TextField("http://…", text: binding(\.baseURL, for: entry.id))
                         .textFieldStyle(.roundedBorder)
+                        .focused($focused, equals: .baseURL(entry.id))
+                        .onSubmit { retest(entry.id) }
                 }
                 .font(.caption)
+
+                if !entry.suggestedEndpoints.isEmpty {
+                    SuggestionChips(
+                        items: entry.suggestedEndpoints,
+                        current: providers.state(for: entry.id).baseURL,
+                        help: "Use this address"
+                    ) { url in
+                        providers.update(baseURL: url, for: entry.id)
+                        retest(entry.id)
+                    }
+                }
             }
 
             LabeledContent("Model") {
                 TextField("Model name", text: binding(\.model, for: entry.id))
                     .textFieldStyle(.roundedBorder)
+                    .focused($focused, equals: .model(entry.id))
+                    .onSubmit { retest(entry.id) }
             }
             .font(.caption)
 
@@ -246,7 +327,12 @@ struct AICleanupPane: View {
                 SuggestionChips(
                     items: entry.suggestedModels,
                     current: providers.state(for: entry.id).model
-                ) { providers.update(model: $0, for: entry.id) }
+                ) { model in
+                    // A chip is a whole answer, so it is tested at once — there is no
+                    // half-typed state to wait out.
+                    providers.update(model: model, for: entry.id)
+                    retest(entry.id)
+                }
             }
 
             StoredSecretRow(
@@ -258,7 +344,7 @@ struct AICleanupPane: View {
                     // rather than leaving a row that looks configured and never ran.
                     dictation.testProvider(entry.id)
                 },
-                onRemove: { try? providers.deleteKey(for: entry.id) }
+                onRemove: { removingKeyFor = entry.id }
             )
 
             if case .failed(let reason) = providers.state(for: entry.id).verification {
@@ -269,39 +355,89 @@ struct AICleanupPane: View {
             }
 
             HStack(spacing: 8) {
-                Button("Test") { dictation.testProvider(entry.id) }
-                    .controlSize(.small)
-                    .disabled(
-                        !providers.isUsable(entry.id) || dictation.testingProviderID != nil
-                    )
-
                 if let url = entry.keyURL, let link = URL(string: url) {
                     Link("Get a key", destination: link).font(.caption)
                 }
 
                 Spacer(minLength: 0)
 
-                Button("Reset") { providers.resetToDefaults(entry.id) }
-                    .controlSize(.small)
-                    .help("Put the endpoint and model back to their defaults")
+                Button("Reset") {
+                    providers.resetToDefaults(entry.id)
+                    retest(entry.id)
+                }
+                .controlSize(.small)
+                .help("Put the endpoint and model back to their defaults")
             }
         }
     }
 
+    /// Runs the test if there is anything to test. A provider with no key yet reads "No
+    /// key" and is left alone; testing it would only produce a failure it already shows.
+    private func retest(_ id: String) {
+        dirty.remove(id)
+        guard providers.isUsable(id) else { return }
+        dictation.testProvider(id)
+    }
+
     /// Writes through the store, which resets verification — a "working" badge earned
-    /// against a different endpoint would be a claim about something no longer configured.
+    /// against a different endpoint would be a claim about something no longer configured
+    /// — and marks the provider for a test when the field is left.
     private func binding(
         _ field: KeyPath<ProviderStore.State, String>, for id: String
     ) -> Binding<String> {
         Binding(
             get: { providers.state(for: id)[keyPath: field] },
             set: { value in
+                guard value != providers.state(for: id)[keyPath: field] else { return }
                 if field == \ProviderStore.State.baseURL {
                     providers.update(baseURL: value, for: id)
                 } else {
                     providers.update(model: value, for: id)
                 }
+                dirty.insert(id)
             }
         )
+    }
+}
+
+/// What the app knows about a provider's health, in one chip.
+///
+/// Four states, not two. Having a key is progress, and it used to look identical to
+/// having none. And "Not working" is the one chip that is also a button: the test that
+/// produced it may have hit a network that blinked, and the retry belongs on the verdict
+/// rather than on a Test button that would otherwise sit there for every other state too.
+struct ProviderBadge: View {
+    let id: String
+    let providers: ProviderStore
+    let dictation: DictationCoordinator
+
+    var body: some View {
+        if dictation.testingProviderID == id {
+            StatusChip(title: "Testing", level: .waiting)
+        } else {
+            switch providers.state(for: id).verification {
+            case .working(let latency, _):
+                StatusChip(
+                    title: "Working · \(String(format: "%.1fs", latency))", level: .ok
+                )
+            case .failed:
+                Button { dictation.testProvider(id) } label: {
+                    StatusChip(title: "Not working · Retry", level: .bad)
+                }
+                .buttonStyle(.plain)
+                .disabled(dictation.testingProviderID != nil)
+                .help("Test this provider again")
+            case .untested:
+                if providers.isUsable(id) {
+                    StatusChip(title: "Not tested", level: .waiting)
+                } else {
+                    StatusChip(
+                        title: ProviderCatalog.entry(id: id).requiresKey && !providers.hasKey(id)
+                            ? "No key" : "Not set up",
+                        level: .bad
+                    )
+                }
+            }
+        }
     }
 }

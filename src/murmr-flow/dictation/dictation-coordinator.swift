@@ -27,7 +27,9 @@ final class DictationCoordinator {
         case transcribing
         case cleaning
         case injecting
-        case failed(String)
+        /// Which part broke, and the sentence for Home. The kind is decided here, where
+        /// the failure is seen, so the pill never has to guess it from the words.
+        case failed(FailureKind, String)
 
         var isRecording: Bool { self == .recording }
         var isBusy: Bool {
@@ -52,7 +54,7 @@ final class DictationCoordinator {
         /// away, so a failure showed a bare "Failed" with nothing actionable.
         var detail: String? {
             switch self {
-            case .failed(let message): message
+            case .failed(_, let message): message
             default: nil
             }
         }
@@ -77,9 +79,17 @@ final class DictationCoordinator {
         let finalText: String
         let usedRawFallback: Bool
         let note: String?
+        /// The text never reached the app in front — Accessibility gone, a secure field,
+        /// a window that refused it. It is on the clipboard regardless; this is what lets
+        /// the pill say so.
+        let insertionFailed: Bool
         let targetApp: String?
         let timing: Timing
     }
+
+    /// How many dictations ended with nothing said. A count rather than a flag because
+    /// the pill has to tell the second one from the first; nothing else reads it.
+    private(set) var nothingHeardCount = 0
 
     private(set) var stage: Stage = .idle {
         didSet {
@@ -109,6 +119,9 @@ final class DictationCoordinator {
     /// Which provider is mid-test, if any. The *result* lives with the provider in
     /// `ProviderStore`, so it survives switching away and relaunching.
     private(set) var testingProviderID: String?
+    /// The provider asked for while another test was running. One slot: only the newest
+    /// request matters, because it describes the current configuration.
+    private var pendingTestID: String?
 
     /// Microphone loudness, 0…1, for the waveform.
     private(set) var micLevel: Float = 0
@@ -120,21 +133,26 @@ final class DictationCoordinator {
     let settings: SettingsStore
     let loader: SpeechModelLoader
 
-    private let recorder = MicRecorder()
+    private let recorder: any MicRecording
 
     /// Optional so the convenience initialiser used by tests need not build one.
     private let devices: AudioDeviceStore?
     /// Shared with meetings mode, so only one copy of the ~600 MB model is resident and
     /// the two never run inference over each other's decoder state.
-    private let transcriber: TranscriptionService
+    private let transcriber: any Transcribing
     let history: HistoryStore
     let prompts: PromptStore
     let providers: ProviderStore
     let dictionary: DictionaryStore
     let speech: SpeechModelStore
-    private let cleanup = CleanupService()
+    private let cleanup: any Cleaning
     private let hotkey = HotkeyMonitor()
-    private let media = MediaPlaybackController()
+    private let media: any MediaPausing
+    /// How finished text reaches the app in front. The real one pastes; a test's reads.
+    private let inject: @MainActor (String) throws -> Void
+    /// Tests only: the fake transcriber needs no model files, so the "is the model on
+    /// disk" gate would otherwise refuse every dictation before it began.
+    private let assumeModelsLoaded: Bool
     private static let mediaLog = Logger(subsystem: "app.murmr.MurmrFlow", category: "media")
     private var tickTask: Task<Void, Never>?
     private var previewTask: Task<Void, Never>?
@@ -159,14 +177,24 @@ final class DictationCoordinator {
     init(
         settings: SettingsStore = SettingsStore(),
         loader: SpeechModelLoader = SpeechModelLoader(),
-        transcriber: TranscriptionService = TranscriptionService(),
+        transcriber: any Transcribing = TranscriptionService(),
         history: HistoryStore = HistoryStore(),
         prompts: PromptStore = PromptStore(),
         providers: ProviderStore = ProviderStore(),
         speech: SpeechModelStore = SpeechModelStore(),
         dictionary: DictionaryStore = DictionaryStore(),
-        devices: AudioDeviceStore? = nil
+        devices: AudioDeviceStore? = nil,
+        recorder: any MicRecording = MicRecorder(),
+        cleanup: any Cleaning = CleanupService(),
+        media: any MediaPausing = MediaPlaybackController(),
+        inject: @escaping @MainActor (String) throws -> Void = TextInjector.inject,
+        assumeModelsLoaded: Bool = false
     ) {
+        self.recorder = recorder
+        self.cleanup = cleanup
+        self.media = media
+        self.inject = inject
+        self.assumeModelsLoaded = assumeModelsLoaded
         self.settings = settings
         self.loader = loader
         self.transcriber = transcriber
@@ -203,7 +231,7 @@ final class DictationCoordinator {
             hotkeyActive = true
         } catch {
             hotkeyActive = false
-            stage = .failed(error.localizedDescription)
+            stage = .failed(.speechModel, error.localizedDescription)
         }
     }
 
@@ -218,30 +246,34 @@ final class DictationCoordinator {
     func beginDictation() {
         guard !stage.isBusy else { return }
         guard !isSuspended else {
-            stage = .failed("A meeting is being recorded. Stop it first.")
+            stage = .failed(.microphone, "A meeting is being recorded. Stop it first.")
             return
         }
 
         // Refuse rather than downloading mid-dictation. Loading is kicked off at launch,
         // so this only fires if that hasn't finished — and holding the key through a
         // ~600 MB download would look like the app had hung.
-        if loader.models == nil {
+        if loader.models == nil, !assumeModelsLoaded {
             // A fast load deliberately shows no busy state, so check the flag too.
             if loader.isPreparing {
-                stage = .failed("The speech model is still getting ready.")
+                stage = .failed(.speechModel, "The speech model is still getting ready.")
                 return
             }
             switch loader.state {
             case .preparing:
-                stage = .failed("The speech model is still getting ready.")
+                stage = .failed(.speechModel, "The speech model is still getting ready.")
             case .downloading(let fraction):
-                stage = .failed("Still downloading the speech model — \(Int(fraction * 100))%.")
+                stage = .failed(
+                    .speechModel, "Still downloading the speech model — \(Int(fraction * 100))%."
+                )
             case .loading:
-                stage = .failed("The speech model is still loading.")
+                stage = .failed(.speechModel, "The speech model is still loading.")
             case .failed(let message):
-                stage = .failed(message)
+                stage = .failed(.speechModel, message)
             case .notLoaded, .ready:
-                stage = .failed("The speech model isn't loaded. Open Settings › Speech model.")
+                stage = .failed(
+                    .speechModel, "The speech model isn't loaded. Open Settings › Speech model."
+                )
                 Task { await warmUp() }
             }
             return
@@ -267,7 +299,8 @@ final class DictationCoordinator {
                 mediaPauseTask = Task { [media] in await media.pauseIfPlaying() }
             }
         } catch {
-            stage = .failed(error.localizedDescription)
+            // Only the recorder can throw here.
+            stage = .failed(.microphone, error.localizedDescription)
         }
     }
 
@@ -316,6 +349,7 @@ final class DictationCoordinator {
                 // Nothing was said. Deliberately *not* an early return: this used to
                 // `return` here, which skipped restoring paused music — so holding the
                 // key without speaking left playback paused for good.
+                nothingHeardCount += 1
                 stage = .idle
                 await restoreMedia()
                 return
@@ -342,17 +376,20 @@ final class DictationCoordinator {
                     // cost latency to show something that is about to be replaced.
                     outputLanguage: settings.dictationTargetLanguage
                 ),
-                dictionary: dictionary.entries(usedIn: .dictation)
+                dictionary: dictionary.entries(usedIn: .dictation),
+                timeout: CleanupService.dictationTimeout
             )
 
             stage = .injecting
             var note = outcome.note
+            var insertionFailed = false
             if deliversText {
                 do {
-                    try TextInjector.inject(outcome.text)
+                    try inject(outcome.text)
                 } catch {
                     // The text is on the clipboard either way — say so rather than
                     // pretending the dictation succeeded silently.
+                    insertionFailed = true
                     note = [note, error.localizedDescription]
                         .compactMap { $0 }
                         .joined(separator: " ")
@@ -364,6 +401,7 @@ final class DictationCoordinator {
                 finalText: outcome.text,
                 usedRawFallback: outcome.usedRawFallback,
                 note: note?.isEmpty == true ? nil : note,
+                insertionFailed: insertionFailed,
                 targetApp: targetApp?.localizedName,
                 timing: Timing(
                     audioDuration: transcription.audioDuration,
@@ -389,7 +427,12 @@ final class DictationCoordinator {
             )
             stage = .idle
         } catch {
-            stage = .failed(error.localizedDescription)
+            // Everything that can throw in the loop is capture, resampling or the model;
+            // clean-up and insertion never throw, they leave a note on the run instead.
+            stage = .failed(
+                error is MicRecorder.RecorderError ? .microphone : .speechModel,
+                error.localizedDescription
+            )
         }
 
         // Always restore, including on the failure paths above.
@@ -468,16 +511,45 @@ final class DictationCoordinator {
     ///
     /// Only possible because the raw transcript is kept. Before, changing a prompt and
     /// wanting the old text through it meant saying the whole thing again.
-    func rerunCleanup(on record: DictationRecord) async {
-        guard settings.cleanupEnabled, let config = providers.activeConfig else { return }
+    /// Why Re-run cannot run right now, or nil when it can. The view disables the button
+    /// with this as its tooltip; it used to be live in exactly the cases where pressing it
+    /// did nothing.
+    var rerunBlocker: String? {
+        if !settings.cleanupEnabled { return "Clean-up is off for dictation" }
+        if !providers.isUsable(providers.activeID) { return "No AI is connected" }
+        return nil
+    }
+
+    /// Cleans a past dictation up again with the current style, and says why if it could
+    /// not.
+    ///
+    /// The same context as the first run — the app it went to, the output language, the
+    /// dictionary — so a translated dictation re-run comes back translated. It used to
+    /// rebuild the prompt from the transcript alone, which replaced a French-to-English
+    /// dictation with the untranslated text and no way back. And the record is replaced
+    /// only when the clean-up actually ran: a fallback would overwrite good text with the
+    /// raw transcript it was made from.
+    @discardableResult
+    func rerunCleanup(on record: DictationRecord) async -> String? {
+        if let blocker = rerunBlocker { return blocker }
+        guard let config = providers.activeConfig else { return "No AI is connected" }
 
         let outcome = await cleanup.clean(
             transcript: record.rawText,
             config: config,
             prompt: PromptLibrary(template: prompts.dictationPrompt.template),
-            context: PromptLibrary.Context(transcript: record.rawText),
-            dictionary: dictionary.entries(usedIn: .dictation)
+            context: PromptLibrary.Context(
+                transcript: record.rawText,
+                frontmostApp: record.targetBundleID,
+                outputLanguage: settings.dictationTargetLanguage
+            ),
+            dictionary: dictionary.entries(usedIn: .dictation),
+            timeout: CleanupService.dictationTimeout
         )
+
+        guard !outcome.usedRawFallback else {
+            return outcome.note ?? "The AI didn\u{2019}t reply, so the text is unchanged."
+        }
 
         history.replace(
             DictationRecord(
@@ -486,12 +558,13 @@ final class DictationCoordinator {
                 audioDuration: record.audioDuration,
                 rawText: record.rawText,
                 finalText: outcome.text,
-                usedRawFallback: outcome.usedRawFallback,
+                usedRawFallback: false,
                 promptName: prompts.dictationPrompt.name,
                 targetAppName: record.targetAppName,
                 targetBundleID: record.targetBundleID
             )
         )
+        return nil
     }
 
     // MARK: - Provider test
@@ -502,8 +575,16 @@ final class DictationCoordinator {
     /// Takes an id so a provider can be proved without being made active — setting up a
     /// second endpoint used to mean switching to it first, which took the working one out
     /// of service to try an untested one.
+    ///
+    /// Tests are run by every change that could alter the answer — a key, a model, an
+    /// endpoint — so two can be asked for faster than one finishes. The second waits, and
+    /// only the newest waits: five quick edits produce two tests, not five, and the last
+    /// one is about what is configured now.
     func testProvider(_ id: String) {
-        guard testingProviderID == nil else { return }
+        guard testingProviderID == nil else {
+            pendingTestID = id
+            return
+        }
         guard let config = providers.config(for: id) else {
             providers.setVerification(.failed("No endpoint or model is set."), for: id)
             return
@@ -511,7 +592,13 @@ final class DictationCoordinator {
         testingProviderID = id
 
         Task { @MainActor in
-            defer { testingProviderID = nil }
+            defer {
+                testingProviderID = nil
+                if let next = pendingTestID {
+                    pendingTestID = nil
+                    testProvider(next)
+                }
+            }
 
             let clock = ContinuousClock()
             let started = clock.now
@@ -521,7 +608,9 @@ final class DictationCoordinator {
                 transcript: probe,
                 config: config,
                 prompt: PromptLibrary(template: prompts.dictationPrompt.template),
-                context: PromptLibrary.Context(transcript: probe)
+                context: PromptLibrary.Context(transcript: probe),
+                dictionary: [],
+                timeout: CleanupService.dictationTimeout
             )
 
             // `clean` never throws by design — it falls back to the raw text and says why.

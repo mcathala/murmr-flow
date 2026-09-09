@@ -21,8 +21,15 @@ final class NoteStore {
     /// Newest first.
     private(set) var notes: [NoteFile] = []
 
-    init() {
-        Self.adoptLegacyFolder()
+    /// Where this store reads and writes. The app's is `defaultFolder`; a test's is a
+    /// scratch directory, which is what lets saving, renaming and deleting be exercised
+    /// without touching anyone's real notes.
+    let folder: URL
+
+    init(folder: URL? = nil) {
+        self.folder = folder ?? Self.defaultFolder
+        // Only the real folder has a past to adopt.
+        if folder == nil { Self.adoptLegacyFolder() }
         reload()
     }
 
@@ -32,7 +39,7 @@ final class NoteStore {
     /// One flat folder rather than `MurmurNotes/Meetings`: the folder is already named
     /// for what it holds, so a nested folder with one thing in it is a level to click
     /// through for nothing.
-    static var folder: URL {
+    static var defaultFolder: URL {
         documentsFolder.appendingPathComponent("MurmurNotes", isDirectory: true)
     }
 
@@ -61,7 +68,7 @@ final class NoteStore {
     ) {
         let manager = FileManager.default
         let legacy = legacy ?? legacyFolder
-        let destination = destination ?? folder
+        let destination = destination ?? defaultFolder
         guard let names = try? manager.contentsOfDirectory(atPath: legacy.path) else { return }
 
         for name in names where name.hasSuffix(".md") {
@@ -107,7 +114,6 @@ final class NoteStore {
     // MARK: - Reading
 
     func reload() {
-        let folder = Self.folder
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else {
             notes = []
             return
@@ -143,7 +149,7 @@ final class NoteStore {
     @discardableResult
     func save(_ transcript: MeetingTranscript) throws -> NoteFile {
         try FileManager.default.createDirectory(
-            at: Self.folder, withIntermediateDirectories: true
+            at: folder, withIntermediateDirectories: true
         )
 
         let url = uniqueURL(for: transcript.startedAt)
@@ -214,9 +220,9 @@ final class NoteStore {
 
     func openFolder() {
         try? FileManager.default.createDirectory(
-            at: Self.folder, withIntermediateDirectories: true
+            at: folder, withIntermediateDirectories: true
         )
-        NSWorkspace.shared.open(Self.folder)
+        NSWorkspace.shared.open(folder)
     }
 
     // MARK: - Naming
@@ -229,13 +235,13 @@ final class NoteStore {
     /// usable in a filename.
     private func uniqueURL(for date: Date) -> URL {
         let base = Self.fileFormatter.string(from: date)
-        var candidate = Self.folder.appendingPathComponent("\(base) Meeting.md")
+        var candidate = folder.appendingPathComponent("\(base) Meeting.md")
 
         // Two meetings inside one minute is unlikely but not impossible, and silently
         // overwriting a note would be the worst failure available here.
         var suffix = 2
         while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = Self.folder.appendingPathComponent("\(base) Meeting \(suffix).md")
+            candidate = folder.appendingPathComponent("\(base) Meeting \(suffix).md")
             suffix += 1
         }
         return candidate

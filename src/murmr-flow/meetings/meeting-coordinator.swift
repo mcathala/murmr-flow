@@ -22,7 +22,9 @@ final class MeetingCoordinator {
         case recording
         case transcribing(TranscribeStep)
         case saved
-        case failed(String)
+        /// Which part broke, and the sentence for the window. Decided here, where the
+        /// failure is seen, so the pill never has to guess it from the words.
+        case failed(FailureKind, String)
 
         var isRecording: Bool { self == .recording }
 
@@ -83,14 +85,36 @@ final class MeetingCoordinator {
             switch self {
             case .noAudio:
                 "No audio was captured. Check that Murmr Flow is allowed under Privacy & "
-                    + "Security \u{203A} System Audio Recording, and that a microphone is "
-                    + "connected."
+                    + "Security \u{203A} \(SystemSettingsPane.systemAudio), and that a "
+                    + "microphone is connected."
             case .systemCaptureFailed:
                 "System audio capture failed — the recording never received a single "
                     + "frame of what the Mac was playing. Nothing was wrong with the "
                     + "meeting; the tap did not run. Try recording again."
             }
         }
+
+        var kind: FailureKind {
+            switch self {
+            case .noAudio: .microphone
+            case .systemCaptureFailed: .systemAudio
+            }
+        }
+    }
+
+    /// Wraps a failure from writing the note file, so the catch below can tell "the model
+    /// failed" from "the disk did" — the words are the same shape, the remedy is not.
+    private struct SaveError: Error {
+        let underlying: Error
+    }
+
+    /// Which part an error belongs to. Our own errors say; anything from the system-audio
+    /// tap is that grant; the recorder's are the microphone; the rest is the model.
+    private static func kind(of error: Error) -> FailureKind {
+        if let ours = error as? RecordingError { return ours.kind }
+        if error is SystemAudioRecorder.RecorderError { return .systemAudio }
+        if error is MeetingRecorder.RecorderError { return .microphone }
+        return .speechModel
     }
 
     private static let log = Logger(subsystem: "app.murmr.MurmrFlow", category: "meetings")
@@ -116,27 +140,41 @@ final class MeetingCoordinator {
     var onRecordingChange: (@MainActor (Bool) -> Void)?
 
     private let loader: SpeechModelLoader
-    private let transcriber: TranscriptionService
+    private let transcriber: any Transcribing
     private let notes: NoteStore
     private let settings: SettingsStore
     private let prompts: PromptStore
     private let providers: ProviderStore
     private let dictionary: DictionaryStore
-    private let devices: AudioDeviceStore
-    private let recorder = MeetingRecorder()
-    private let cleanup = CleanupService()
+    private let devices: AudioDeviceStore?
+    private let recorder: any MeetingRecording
+    private let cleanup: any Cleaning
+    /// Reads a recorded stream back as samples. The real one opens a wav file; a test's
+    /// hands back whatever the fake recorder "recorded".
+    private let readSamples: @Sendable (URL) throws -> [Float]
+    /// Tests only: the fake transcriber needs no model files, so the "is the model on
+    /// disk" gate would otherwise refuse every meeting before it began.
+    private let assumeModelsLoaded: Bool
     private var tickTask: Task<Void, Never>?
 
     init(
         loader: SpeechModelLoader,
-        transcriber: TranscriptionService,
+        transcriber: any Transcribing,
         notes: NoteStore,
         settings: SettingsStore,
         prompts: PromptStore,
         providers: ProviderStore,
         dictionary: DictionaryStore,
-        devices: AudioDeviceStore
+        devices: AudioDeviceStore?,
+        recorder: any MeetingRecording = MeetingRecorder(),
+        cleanup: any Cleaning = CleanupService(),
+        readSamples: @escaping @Sendable (URL) throws -> [Float] = AudioFileReader.samples(at:),
+        assumeModelsLoaded: Bool = false
     ) {
+        self.recorder = recorder
+        self.cleanup = cleanup
+        self.readSamples = readSamples
+        self.assumeModelsLoaded = assumeModelsLoaded
         self.loader = loader
         self.transcriber = transcriber
         self.notes = notes
@@ -164,8 +202,8 @@ final class MeetingCoordinator {
 
         // Refuse rather than downloading mid-meeting. Otherwise the user records for an
         // hour and only then discovers there is no model to transcribe it with.
-        guard loader.models != nil else {
-            stage = .failed(modelNotReadyMessage())
+        guard loader.models != nil || assumeModelsLoaded else {
+            stage = .failed(.speechModel, modelNotReadyMessage())
             if !loader.isPreparing { Task { await loader.prepare() } }
             return
         }
@@ -173,14 +211,14 @@ final class MeetingCoordinator {
         do {
             // Read the choice at the moment of recording rather than holding it, so
             // picking a different microphone takes effect on the very next take.
-            recorder.inputDeviceID = devices.selectedInputDeviceID
+            recorder.inputDeviceID = devices?.selectedInputDeviceID
             try recorder.start()
             elapsed = 0
             stage = .recording
             startTicking()
             onRecordingChange?(true)
         } catch {
-            stage = .failed(error.localizedDescription)
+            stage = .failed(Self.kind(of: error), error.localizedDescription)
         }
     }
 
@@ -188,7 +226,7 @@ final class MeetingCoordinator {
         stopTicking()
         guard let recording = recorder.stop() else {
             onRecordingChange?(false)
-            stage = .failed("Nothing was recorded.")
+            stage = .failed(.microphone, "Nothing was recorded.")
             return
         }
         onRecordingChange?(false)
@@ -201,8 +239,8 @@ final class MeetingCoordinator {
             // Each side is read on its own. One stream can legitimately be empty — a
             // meeting where you never spoke, or a muted microphone — and that must not
             // cost the other half of the transcript.
-            let yourSamples = (try? AudioFileReader.samples(at: recording.you)) ?? []
-            let theirSamples = (try? AudioFileReader.samples(at: recording.them)) ?? []
+            let yourSamples = (try? readSamples(recording.you)) ?? []
+            let theirSamples = (try? readSamples(recording.them)) ?? []
             guard !yourSamples.isEmpty || !theirSamples.isEmpty else {
                 throw RecordingError.noAudio
             }
@@ -232,7 +270,12 @@ final class MeetingCoordinator {
             let (transcript, cleanupNote) = await cleaned(woven)
 
             stage = .transcribing(.writing)
-            let saved = try notes.save(transcript)
+            let saved: NoteFile
+            do {
+                saved = try notes.save(transcript)
+            } catch {
+                throw SaveError(underlying: error)
+            }
 
             lastResult = Result(
                 transcript: transcript,
@@ -244,8 +287,11 @@ final class MeetingCoordinator {
             Self.log.notice(
                 "meeting saved: \(transcript.utterances.count, privacy: .public) utterances"
             )
+        } catch let save as SaveError {
+            stage = .failed(.notes, save.underlying.localizedDescription)
+            Self.log.error("meeting failed: \(save.underlying.localizedDescription, privacy: .public)")
         } catch {
-            stage = .failed(error.localizedDescription)
+            stage = .failed(Self.kind(of: error), error.localizedDescription)
             Self.log.error("meeting failed: \(error.localizedDescription, privacy: .public)")
         }
 
@@ -291,7 +337,8 @@ final class MeetingCoordinator {
                 transcript: "",  // filled in per batch
                 outputLanguage: settings.notetakerTargetLanguage
             ),
-            dictionary: dictionary.entries(usedIn: .notetaker)
+            dictionary: dictionary.entries(usedIn: .notetaker),
+            timeout: CleanupService.noteTimeout
         )
 
         guard !outcome.usedRawFallback else { return (transcript, outcome.note) }
@@ -364,12 +411,4 @@ final class MeetingCoordinator {
 
     func openNotesFolder() { notes.openFolder() }
 
-    /// Opens the pane holding the System Audio Recording toggle, for when the tap was
-    /// refused. There is no API to grant it and no notification when it changes.
-    func openSystemAudioSettings() {
-        guard let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture"
-        ) else { return }
-        NSWorkspace.shared.open(url)
-    }
 }

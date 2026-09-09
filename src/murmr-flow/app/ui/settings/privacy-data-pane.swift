@@ -46,9 +46,11 @@ struct PrivacyDataPane: View {
             SectionLabel(title: "Where notes are saved")
             notesFolder
 
+            // Named for both things the button takes: it used to sit under "History"
+            // and only the dialog admitted the notes went too.
             HStack(spacing: 10) {
-                SectionLabel(title: "History")
-                Button("Delete all", role: .destructive) { pending = .everything }
+                SectionLabel(title: "History & notes")
+                Button("Delete everything", role: .destructive) { pending = .everything }
                     .controlSize(.small)
                     .disabled(isEmpty)
                 Spacer(minLength: 0)
@@ -103,7 +105,7 @@ struct PrivacyDataPane: View {
                 // clipboard fallback is explained where it happens, not here.
                 WarningRow(
                     message: "Accessibility is off. The hotkey won\u{2019}t fire.",
-                    action: ("Allow", { permissions.openAccessibilitySettings() })
+                    action: ("Allow", { permissions.requestAccessibility() })
                 )
             }
             if permissions.microphone != .granted {
@@ -152,7 +154,7 @@ struct PrivacyDataPane: View {
     private var notesFolder: some View {
         Card {
             HStack(spacing: 10) {
-                Text(NoteStore.folder.path(percentEncoded: false))
+                Text(notes.folder.path(percentEncoded: false))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)

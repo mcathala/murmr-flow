@@ -149,7 +149,9 @@ struct DetailGrid<Content: View>: View {
     }
 }
 
-/// A dot and a word. Green means tested and working — not merely configured.
+/// A dot and a word. Green means tested and working — not merely configured. Red means
+/// something to fix; it was gold, which is the colour the app gives to the *chosen* thing,
+/// so a broken provider and a selected style lit the same way.
 struct StatusChip: View {
     enum Level {
         case ok, waiting, bad
@@ -158,7 +160,7 @@ struct StatusChip: View {
             switch self {
             case .ok: Theme.Palette.ok
             case .waiting: Theme.Palette.faint
-            case .bad: Theme.Palette.gold
+            case .bad: Theme.Palette.danger
             }
         }
     }
@@ -380,6 +382,62 @@ struct Monogram: View {
     }
 }
 
+/// A clean-up provider's own mark in the tile the monogram used, or the monogram when
+/// there is none. Custom is a generic server, so it gets the symbol for one.
+///
+/// Two letters told nobody which was which — "oc", "op", "gg" — where the marks are
+/// recognised at a glance. The files travel in the bundle under `Resources/Providers`; a
+/// build without them, or a test with no bundle, falls back to the letters.
+struct ProviderMark: View {
+    let entry: ProviderCatalog.Entry
+    var size: CGFloat = 26
+
+    var body: some View {
+        if let image = Self.image(for: entry) {
+            if entry.logoIsTile {
+                // The mark brings its own ground, so it is the whole tile.
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            } else {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: size - 9, height: size - 9)
+                    .frame(width: size, height: size)
+                    .glass(.thin, radius: 7, elevated: false)
+            }
+        } else if entry.requiresCustomBaseURL {
+            Image(systemName: "server.rack")
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: size, height: size)
+                .glass(.thin, radius: 7, elevated: false)
+                .foregroundStyle(Theme.Palette.muted)
+        } else {
+            Monogram(name: entry.displayName)
+        }
+    }
+
+    /// Loaded once per file. `NSImage` reads SVG and PNG alike on macOS 11 and later.
+    @MainActor private static var cache: [String: NSImage] = [:]
+
+    @MainActor
+    static func image(for entry: ProviderCatalog.Entry) -> NSImage? {
+        guard let logo = entry.logo else { return nil }
+        if let cached = cache[logo] { return cached }
+        guard let url = Bundle.main.resourceURL?
+                .appendingPathComponent("Providers", isDirectory: true)
+                .appendingPathComponent(logo),
+              let image = NSImage(contentsOf: url)
+        else { return nil }
+        cache[logo] = image
+        return image
+    }
+}
+
 /// An app's real icon where we can get it, a monogram where we can't.
 ///
 /// For apps on this Mac the icon is free and always current — macOS resolves it from the
@@ -437,6 +495,7 @@ struct RemovableChips: View {
 struct SuggestionChips: View {
     let items: [String]
     var current: String?
+    var help = "Use this model"
     let onPick: (String) -> Void
 
     var body: some View {
@@ -462,7 +521,7 @@ struct SuggestionChips: View {
                 .foregroundStyle(
                     item == current ? Theme.Palette.text : Theme.Palette.muted
                 )
-                .help("Use this model")
+                .help(help)
             }
         }
     }

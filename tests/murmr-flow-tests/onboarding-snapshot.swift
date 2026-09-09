@@ -35,9 +35,21 @@ struct OnboardingSnapshotTests {
         while true {
             try write(
                 OnboardingView(services: services),
-                as: "onboarding-\(flow.step.number)-\(flow.step)",
+                as: "onboarding-\(flow.position)-\(flow.step)",
                 in: directory
             )
+            // The pause after declining the AI, then back to the page it interrupts. Only
+            // the first decline is driven: the second one can finish the flow, and a
+            // finished flow would write completion into the runner's defaults.
+            if flow.step == .connectAI {
+                flow.declineAI()
+                try write(
+                    OnboardingView(services: services),
+                    as: "onboarding-\(flow.position)-\(flow.step)",
+                    in: directory
+                )
+                flow.back()
+            }
             guard flow.step != .tryIt else { break }
             flow.advance()
         }

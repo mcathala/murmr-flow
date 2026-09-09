@@ -56,8 +56,7 @@ final class PermissionManager {
     }
 
     func openSystemAudioSettings() {
-        // The audio-only grant lives in the Screen & System Audio Recording pane.
-        open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        open(SystemSettingsPane.systemAudioURL)
     }
 
     private static func microphoneState() -> PermissionState {
@@ -101,11 +100,44 @@ final class PermissionManager {
     /// `promptAccessibility()` stays as the fallback for a machine where this does not
     /// list the app; the dialog is guaranteed to.
     func requestAccessibility() {
+        if dropStaleAccessibilityEntries() {
+            // After a reset the quiet ask does not put the app back in the list — seen
+            // once, with the row simply gone. Apple's dialog always does, so take it.
+            promptAccessibility()
+            openAccessibilitySettings()
+            return
+        }
         var value: CFTypeRef?
         _ = AXUIElementCopyAttributeValue(
             AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &value
         )
         openAccessibilitySettings()
+    }
+
+    /// Ad-hoc builds only. TCC tells one build from the next by its code hash, and an
+    /// ad-hoc hash changes on every build — so the Accessibility list fills with rows for
+    /// builds that no longer exist, all named Murmr Flow, and the toggle the person flips
+    /// belongs to one of them. That was a real afternoon lost: switched off, switched on,
+    /// still "Not granted". Clearing our own bundle's entries first means the one row that
+    /// appears is this build's. A signed build never has the problem and is left alone;
+    /// `tccutil` needs no privileges for the calling app's own identifier.
+    @discardableResult
+    private func dropStaleAccessibilityEntries() -> Bool {
+        guard SigningInfo.current().isAdHoc,
+              let bundleID = Bundle.main.bundleIdentifier else { return false }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", "Accessibility", bundleID]
+        process.standardOutput = nil
+        process.standardError = nil
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            // Nothing lost: the warning row in onboarding still explains the manual way.
+            return false
+        }
     }
 
     // MARK: - Deep links
@@ -133,9 +165,13 @@ final class PermissionManager {
         // is how the first version of this fix managed to fix nothing. The entitlement
         // would cost its own "wants to control System Settings" prompt; a plain kill costs
         // neither, and waits for the corpse before opening so the URL cannot reanimate it.
+        //
+        // Not when System Settings is already in front, though: then the person is
+        // looking at it, on this Space, and killing the window under them to bring it
+        // back is worse than the pane switching in place.
         let running = NSRunningApplication.runningApplications(
             withBundleIdentifier: "com.apple.systempreferences"
-        )
+        ).filter { !$0.isActive }
         running.forEach { _ = $0.forceTerminate() }
         Task { @MainActor in
             for _ in 0..<10 where running.contains(where: { !$0.isTerminated }) {

@@ -36,6 +36,40 @@ struct PromptRowsSnapshotTests {
         else { return }
         try png.write(to: URL(fileURLWithPath: directory).appendingPathComponent("prompts.png"))
 
+        // The pane's header row above the rows, so the two pills can be seen lined up with
+        // the rows' — that alignment is the reason they are pills. Composed here rather
+        // than rendering `AICleanupPane`: `ImageRenderer` draws a `ScrollView` as nothing.
+        let pane = VStack(alignment: .leading, spacing: 14) {
+            SettingRow(title: "Activate for") {
+                HStack(spacing: 8) {
+                    AssignmentToggle(
+                        title: "Dictation", symbol: "mic.fill", isOn: true, togglesOff: true
+                    ) {}
+                    AssignmentToggle(
+                        title: "Notetaker", symbol: "text.document", isOn: false, togglesOff: true
+                    ) {}
+                    Button("Edit") {}.controlSize(.small).hidden()
+                }
+            }
+            PromptsSection(prompts: prompts)
+        }
+        .frame(width: 640)
+        .padding(24)
+        .background(Theme.Palette.deep)
+        .font(Theme.Text.body)
+        .foregroundStyle(Theme.Palette.text)
+        .tint(Theme.Palette.gold)
+        let paneRenderer = ImageRenderer(content: pane.environment(\.colorScheme, .dark))
+        paneRenderer.scale = 2
+        if let image = paneRenderer.nsImage,
+           let tiff = image.tiffRepresentation,
+           let bitmap = NSBitmapImageRep(data: tiff),
+           let png = bitmap.representation(using: .png, properties: [:]) {
+            try png.write(
+                to: URL(fileURLWithPath: directory).appendingPathComponent("ai-cleanup.png")
+            )
+        }
+
         // The shipped wording as the model receives it, one file each, for reading.
         for preset in PromptStore.builtIns {
             let rendered = PromptLibrary(template: preset.template)

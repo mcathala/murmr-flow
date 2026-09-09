@@ -11,6 +11,12 @@ struct MurmrFlowApp: App {
 
     private var services: AppServices { AppServices.shared }
 
+    init() {
+        // Before `AppServices.shared` exists: its stores read their defaults as they are
+        // made, so a wipe after that would be a wipe of nothing.
+        FreshStart.applyIfRequested()
+    }
+
     var body: some Scene {
         // A window as well as a menu-bar item. On a notched MacBook with a busy menu bar,
         // new items land in the hidden overflow region and are simply invisible; with

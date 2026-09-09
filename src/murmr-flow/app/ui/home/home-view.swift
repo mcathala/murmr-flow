@@ -48,7 +48,13 @@ struct HomeView: View {
     private var status: some View {
         HStack(spacing: 8) {
             StatusChip(title: "Speech model", level: speechModelLevel)
-            StatusChip(title: "AI provider", level: aiProviderLevel)
+            // Switched off on purpose is a choice, not a state to worry about, so the
+            // chip says which rather than going amber over a configured-nothing.
+            if services.settings.cleanupEnabled {
+                StatusChip(title: "AI provider", level: aiProviderLevel)
+            } else {
+                StatusChip(title: "Clean-up off", level: .waiting)
+            }
             Spacer(minLength: 0)
         }
     }
@@ -66,7 +72,6 @@ struct HomeView: View {
     }
 
     private var aiProviderLevel: StatusChip.Level {
-        guard services.settings.cleanupEnabled else { return .waiting }
         let providers = services.providers
         switch providers.state(for: providers.activeID).verification {
         case .working: return .ok
@@ -84,17 +89,15 @@ struct HomeView: View {
             && !services.providers.isUsable(services.providers.activeID)
     }
 
+    /// Faults that are Home's to report. A missing permission is not one any more: the
+    /// window shows that above every section, so it is seen wherever you are.
     private var trouble: (message: String, action: (title: String, run: () -> Void))? {
-        if services.permissions.accessibility != .granted {
+        if services.permissions.allGranted, !services.dictation.hotkeyActive {
+            // The button does what the sentence says. It used to say "Restart" over a
+            // button that only quit.
             return (
-                "Accessibility is off, so your hotkey won't fire.",
-                ("Allow", { services.permissions.openAccessibilitySettings() })
-            )
-        }
-        if !services.dictation.hotkeyActive {
-            return (
-                "The hotkey watcher isn't running. Restart Murmr Flow.",
-                ("Quit", { NSApplication.shared.terminate(nil) })
+                "The hotkey watcher isn't running. Quit and reopen Murmr Flow.",
+                ("Quit and reopen", { services.relaunch() })
             )
         }
         if case .failed(let message) = services.dictation.loader.state {
@@ -174,7 +177,8 @@ struct HomeView: View {
 
         if items.isEmpty {
             Card {
-                Text("Hold your hotkey and speak, or start a meeting from the toolbar.")
+                Text("\(services.settings.hotkeyPhrase) and speak, or open Notetaker and "
+                     + "press Start.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -183,7 +187,14 @@ struct HomeView: View {
                 VStack(spacing: 0) {
                     ForEach(items) { item in
                         Button {
-                            onOpen(item.isNote ? .notetaker : .dictation)
+                            // A note opens as the note, the way the menu bar's rows
+                            // already did; a row that only opened the section it lives in
+                            // made you find it twice.
+                            if let note = item.note {
+                                services.notes.open(note)
+                            } else {
+                                onOpen(.dictation)
+                            }
                         } label: {
                             HStack(spacing: 10) {
                                 if let bundleID = item.bundleID,
@@ -231,6 +242,8 @@ struct RecentItem: Identifiable {
     /// Set for dictations that went somewhere identifiable, so the row can carry that
     /// app's own icon instead of a generic microphone.
     var bundleID: String?
+    /// The file itself, for notes, so the row can open it rather than the section.
+    var note: NoteFile?
 
     static func merge(
         dictations: [DictationRecord], notes: [NoteFile], limit: Int
@@ -258,7 +271,8 @@ struct RecentItem: Identifiable {
                 title: $0.title,
                 subtitle: "\(Self.when($0.date)) · \(MeetingTranscript.clock($0.duration))",
                 symbol: "text.document",
-                isNote: true
+                isNote: true,
+                note: $0
             )
         }
 

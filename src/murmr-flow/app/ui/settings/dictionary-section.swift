@@ -82,6 +82,12 @@ struct DictionarySection: View {
         open = nil
     }
 
+    private func toggle(_ entry: DictionaryEntry) {
+        let wasOpen = open == entry.id
+        close()
+        if !wasOpen { open = entry.id }
+    }
+
     // MARK: - One entry
 
     private func card(_ entry: DictionaryEntry) -> some View {
@@ -95,12 +101,13 @@ struct DictionarySection: View {
 
                     Badge(text: entry.scope.label, symbol: symbol(entry.scope))
 
-                    Button(isOpen ? "Done" : "Edit") {
-                        close()
-                        if !isOpen { open = entry.id }
-                    }
-                    .controlSize(.small)
+                    Button(isOpen ? "Done" : "Edit") { toggle(entry) }
+                        .controlSize(.small)
                 }
+                // The whole header opens the editor, the same gesture as a style row or a
+                // provider row. The badge is not a button, so it is part of the target.
+                .contentShape(Rectangle())
+                .onTapGesture { toggle(entry) }
 
                 if isOpen { editor(entry) }
             }

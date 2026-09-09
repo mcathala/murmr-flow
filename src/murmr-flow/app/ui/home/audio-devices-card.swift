@@ -104,8 +104,15 @@ struct AudioDevicesCard: View {
                 .foregroundStyle(Theme.Palette.muted)
                 .frame(width: 16)
 
-            // "Speaker", as people call the thing — "Output" is the audio stack's word.
-            Text("Speaker").font(Theme.Text.bodyStrong)
+            // Picking one here moves the Mac's own default output, not a setting of this
+            // app's — so the row says whose setting it is rather than leaving that to be
+            // discovered when the music moves.
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Mac output").font(Theme.Text.bodyStrong)
+                Text("Changes your Mac\u{2019}s sound output.")
+                    .font(Theme.Text.small)
+                    .foregroundStyle(Theme.Palette.faint)
+            }
 
             Spacer(minLength: 8)
 

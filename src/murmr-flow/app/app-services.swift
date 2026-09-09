@@ -18,7 +18,11 @@ final class AppServices {
 
     /// Which section the window is showing. Held here rather than as view state so the
     /// menu bar and the ⌘, shortcut can move it from outside the view.
-    var route: MainWindow.Route = .home
+    var route: MainWindow.Route = .home {
+        didSet {
+            if case .settings(let pane) = route { lastSettingsPane = pane }
+        }
+    }
 
     /// Where leaving Settings returns you.
     ///
@@ -82,17 +86,21 @@ final class AppServices {
         // stored property has been set, and this one is being set.
         let permissions = self.permissions
         let speech = self.speech
+        let providers = self.providers
         onboarding = OnboardingCoordinator { step in
             switch step {
             case .language: SpeechModelLoader.isDownloaded(speech.activeModel)
             // Pages that carry a grant are satisfied by it — which is what lets a fully
             // set-up machine skip the whole flow. The microphone lives on Try It: the
-            // first dictation is the first thing that needs it.
+            // first dictation is the first thing that needs it. Or on its own page, when
+            // Try it was given up along with the AI.
             case .howItWorks: permissions.accessibility == .granted
             case .systemAudio: permissions.systemAudio == .granted
-            case .tryIt: permissions.microphone == .granted
+            case .tryIt, .microphone: permissions.microphone == .granted
+            // Connected means proved: a pasted key that never answered is not one.
+            case .connectAI: providers.activeState.verification.isWorking
             // Nothing to check: these are there to be read or done, not verified.
-            case .underTheHood, .style: false
+            case .underTheHood, .style, .withoutAI: false
             }
         }
     }
@@ -112,13 +120,42 @@ final class AppServices {
     /// Enters Settings, remembering what to come back to. Re-entering from inside Settings
     /// leaves that memory alone, or moving between two panes would make Home the only way
     /// out of every one of them.
-    func openSettings(_ pane: SettingsPane = .speechModel) {
+    ///
+    /// With no pane named, it opens the one you were in last — across launches. ⌘, and
+    /// the menu bar used to land on Speech model every time, so a setting you kept
+    /// returning to cost a second click each visit.
+    func openSettings(_ pane: SettingsPane? = nil) {
         if !route.isSettings { routeBeforeSettings = route }
-        route = .settings(pane)
+        route = .settings(pane ?? lastSettingsPane)
     }
 
     func closeSettings() {
         route = routeBeforeSettings
+    }
+
+    private static let lastPaneKey = "settings.lastPane"
+
+    /// The pane Settings opens on when none is asked for. Written whenever a pane is
+    /// shown, so the sidebar rows and ⌘, agree on what "last" means.
+    private var lastSettingsPane: SettingsPane {
+        get {
+            UserDefaults.standard.string(forKey: Self.lastPaneKey)
+                .flatMap(SettingsPane.init(rawValue:)) ?? .speechModel
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: Self.lastPaneKey) }
+    }
+
+    /// Quits and comes back. `open` is asked to relaunch the bundle after a beat, from a
+    /// shell that outlives this process, so the new instance starts once this one is
+    /// gone rather than beside it.
+    func relaunch() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [
+            "-c", "sleep 1; /usr/bin/open \"\(Bundle.main.bundlePath)\"",
+        ]
+        try? process.run()
+        NSApplication.shared.terminate(nil)
     }
 
     // MARK: - Launch

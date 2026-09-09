@@ -56,7 +56,7 @@ struct OnboardingTests {
         let flow = make(world)
         flow.begin()
         #expect(flow.step == .language)
-        #expect(flow.total == 6)
+        #expect(flow.total == 7)
     }
 
     /// System audio is the one ask with a page of its own, so it is the one page a
@@ -68,7 +68,7 @@ struct OnboardingTests {
         let flow = make(world)
         flow.begin()
         #expect(flow.step == .language)
-        #expect(flow.total == 5)
+        #expect(flow.total == 6)
         #expect(!flow.plan.contains(.systemAudio))
     }
 
@@ -81,7 +81,7 @@ struct OnboardingTests {
         flow.begin()
         #expect(flow.step == .language)
         #expect(flow.position == 1)
-        #expect(flow.total == 5)
+        #expect(flow.total == 6)
         flow.advance()
         #expect(flow.step == .underTheHood)
         #expect(flow.position == 2)
@@ -145,7 +145,73 @@ struct OnboardingTests {
         flow.advance()
         #expect(flow.step == .style)
         flow.advance()
+        #expect(flow.step == .connectAI)
+        flow.advance()
         #expect(flow.step == .tryIt)
+    }
+
+    /// A provider that already works is shown, not skipped: the page is where you see
+    /// "Working" beside the one you will use, and where you could pick another.
+    @Test("a working AI is still shown")
+    func connectedAIShown() {
+        let world = World()
+        world.satisfied = [.connectAI]
+        let flow = make(world)
+        flow.begin()
+        #expect(flow.total == 7)
+        #expect(flow.plan.contains(.connectAI))
+    }
+
+    /// Declining once is a question, not a skip: the pause shares the AI page's number,
+    /// and Back from it undoes the decline.
+    @Test("declining the AI pauses on the same number, and Back undoes it")
+    func declineOnce() {
+        let flow = make(World())
+        flow.begin()
+        while flow.step != .connectAI { flow.advance() }
+        let number = flow.position
+        let total = flow.total
+
+        flow.declineAI()
+        #expect(flow.step == .withoutAI)
+        #expect(flow.position == number)
+        #expect(flow.total == total)
+        #expect(flow.declinedAI)
+
+        flow.back()
+        #expect(flow.step == .connectAI)
+        #expect(!flow.plan.contains(.withoutAI))
+        #expect(!flow.declinedAI)
+    }
+
+    /// Declining twice gives up Try it — a first dictation with nothing to polish it is
+    /// not the proof the page promises — but not the microphone it was carrying.
+    @Test("declining twice swaps Try it for the microphone ask")
+    func declineTwice() {
+        let flow = make(World())
+        flow.begin()
+        while flow.step != .connectAI { flow.advance() }
+        flow.declineAI()
+        flow.continueWithoutAI()
+        #expect(flow.step == .microphone)
+        #expect(!flow.plan.contains(.tryIt))
+        #expect(flow.position == flow.total)
+        flow.advance()
+        #expect(flow.isComplete)
+    }
+
+    /// With the microphone already granted there is nothing left to ask, so the second
+    /// no is also the door.
+    @Test("declining twice with the microphone granted finishes")
+    func declineTwiceGranted() {
+        let world = World()
+        world.satisfied = [.microphone, .tryIt]
+        let flow = make(world)
+        flow.begin()
+        while flow.step != .connectAI { flow.advance() }
+        flow.declineAI()
+        flow.continueWithoutAI()
+        #expect(flow.isComplete)
     }
 
     @Test("advancing past the last step finishes")

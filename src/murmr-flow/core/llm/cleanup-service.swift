@@ -22,7 +22,13 @@ actor CleanupService {
         }
     }
 
-    private let client = LLMClient()
+    private let client: any LLMCompleting
+
+    /// The real client by default. Tests hand in one that answers from a script, which is
+    /// the only way to exercise the fallback rules below without paying a provider.
+    init(client: any LLMCompleting = LLMClient()) {
+        self.client = client
+    }
 
     /// Dictation is latency-sensitive: past a few seconds the user would rather have
     /// unpolished text than keep waiting.

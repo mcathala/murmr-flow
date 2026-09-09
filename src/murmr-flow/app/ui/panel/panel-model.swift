@@ -32,12 +32,15 @@ final class PanelModel {
         case meeting
         /// Transcribing, tidying, writing a note — one row, one label.
         case working(String)
+        /// Something worth a sentence that is not a fault — nothing was heard, say. Quiet,
+        /// and gone by itself a moment later; the bridge clears it.
+        case notice(String)
         case failed(Failure)
 
         var isBusy: Bool {
             switch self {
             case .dictating, .meeting, .working: true
-            case .resting, .armed, .failed: false
+            case .resting, .armed, .notice, .failed: false
             }
         }
 
@@ -61,8 +64,9 @@ final class PanelModel {
             case .armed, .failed:
                 // Nothing was started, or it already ended — discard just dismisses.
                 Controls(stop: false, discard: true)
-            case .resting, .working:
-                // Mid-transcription there is nothing useful to stop *into*.
+            case .resting, .working, .notice:
+                // Mid-transcription there is nothing useful to stop *into*; a notice
+                // leaves on its own.
                 Controls()
             }
         }
@@ -73,19 +77,9 @@ final class PanelModel {
         var discard = false
     }
 
-    /// The whole failure vocabulary. Which half broke is all you need in the moment; the
-    /// detail belongs on Home, where there is room for it.
-    enum Failure: Equatable {
-        case speechModel
-        case aiProvider
-
-        var message: String {
-            switch self {
-            case .speechModel: "Speech model failed"
-            case .aiProvider: "AI provider failed"
-            }
-        }
-    }
+    /// Which part broke — `FailureKind`, decided by the coordinator that saw it happen. The
+    /// pill only turns the kind into words; it never reads the message.
+    typealias Failure = FailureKind
 
     // MARK: - State
 
@@ -133,7 +127,7 @@ final class PanelModel {
     var showsBubbles: Bool {
         switch phase {
         case .armed, .dictating, .meeting: true
-        case .resting, .working, .failed: false
+        case .resting, .working, .notice, .failed: false
         }
     }
 
@@ -232,9 +226,11 @@ final class PanelModel {
             CGSize(width: 232, height: 48)
         case .meeting:
             CGSize(width: 368, height: 48)
-        case .failed:
+        case .notice:
+            CGSize(width: 200, height: 48)
+        case .failed(let failure):
             // The message and the way out — the two-word failure needs no mode icon.
-            CGSize(width: 210, height: 48)
+            CGSize(width: failure.pillWidth, height: 48)
         }
         // The bubbles ride above the row, so they are window height, not row height.
         if showsBubbles { size.height += Self.bubbleReach }

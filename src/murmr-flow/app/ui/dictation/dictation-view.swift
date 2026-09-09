@@ -18,20 +18,12 @@ struct DictationView: View {
     /// for a mistake and useless for a clear-out.
     @State private var selection: Set<UUID> = []
     @State private var isRerunning = false
+    @State private var rerunNote: String?
     @State private var confirmingDelete = false
 
     var body: some View {
         PaneScroll {
             recordCard
-
-            // The menu offers the language whatever the state of clean-up, so the promise
-            // has to be kept honest here: without the LLM pass nothing translates.
-            if settings.dictationTranslates, !settings.cleanupEnabled {
-                WarningRow(
-                    message: "Translation happens in the AI clean-up, which is off — "
-                        + "you\u{2019}ll get your words as spoken."
-                )
-            }
 
             if selection.count > 1 {
                 SectionLabel(title: "\(selection.count) selected")
@@ -61,8 +53,8 @@ struct DictationView: View {
                 EmptyPane(
                     symbol: "mic",
                     title: "Nothing yet",
-                    hint: "Hold \(dictation.settings.hotkey.displayName) anywhere and speak. "
-                        + "The text lands wherever your cursor is."
+                    hint: "\(settings.hotkeyPhrase) anywhere and speak. The text lands "
+                        + "wherever your cursor is."
                 )
                 .frame(minHeight: 220)
             }
@@ -133,19 +125,33 @@ struct DictationView: View {
                 }
             }
         ) {
-            translateMenu
-            Menu {
-                ForEach(prompts.presets) { preset in
-                    Button(preset.name) { prompts.dictationPromptID = preset.id }
+            // The two settings stay in view with clean-up off, dimmed, so the card
+            // still shows what it *would* do — and the way to make it do it sits beside
+            // them. Notes does the same; the two cards used to disagree, one hiding the
+            // menus and the other showing live controls that did nothing.
+            HStack(spacing: 12) {
+                translateMenu
+                Menu {
+                    ForEach(prompts.presets) { preset in
+                        Button(preset.name) { prompts.dictationPromptID = preset.id }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles").font(.system(size: 10, weight: .medium))
+                        Text(prompts.dictationPrompt.name)
+                    }
                 }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "sparkles").font(.system(size: 10, weight: .medium))
-                    Text(prompts.dictationPrompt.name)
-                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+            .opacity(settings.cleanupEnabled ? 1 : 0.45)
+            .disabled(!settings.cleanupEnabled)
+
+            if !settings.cleanupEnabled {
+                Button("Turn on") { settings.cleanupEnabled = true }
+                    .controlSize(.small)
+                    .help("Clean up dictation with the AI")
+            }
         }
     }
 
@@ -169,18 +175,22 @@ struct DictationView: View {
             return String(format: "Listening — %.1fs", dictation.elapsed)
         }
         if dictation.stage.isBusy { return dictation.stage.label }
-        return "Hold \(dictation.settings.hotkey.displayName) anywhere"
+        return "\(settings.hotkeyPhrase) anywhere"
     }
 
     private var subhead: String {
         if dictation.stage.isRecording, !dictation.preview.isEmpty {
             return dictation.preview
         }
-        if case .failed(let message) = dictation.stage { return message }
-        return dictation.settings.holdToTalk
+        if case .failed(_, let message) = dictation.stage { return message }
+        if !settings.cleanupEnabled {
+            return "Clean-up is off. Style and language don\u{2019}t apply."
+        }
+        return settings.holdToTalk
             ? "Hold the key while you speak."
             : "Press once to start, once to stop."
     }
+
 
     // MARK: - Transcript
 
@@ -216,6 +226,24 @@ struct DictationView: View {
                         .foregroundStyle(.orange)
                 }
 
+                // What the pill said in passing, kept here where there is room to read
+                // it: the latest run's note, only while this is the latest record.
+                if record.id == history.dictations.first?.id,
+                   let note = dictation.lastRun?.note {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // Why the last Re-run left the text as it was. Cleared by the next one.
+                if let rerunNote {
+                    Text(rerunNote)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 HStack(spacing: 8) {
                     Button("Copy") {
                         TextInjector.copyToClipboard(
@@ -227,12 +255,15 @@ struct DictationView: View {
                     }
                     Button(isRerunning ? "Re-running…" : "Re-run clean-up") {
                         isRerunning = true
+                        rerunNote = nil
                         Task {
-                            await dictation.rerunCleanup(on: record)
+                            rerunNote = await dictation.rerunCleanup(on: record)
                             isRerunning = false
                         }
                     }
-                    .disabled(isRerunning)
+                    .disabled(isRerunning || dictation.rerunBlocker != nil)
+                    .help(dictation.rerunBlocker
+                          ?? "Clean this transcript up again with the current style")
                     Spacer(minLength: 0)
                     Button {
                         selection = [record.id]

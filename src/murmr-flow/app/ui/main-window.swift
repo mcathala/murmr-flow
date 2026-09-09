@@ -86,14 +86,6 @@ struct MainWindow: View {
         .foregroundStyle(Theme.Palette.text)
         .tint(Theme.Palette.gold)
         .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
-        .onAppear {
-            // Land on the thing that needs attention rather than hiding a broken
-            // permission behind a row the user has no reason to click. Not on a first
-            // launch, where the flow covering the window is already that landing.
-            if services.onboarding.isComplete, !services.permissions.allGranted {
-                services.openSettings(.privacyData)
-            }
-        }
     }
 
     /// The sidebar and the section it selects — the window on every launch but the first.
@@ -111,8 +103,45 @@ struct MainWindow: View {
                 .frame(width: 1)
                 .ignoresSafeArea()
 
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 0) {
+                permissionBanner
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    /// A missing permission, said above whichever section is showing. The window used to
+    /// route itself to Privacy & data whenever one was off — so ⌘, from the Hotkeys pane
+    /// landed somewhere else, and "Settings…" seemed to open the wrong pane. The problem
+    /// is now a line you can see from anywhere, and that pane is the one place it is not
+    /// repeated, because it lists the same thing with the same button.
+    @ViewBuilder
+    private var permissionBanner: some View {
+        let permissions = services.permissions
+        if services.route != .settings(.privacyData), !permissions.allGranted {
+            VStack(spacing: 8) {
+                if permissions.accessibility != .granted {
+                    WarningRow(
+                        message: "Accessibility is off, so your hotkey won\u{2019}t fire.",
+                        action: ("Allow", { permissions.requestAccessibility() })
+                    )
+                }
+                if permissions.microphone != .granted {
+                    WarningRow(
+                        message: "Microphone isn\u{2019}t allowed, so nothing can be heard.",
+                        action: ("Allow", {
+                            if permissions.microphone == .notDetermined {
+                                Task { await permissions.requestMicrophone() }
+                            } else {
+                                permissions.openMicrophoneSettings()
+                            }
+                        })
+                    )
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
         }
     }
 
@@ -246,7 +275,7 @@ struct MainWindow: View {
                 permissions: services.permissions
             )
         case .insights:
-            InsightsView(history: services.history)
+            InsightsView(history: services.history, settings: services.settings)
         case .settings(let pane):
             SettingsPaneView(pane: pane, services: services)
         }

@@ -28,6 +28,7 @@ struct OnboardingView: View {
     private var speech: SpeechModelStore { services.speech }
     private var settings: SettingsStore { services.settings }
     private var prompts: PromptStore { services.prompts }
+    private var providers: ProviderStore { services.providers }
     private var step: OnboardingCoordinator.Step { onboarding.step }
 
     /// The languages picked on the first screen. They decide the model; the person never
@@ -77,6 +78,7 @@ struct OnboardingView: View {
             // The try-it box is the destination; nothing is pasted anywhere while it is up.
             dictation.deliversText = step != .tryIt
             guard step == .howItWorks || step == .systemAudio || step == .tryIt
+                || step == .microphone
             else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
@@ -106,6 +108,11 @@ struct OnboardingView: View {
             }
         }
         .onChange(of: permissions.systemAudio) { onboarding.noteProgress() }
+        // The AI page moves on by itself the moment the key is proved, the way the
+        // permission pages do when their grant lands: the tick is the answer.
+        .onChange(of: providers.activeState.verification.isWorking) {
+            if step == .connectAI { onboarding.noteProgress() }
+        }
     }
 
     // MARK: - Words
@@ -117,7 +124,10 @@ struct OnboardingView: View {
         case .howItWorks: "How it works"
         case .underTheHood: "What\u{2019}s inside"
         case .style: "How should it sound?"
+        case .connectAI: "Connect an AI"
+        case .withoutAI: "Sure you want to skip?"
         case .tryIt: "Try it"
+        case .microphone: "Let it hear you"
         }
     }
 
@@ -139,11 +149,23 @@ struct OnboardingView: View {
                 + "\u{2022} Style — how the words are written.\n"
                 + "\u{2022} Language — what they come out in. Dictate in French, land in "
                 + "English; Off keeps the language you spoke."
+        case .connectAI:
+            if providers.activeState.verification.isWorking {
+                return "\(providers.activeEntry.displayName) is connected and answering. "
+                    + "Keep it, or pick another one here."
+            }
+            return "It turns raw speech into clean text: punctuation, your style, "
+                + "translation. Pick one, paste its key, and we check it right away."
+        case .withoutAI:
+            return "Without an AI, your text will be rougher and less accurate. Here is "
+                + "what changes:"
         case .tryIt:
             let key = settings.hotkey.displayName
             return settings.holdToTalk
                 ? "Hold \(key), say a sentence, and let go. Your words appear below."
                 : "Press \(key), say a sentence, and press it again. Your words appear below."
+        case .microphone:
+            return "Murmr Flow needs the microphone to turn speech into text."
         }
     }
 
@@ -211,8 +233,23 @@ struct OnboardingView: View {
             underTheHood
         case .style:
             stylePicker
+        case .connectAI:
+            connectAI
+        case .withoutAI:
+            withoutAI
         case .tryIt:
             tryCard
+        case .microphone:
+            VStack(alignment: .leading, spacing: 8) {
+                inlinePermission(
+                    symbol: "mic.fill",
+                    title: "Microphone",
+                    caption: "Once allowed, press \(settings.hotkey.displayName) in any app "
+                        + "and speak.",
+                    state: permissions.microphone,
+                    action: nil
+                )
+            }
         }
     }
 
@@ -241,6 +278,7 @@ struct OnboardingView: View {
     private func choiceChip(
         _ title: String,
         flag: String? = nil,
+        image: NSImage? = nil,
         fills: Bool = false,
         isOn: Bool,
         action: @escaping () -> Void
@@ -250,6 +288,15 @@ struct OnboardingView: View {
                 if let flag {
                     // The system face, not Mona Sans: flags are emoji and only render there.
                     Text(flag).font(.system(size: 13))
+                }
+                if let image {
+                    // A provider's mark, the same one Settings shows beside its row.
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 13, height: 13)
+                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                 }
                 Text(title)
                     .font(Theme.Text.body)
@@ -394,7 +441,7 @@ struct OnboardingView: View {
                 slot: .meeting,
                 key: settings.meetingHotkey,
                 steps: [
-                    "Press once when the meeting starts.",
+                    "Press once when you want to take notes.",
                     "Talk, listen.",
                     "Press again when it ends. You get notes with who said what.",
                 ]
@@ -535,17 +582,206 @@ struct OnboardingView: View {
                             get: { settings.notetakerOutputLanguage },
                             set: { settings.notetakerOutputLanguage = $0 }
                         ),
-                        options: [(PromptStore.meetingPreset.id, PromptStore.meetingPreset.name),
-                                  (nil, "As spoken")],
+                        // Notes only. "As spoken" was offered here once and taken out:
+                        // raw notes are what the app does *without* the AI, not a style.
+                        options: [(PromptStore.meetingPreset.id, PromptStore.meetingPreset.name)],
                         selected: prompts.notetakerPromptID,
                         summary: prompts.notetakerPrompt.map(Self.summary) ?? "Saved exactly as transcribed."
-                    ) { prompts.notetakerPromptID = $0 }
+                    ) { prompts.notetakerPromptID = $0 ?? prompts.notetakerPromptID }
                 }
             }
-            Text("Styles and translation need the AI clean-up set up in Settings. Until "
-                 + "then, you get your words exactly as spoken.")
+            Text(styleFootnote)
                 .font(Theme.Text.small)
                 .foregroundStyle(Theme.Palette.faint)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Says where the AI stands, because without it the choices above do nothing. Three
+    /// readings: it is the next page, it is already connected, or it was never set up.
+    private var styleFootnote: String {
+        if providers.activeState.verification.isWorking {
+            return "Your AI is connected, so these apply from the first dictation."
+        }
+        if onboarding.plan.contains(.connectAI) {
+            return "You\u{2019}ll connect the AI on the next screen."
+        }
+        return "Styles and translation need the AI clean-up set up in Settings. Until "
+            + "then, you get your words exactly as spoken."
+    }
+
+    // MARK: - Connect an AI
+
+    /// The catalogue as chips, then one card that walks through getting a key and takes
+    /// it. Written for someone who has never made an API key: the three lines say where
+    /// to go, what to press, and that pasting it here is the end of the job.
+    private var connectAI: some View {
+        let entry = providers.activeEntry
+        let state = providers.activeState
+        return VStack(alignment: .leading, spacing: 10) {
+            FlowLayout(spacing: 6) {
+                ForEach(ProviderCatalog.all) { candidate in
+                    choiceChip(
+                        candidate.displayName,
+                        image: ProviderMark.image(for: candidate),
+                        isOn: candidate.id == providers.activeID
+                    ) {
+                        // Choosing here *is* choosing the one in use: on a first launch
+                        // there is nothing else it could mean.
+                        dictation.activateProvider(candidate.id)
+                    }
+                }
+            }
+
+            Card {
+                VStack(alignment: .leading, spacing: 10) {
+                    keyGuide(entry)
+
+                    Divider()
+
+                    if entry.requiresCustomBaseURL {
+                        LabeledContent("Endpoint") {
+                            TextField("https://…", text: providerBinding(\.baseURL))
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        .font(Theme.Text.small)
+                        LabeledContent("Model") {
+                            TextField("Model name", text: providerBinding(\.model))
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        .font(Theme.Text.small)
+                    } else {
+                        HStack(spacing: 8) {
+                            Text("Model")
+                                .font(Theme.Text.small)
+                                .foregroundStyle(Theme.Palette.muted)
+                            Text(state.model)
+                                .font(Theme.Text.mono)
+                                .foregroundStyle(Theme.Palette.muted)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            ProviderBadge(id: entry.id, providers: providers, dictation: dictation)
+                        }
+                    }
+
+                    StoredSecretRow(
+                        hasKey: providers.hasKey(entry.id),
+                        isOptional: !entry.requiresKey,
+                        onSave: { key in
+                            try? providers.saveKey(key, for: entry.id)
+                            dictation.testProvider(entry.id)
+                        },
+                        onRemove: { try? providers.deleteKey(for: entry.id) }
+                    )
+
+                    if entry.requiresCustomBaseURL {
+                        HStack {
+                            Spacer(minLength: 0)
+                            ProviderBadge(id: entry.id, providers: providers, dictation: dictation)
+                        }
+                    }
+
+                    if let reason = state.verification.failure {
+                        Text(reason)
+                            .font(Theme.Text.small)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Where the key comes from, as three numbered lines and the one button that opens
+    /// the page. The host is named in the button so the person knows what they are about
+    /// to see before they see it.
+    @ViewBuilder
+    private func keyGuide(_ entry: ProviderCatalog.Entry) -> some View {
+        let host = entry.keyURL.flatMap { URL(string: $0)?.host } ?? ""
+        let lines: [String] = entry.requiresCustomBaseURL
+            ? [
+                "Enter the address of a server that speaks the OpenAI chat API — Ollama, "
+                    + "LM Studio, vLLM. Others won\u{2019}t work. Ollama on this Mac is "
+                    + "http://localhost:11434/v1.",
+                "Type the name of the model it serves.",
+                "Add a key only if the server asks for one.",
+            ]
+            : [
+                "Open \(host) and sign in. A free account is enough.",
+                "Create an API key and copy it.",
+                "Paste it below. We check it straight away.",
+            ]
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                HStack(alignment: .top, spacing: 8) {
+                    Text("\(index + 1)")
+                        .font(Theme.Text.label)
+                        .foregroundStyle(Theme.Palette.faint)
+                        .frame(width: 10, alignment: .trailing)
+                        .padding(.top, 2)
+                    Text(line)
+                        .font(Theme.Text.small)
+                        .foregroundStyle(Theme.Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let keyURL = entry.keyURL, let url = URL(string: keyURL) {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Label("Get a key at \(host)", systemImage: "arrow.up.right.square")
+                }
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    /// Endpoint and model for the Custom entry, written through the store so a change
+    /// resets the proof, exactly as Settings does.
+    private func providerBinding(_ field: KeyPath<ProviderStore.State, String>) -> Binding<String> {
+        let id = providers.activeID
+        return Binding(
+            get: { providers.state(for: id)[keyPath: field] },
+            set: { value in
+                if field == \ProviderStore.State.baseURL {
+                    providers.update(baseURL: value, for: id)
+                } else {
+                    providers.update(model: value, for: id)
+                }
+            }
+        )
+    }
+
+    // MARK: - Without an AI
+
+    /// What skipping costs, in the reader's terms. The primary button on this page goes
+    /// *back*, so the easy click is the good one; going on is the quiet text.
+    private var withoutAI: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Card {
+                VStack(alignment: .leading, spacing: 10) {
+                    costLine("No punctuation or filler-word fixes. Words land exactly as spoken.")
+                    costLine("Styles do nothing. Formal, Structure and Casual all give the same "
+                             + "raw text.")
+                    costLine("No translation, and notes are saved as a raw transcript.")
+                }
+            }
+            Text("You can connect one any time in Settings \u{203A} AI clean-up.")
+                .font(Theme.Text.small)
+                .foregroundStyle(Theme.Palette.faint)
+        }
+    }
+
+    private func costLine(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "minus.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.Palette.gold)
+                .padding(.top, 2)
+            Text(text)
+                .font(Theme.Text.body)
+                .foregroundStyle(Theme.Palette.text)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -674,9 +910,7 @@ struct OnboardingView: View {
         "Structure": "Two asks:\n– move the meeting to Thursday\n– send the report",
         "Formal": "Could we move the meeting to Thursday? Please also send me the report.",
         "Casual": "Can we push the meeting to Thursday? And send me the report too.",
-        "Meeting": "Decided: meeting moves to Thursday.\nTo-do: send the report.",
-        "As spoken": "so are we good to move the meeting to thursday yeah thursday works "
-            + "for me perfect and can you send me the report after the call sure will do",
+        "Notes": "Decided: meeting moves to Thursday.\nTo-do: send the report.",
     ]
 
     /// One line per built-in, in the reader's terms. A custom prompt describes itself by
@@ -688,7 +922,7 @@ struct OnboardingView: View {
             "Structure": "Rambling turned into paragraphs and lists.",
             "Formal": "Polished, professional wording.",
             "Casual": "Relaxed and conversational.",
-            "Meeting": "Who said what, decisions, and to-dos.",
+            "Notes": "Who said what, decisions, and to-dos.",
         ][preset.name]
     }
 
@@ -764,7 +998,7 @@ struct OnboardingView: View {
                 WarningRow(
                     message: "Accessibility is off, so the key won\u{2019}t work yet — use the "
                         + "button for now.",
-                    action: ("Allow", { permissions.openAccessibilitySettings() })
+                    action: ("Allow", { permissions.requestAccessibility() })
                 )
             }
 
@@ -850,7 +1084,7 @@ struct OnboardingView: View {
             // Only while the primary button is an ask: once the grant is in (or on a
             // page whose primary is already Continue), skipping means nothing.
             if showsSkip {
-                Button("Skip for now") { skip() }
+                Button(skipTitle) { skip() }
                     .buttonStyle(.plain)
                     .font(Theme.Text.body)
                     .foregroundStyle(Theme.Palette.muted)
@@ -860,10 +1094,21 @@ struct OnboardingView: View {
                 Button(action.title, action: action.run)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    // Nothing picked means nothing to decide from.
-                    .disabled(step == .language && languages.isEmpty)
+                    // Nothing picked means nothing to decide from; a key that has not
+                    // answered yet is not a connection.
+                    .disabled(
+                        (step == .language && languages.isEmpty)
+                            || (step == .connectAI
+                                && !providers.activeState.verification.isWorking)
+                    )
             }
         }
+    }
+
+    /// The quiet way past. Named for what it does on the one page where "skip" would be
+    /// the wrong word: there, the question has already been asked once.
+    private var skipTitle: String {
+        step == .withoutAI ? "Continue without AI" : "Skip for now"
     }
 
     /// The one button.
@@ -900,9 +1145,12 @@ struct OnboardingView: View {
                     permissions.requestAccessibility()
                 }
             })
-        case .underTheHood, .style:
+        case .underTheHood, .style, .connectAI:
             return ("Continue", { onboarding.advance() })
-        case .tryIt:
+        case .withoutAI:
+            // Back to the page that was declined: the easy click is the good one.
+            return ("Connect an AI", { onboarding.back() })
+        case .tryIt, .microphone:
             switch permissions.microphone {
             case .granted:
                 return ("Done", { services.finishOnboarding() })
@@ -949,17 +1197,24 @@ struct OnboardingView: View {
         case .language: true
         case .howItWorks: permissions.accessibility != .granted
         case .systemAudio: permissions.systemAudio != .granted
-        case .tryIt: permissions.microphone != .granted
+        case .tryIt, .microphone: permissions.microphone != .granted
+        case .connectAI: !providers.activeState.verification.isWorking
+        case .withoutAI: true
         case .underTheHood, .style: false
         }
     }
 
     private func skip() {
-        if step == .language {
+        switch step {
+        case .language:
             choose(speech.activeModel)
-        } else if step == .tryIt {
+        case .tryIt, .microphone:
             services.finishOnboarding()
-        } else {
+        case .connectAI:
+            onboarding.declineAI()
+        case .withoutAI:
+            onboarding.continueWithoutAI()
+        default:
             onboarding.advance()
         }
     }

@@ -40,6 +40,7 @@ struct PanelView: View {
         case .dictating: dictating
         case .meeting: meeting
         case .working(let label): working(label)
+        case .notice(let text): notice(text)
         case .failed(let failure): failed(failure)
         }
     }
@@ -235,12 +236,31 @@ struct PanelView: View {
         }
     }
 
+    /// Quiet, in the muted colour: information, not alarm. No controls — it goes by
+    /// itself.
+    private func notice(_ text: String) -> some View {
+        row {
+            HStack(spacing: 8) {
+                indicator
+                divider
+                Text(text)
+                    .font(Theme.Text.small)
+                    .foregroundStyle(Theme.Palette.muted)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
     private func failed(_ failure: PanelModel.Failure) -> some View {
         row {
             HStack(spacing: 8) {
-                Text(failure.message)
+                Text(failure.headline)
                     .font(Theme.Text.bodyStrong)
-                    .foregroundStyle(Theme.Palette.gold)
+                    // Red, not gold: gold is the colour of the chosen thing everywhere
+                    // else in the app, and a fault is not that.
+                    .foregroundStyle(Theme.Palette.danger)
+                    .lineLimit(1)
                 Spacer(minLength: 0)
                 controls
             }
