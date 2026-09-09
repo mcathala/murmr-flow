@@ -18,6 +18,7 @@ struct DictationView: View {
     /// for a mistake and useless for a clear-out.
     @State private var selection: Set<UUID> = []
     @State private var isRerunning = false
+    @State private var rerunNote: String?
     @State private var confirmingDelete = false
 
     var body: some View {
@@ -190,15 +191,6 @@ struct DictationView: View {
             : "Press once to start, once to stop."
     }
 
-    /// Why Re-run cannot run, or nil when it can. The button used to be live in exactly
-    /// the cases where pressing it did nothing.
-    private var rerunBlocker: String? {
-        if !settings.cleanupEnabled { return "Clean-up is off for dictation" }
-        if !dictation.providers.isUsable(dictation.providers.activeID) {
-            return "No AI is connected"
-        }
-        return nil
-    }
 
     // MARK: - Transcript
 
@@ -244,6 +236,14 @@ struct DictationView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                // Why the last Re-run left the text as it was. Cleared by the next one.
+                if let rerunNote {
+                    Text(rerunNote)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 HStack(spacing: 8) {
                     Button("Copy") {
                         TextInjector.copyToClipboard(
@@ -255,13 +255,15 @@ struct DictationView: View {
                     }
                     Button(isRerunning ? "Re-running…" : "Re-run clean-up") {
                         isRerunning = true
+                        rerunNote = nil
                         Task {
-                            await dictation.rerunCleanup(on: record)
+                            rerunNote = await dictation.rerunCleanup(on: record)
                             isRerunning = false
                         }
                     }
-                    .disabled(isRerunning || rerunBlocker != nil)
-                    .help(rerunBlocker ?? "Clean this transcript up again with the current style")
+                    .disabled(isRerunning || dictation.rerunBlocker != nil)
+                    .help(dictation.rerunBlocker
+                          ?? "Clean this transcript up again with the current style")
                     Spacer(minLength: 0)
                     Button {
                         selection = [record.id]

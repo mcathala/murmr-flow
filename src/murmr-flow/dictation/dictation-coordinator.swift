@@ -495,16 +495,44 @@ final class DictationCoordinator {
     ///
     /// Only possible because the raw transcript is kept. Before, changing a prompt and
     /// wanting the old text through it meant saying the whole thing again.
-    func rerunCleanup(on record: DictationRecord) async {
-        guard settings.cleanupEnabled, let config = providers.activeConfig else { return }
+    /// Why Re-run cannot run right now, or nil when it can. The view disables the button
+    /// with this as its tooltip; it used to be live in exactly the cases where pressing it
+    /// did nothing.
+    var rerunBlocker: String? {
+        if !settings.cleanupEnabled { return "Clean-up is off for dictation" }
+        if !providers.isUsable(providers.activeID) { return "No AI is connected" }
+        return nil
+    }
+
+    /// Cleans a past dictation up again with the current style, and says why if it could
+    /// not.
+    ///
+    /// The same context as the first run — the app it went to, the output language, the
+    /// dictionary — so a translated dictation re-run comes back translated. It used to
+    /// rebuild the prompt from the transcript alone, which replaced a French-to-English
+    /// dictation with the untranslated text and no way back. And the record is replaced
+    /// only when the clean-up actually ran: a fallback would overwrite good text with the
+    /// raw transcript it was made from.
+    @discardableResult
+    func rerunCleanup(on record: DictationRecord) async -> String? {
+        if let blocker = rerunBlocker { return blocker }
+        guard let config = providers.activeConfig else { return "No AI is connected" }
 
         let outcome = await cleanup.clean(
             transcript: record.rawText,
             config: config,
             prompt: PromptLibrary(template: prompts.dictationPrompt.template),
-            context: PromptLibrary.Context(transcript: record.rawText),
+            context: PromptLibrary.Context(
+                transcript: record.rawText,
+                frontmostApp: record.targetBundleID,
+                outputLanguage: settings.dictationTargetLanguage
+            ),
             dictionary: dictionary.entries(usedIn: .dictation)
         )
+
+        guard !outcome.usedRawFallback else {
+            return outcome.note ?? "The AI didn\u{2019}t reply, so the text is unchanged."
+        }
 
         history.replace(
             DictationRecord(
@@ -513,12 +541,13 @@ final class DictationCoordinator {
                 audioDuration: record.audioDuration,
                 rawText: record.rawText,
                 finalText: outcome.text,
-                usedRawFallback: outcome.usedRawFallback,
+                usedRawFallback: false,
                 promptName: prompts.dictationPrompt.name,
                 targetAppName: record.targetAppName,
                 targetBundleID: record.targetBundleID
             )
         )
+        return nil
     }
 
     // MARK: - Provider test
