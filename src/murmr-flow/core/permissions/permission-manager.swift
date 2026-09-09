@@ -56,8 +56,7 @@ final class PermissionManager {
     }
 
     func openSystemAudioSettings() {
-        // The audio-only grant lives in the Screen & System Audio Recording pane.
-        open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        open(SystemSettingsPane.systemAudioURL)
     }
 
     private static func microphoneState() -> PermissionState {

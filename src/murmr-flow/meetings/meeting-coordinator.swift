@@ -22,7 +22,9 @@ final class MeetingCoordinator {
         case recording
         case transcribing(TranscribeStep)
         case saved
-        case failed(String)
+        /// Which part broke, and the sentence for the window. Decided here, where the
+        /// failure is seen, so the pill never has to guess it from the words.
+        case failed(FailureKind, String)
 
         var isRecording: Bool { self == .recording }
 
@@ -83,14 +85,36 @@ final class MeetingCoordinator {
             switch self {
             case .noAudio:
                 "No audio was captured. Check that Murmr Flow is allowed under Privacy & "
-                    + "Security \u{203A} System Audio Recording, and that a microphone is "
-                    + "connected."
+                    + "Security \u{203A} \(SystemSettingsPane.systemAudio), and that a "
+                    + "microphone is connected."
             case .systemCaptureFailed:
                 "System audio capture failed — the recording never received a single "
                     + "frame of what the Mac was playing. Nothing was wrong with the "
                     + "meeting; the tap did not run. Try recording again."
             }
         }
+
+        var kind: FailureKind {
+            switch self {
+            case .noAudio: .microphone
+            case .systemCaptureFailed: .systemAudio
+            }
+        }
+    }
+
+    /// Wraps a failure from writing the note file, so the catch below can tell "the model
+    /// failed" from "the disk did" — the words are the same shape, the remedy is not.
+    private struct SaveError: Error {
+        let underlying: Error
+    }
+
+    /// Which part an error belongs to. Our own errors say; anything from the system-audio
+    /// tap is that grant; the recorder's are the microphone; the rest is the model.
+    private static func kind(of error: Error) -> FailureKind {
+        if let ours = error as? RecordingError { return ours.kind }
+        if error is SystemAudioRecorder.RecorderError { return .systemAudio }
+        if error is MeetingRecorder.RecorderError { return .microphone }
+        return .speechModel
     }
 
     private static let log = Logger(subsystem: "app.murmr.MurmrFlow", category: "meetings")
@@ -165,7 +189,7 @@ final class MeetingCoordinator {
         // Refuse rather than downloading mid-meeting. Otherwise the user records for an
         // hour and only then discovers there is no model to transcribe it with.
         guard loader.models != nil else {
-            stage = .failed(modelNotReadyMessage())
+            stage = .failed(.speechModel, modelNotReadyMessage())
             if !loader.isPreparing { Task { await loader.prepare() } }
             return
         }
@@ -180,7 +204,7 @@ final class MeetingCoordinator {
             startTicking()
             onRecordingChange?(true)
         } catch {
-            stage = .failed(error.localizedDescription)
+            stage = .failed(Self.kind(of: error), error.localizedDescription)
         }
     }
 
@@ -188,7 +212,7 @@ final class MeetingCoordinator {
         stopTicking()
         guard let recording = recorder.stop() else {
             onRecordingChange?(false)
-            stage = .failed("Nothing was recorded.")
+            stage = .failed(.microphone, "Nothing was recorded.")
             return
         }
         onRecordingChange?(false)
@@ -232,7 +256,12 @@ final class MeetingCoordinator {
             let (transcript, cleanupNote) = await cleaned(woven)
 
             stage = .transcribing(.writing)
-            let saved = try notes.save(transcript)
+            let saved: NoteFile
+            do {
+                saved = try notes.save(transcript)
+            } catch {
+                throw SaveError(underlying: error)
+            }
 
             lastResult = Result(
                 transcript: transcript,
@@ -244,8 +273,11 @@ final class MeetingCoordinator {
             Self.log.notice(
                 "meeting saved: \(transcript.utterances.count, privacy: .public) utterances"
             )
+        } catch let save as SaveError {
+            stage = .failed(.notes, save.underlying.localizedDescription)
+            Self.log.error("meeting failed: \(save.underlying.localizedDescription, privacy: .public)")
         } catch {
-            stage = .failed(error.localizedDescription)
+            stage = .failed(Self.kind(of: error), error.localizedDescription)
             Self.log.error("meeting failed: \(error.localizedDescription, privacy: .public)")
         }
 
@@ -364,12 +396,4 @@ final class MeetingCoordinator {
 
     func openNotesFolder() { notes.openFolder() }
 
-    /// Opens the pane holding the System Audio Recording toggle, for when the tap was
-    /// refused. There is no API to grant it and no notification when it changes.
-    func openSystemAudioSettings() {
-        guard let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture"
-        ) else { return }
-        NSWorkspace.shared.open(url)
-    }
 }

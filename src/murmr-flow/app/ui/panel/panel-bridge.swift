@@ -176,9 +176,9 @@ final class PanelBridge {
             model.set(.working(step.label))
             panel.apply()
             return
-        case .failed(let message):
+        case .failed(let kind, _):
             model.mode = .note
-            model.set(.failed(Self.failure(for: message)))
+            model.set(.failed(kind))
             panel.apply()
             return
         case .idle, .saved:
@@ -203,8 +203,8 @@ final class PanelBridge {
         case .injecting:
             model.set(.working("Inserting…"))
 
-        case .failed(let message):
-            model.set(.failed(Self.failure(for: message)))
+        case .failed(let kind, _):
+            model.set(.failed(kind))
 
         case .idle:
             // No success state. The text appearing in your document *is* the confirmation;
@@ -242,16 +242,6 @@ final class PanelBridge {
             self.panel.model.set(.resting)
             self.panel.apply()
         }
-    }
-
-    private static func failure(for message: String) -> PanelModel.Failure {
-        // Which part broke, read off the message until the coordinators carry a typed
-        // kind. System audio first: its messages also mention "recording" and "audio",
-        // and used to fall through to the speech model, which had nothing to do with it.
-        let lowered = message.lowercased()
-        if lowered.contains("system audio") { return .systemAudio }
-        let cleanupWords = ["key", "provider", "api", "clean", "model responded", "http"]
-        return cleanupWords.contains(where: lowered.contains) ? .aiProvider : .speechModel
     }
 
     private func captureTarget() {

@@ -77,32 +77,9 @@ final class PanelModel {
         var discard = false
     }
 
-    /// The whole failure vocabulary. Which part broke is all you need in the moment; the
-    /// detail belongs on Home, where there is room for it.
-    ///
-    /// Two of these name a permission rather than a component, because that is what the
-    /// person can act on: a meeting that heard nothing is a system-audio grant, and text
-    /// that could not be typed is on the clipboard already — the row says how to get it.
-    enum Failure: Equatable {
-        case speechModel
-        case aiProvider
-        case systemAudio
-        case insertion
-
-        var message: String {
-            switch self {
-            case .speechModel: "Speech model failed"
-            case .aiProvider: "AI provider failed"
-            case .systemAudio: "System audio isn\u{2019}t allowed"
-            case .insertion: "Couldn\u{2019}t type here. Copied — press ⌘V"
-            }
-        }
-
-        /// The insertion line is a sentence, not a verdict, and needs the room.
-        var width: CGFloat {
-            self == .insertion ? 300 : 210
-        }
-    }
+    /// Which part broke — `FailureKind`, decided by the coordinator that saw it happen. The
+    /// pill only turns the kind into words; it never reads the message.
+    typealias Failure = FailureKind
 
     // MARK: - State
 
@@ -253,7 +230,7 @@ final class PanelModel {
             CGSize(width: 200, height: 48)
         case .failed(let failure):
             // The message and the way out — the two-word failure needs no mode icon.
-            CGSize(width: failure.width, height: 48)
+            CGSize(width: failure.pillWidth, height: 48)
         }
         // The bubbles ride above the row, so they are window height, not row height.
         if showsBubbles { size.height += Self.bubbleReach }

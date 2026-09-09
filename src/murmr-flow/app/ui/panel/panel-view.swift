@@ -255,7 +255,7 @@ struct PanelView: View {
     private func failed(_ failure: PanelModel.Failure) -> some View {
         row {
             HStack(spacing: 8) {
-                Text(failure.message)
+                Text(failure.headline)
                     .font(Theme.Text.bodyStrong)
                     // Red, not gold: gold is the colour of the chosen thing everywhere
                     // else in the app, and a fault is not that.

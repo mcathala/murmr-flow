@@ -181,7 +181,7 @@ struct DictationView: View {
         if dictation.stage.isRecording, !dictation.preview.isEmpty {
             return dictation.preview
         }
-        if case .failed(let message) = dictation.stage { return message }
+        if case .failed(_, let message) = dictation.stage { return message }
         if !settings.cleanupEnabled {
             return "Clean-up is off. Style and language don\u{2019}t apply."
         }

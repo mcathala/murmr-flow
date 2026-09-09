@@ -114,8 +114,8 @@ struct NotetakerView: View {
                 LevelMeter(label: "Them", level: meetings.themLevel)
                 Button("Discard") { confirmingDiscard = true }
                     .controlSize(.small)
-            } else if case .failed(let message) = meetings.stage,
-                      message.contains("System Audio Recording") {
+            } else if case .failed(let kind, _) = meetings.stage,
+                      kind == .systemAudio || kind == .microphone {
                 // The one failure with a door to open. The message already names the
                 // pane; this walks there.
                 Button("Open System Settings") { permissions.openSystemAudioSettings() }
@@ -188,7 +188,7 @@ struct NotetakerView: View {
 
     private var recordSubhead: String {
         switch meetings.stage {
-        case .failed(let message):
+        case .failed(_, let message):
             message
         case .transcribing:
             "This runs faster than the meeting did — a moment for a long one."

@@ -27,7 +27,9 @@ final class DictationCoordinator {
         case transcribing
         case cleaning
         case injecting
-        case failed(String)
+        /// Which part broke, and the sentence for Home. The kind is decided here, where
+        /// the failure is seen, so the pill never has to guess it from the words.
+        case failed(FailureKind, String)
 
         var isRecording: Bool { self == .recording }
         var isBusy: Bool {
@@ -52,7 +54,7 @@ final class DictationCoordinator {
         /// away, so a failure showed a bare "Failed" with nothing actionable.
         var detail: String? {
             switch self {
-            case .failed(let message): message
+            case .failed(_, let message): message
             default: nil
             }
         }
@@ -214,7 +216,7 @@ final class DictationCoordinator {
             hotkeyActive = true
         } catch {
             hotkeyActive = false
-            stage = .failed(error.localizedDescription)
+            stage = .failed(.speechModel, error.localizedDescription)
         }
     }
 
@@ -229,7 +231,7 @@ final class DictationCoordinator {
     func beginDictation() {
         guard !stage.isBusy else { return }
         guard !isSuspended else {
-            stage = .failed("A meeting is being recorded. Stop it first.")
+            stage = .failed(.microphone, "A meeting is being recorded. Stop it first.")
             return
         }
 
@@ -239,20 +241,24 @@ final class DictationCoordinator {
         if loader.models == nil {
             // A fast load deliberately shows no busy state, so check the flag too.
             if loader.isPreparing {
-                stage = .failed("The speech model is still getting ready.")
+                stage = .failed(.speechModel, "The speech model is still getting ready.")
                 return
             }
             switch loader.state {
             case .preparing:
-                stage = .failed("The speech model is still getting ready.")
+                stage = .failed(.speechModel, "The speech model is still getting ready.")
             case .downloading(let fraction):
-                stage = .failed("Still downloading the speech model — \(Int(fraction * 100))%.")
+                stage = .failed(
+                    .speechModel, "Still downloading the speech model — \(Int(fraction * 100))%."
+                )
             case .loading:
-                stage = .failed("The speech model is still loading.")
+                stage = .failed(.speechModel, "The speech model is still loading.")
             case .failed(let message):
-                stage = .failed(message)
+                stage = .failed(.speechModel, message)
             case .notLoaded, .ready:
-                stage = .failed("The speech model isn't loaded. Open Settings › Speech model.")
+                stage = .failed(
+                    .speechModel, "The speech model isn't loaded. Open Settings › Speech model."
+                )
                 Task { await warmUp() }
             }
             return
@@ -278,7 +284,8 @@ final class DictationCoordinator {
                 mediaPauseTask = Task { [media] in await media.pauseIfPlaying() }
             }
         } catch {
-            stage = .failed(error.localizedDescription)
+            // Only the recorder can throw here.
+            stage = .failed(.microphone, error.localizedDescription)
         }
     }
 
@@ -404,7 +411,12 @@ final class DictationCoordinator {
             )
             stage = .idle
         } catch {
-            stage = .failed(error.localizedDescription)
+            // Everything that can throw in the loop is capture, resampling or the model;
+            // clean-up and insertion never throw, they leave a note on the run instead.
+            stage = .failed(
+                error is MicRecorder.RecorderError ? .microphone : .speechModel,
+                error.localizedDescription
+            )
         }
 
         // Always restore, including on the failure paths above.
