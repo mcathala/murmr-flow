@@ -165,9 +165,13 @@ final class PermissionManager {
         // is how the first version of this fix managed to fix nothing. The entitlement
         // would cost its own "wants to control System Settings" prompt; a plain kill costs
         // neither, and waits for the corpse before opening so the URL cannot reanimate it.
+        //
+        // Not when System Settings is already in front, though: then the person is
+        // looking at it, on this Space, and killing the window under them to bring it
+        // back is worse than the pane switching in place.
         let running = NSRunningApplication.runningApplications(
             withBundleIdentifier: "com.apple.systempreferences"
-        )
+        ).filter { !$0.isActive }
         running.forEach { _ = $0.forceTerminate() }
         Task { @MainActor in
             for _ in 0..<10 where running.contains(where: { !$0.isTerminated }) {
