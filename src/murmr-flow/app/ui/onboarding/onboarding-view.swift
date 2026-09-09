@@ -427,7 +427,7 @@ struct OnboardingView: View {
                 slot: .meeting,
                 key: settings.meetingHotkey,
                 steps: [
-                    "Press once when the meeting starts.",
+                    "Press once when you want to take notes.",
                     "Talk, listen.",
                     "Press again when it ends. You get notes with who said what.",
                 ]
