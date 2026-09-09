@@ -19,6 +19,14 @@ enum ProviderCatalog {
         /// Whether the base URL is expected to be edited.
         let requiresCustomBaseURL: Bool
         let suggestedModels: [String]
+        /// The provider's own mark, a file under `Resources/Providers`. Nil draws a
+        /// monogram. Sources and licences: `resources/providers/SOURCES.md`.
+        var logo: String? = nil
+        /// Whether the mark is a full tile with its own background, to be shown edge to
+        /// edge, rather than a glyph to be centred in ours.
+        var logoIsTile: Bool = false
+        /// Addresses worth offering as chips when the endpoint is the user's to type.
+        var suggestedEndpoints: [String] = []
     }
 
     static let groq = Entry(
@@ -32,7 +40,9 @@ enum ProviderCatalog {
         suggestedModels: [
             "openai/gpt-oss-120b",
             "openai/gpt-oss-20b",
-        ]
+        ],
+        logo: "groq.svg",
+        logoIsTile: true
     )
 
     /// Hosts the same gpt-oss-120b as Groq with a free tier five times the size — 1M
@@ -48,7 +58,8 @@ enum ProviderCatalog {
         suggestedModels: [
             "gpt-oss-120b",
             "qwen-3.8-27b",
-        ]
+        ],
+        logo: "cerebras.png"
     )
 
     /// Ollama's hosted models, not the local server — that one is a Custom endpoint at
@@ -65,7 +76,8 @@ enum ProviderCatalog {
         suggestedModels: [
             "gpt-oss:120b",
             "gpt-oss:20b",
-        ]
+        ],
+        logo: "ollama.svg"
     )
 
     /// One key, every model. The free routes are rationed to 50 requests a day unless the
@@ -81,7 +93,8 @@ enum ProviderCatalog {
         suggestedModels: [
             "openai/gpt-oss-120b",
             "openai/gpt-oss-20b",
-        ]
+        ],
+        logo: "openrouter.svg"
     )
 
     /// The one most people already have an account for. Google's OpenAI-compatible
@@ -99,26 +112,40 @@ enum ProviderCatalog {
         suggestedModels: [
             "gemini-3.5-flash-lite",
             "gemini-3.8-flash",
-        ]
+        ],
+        logo: "gemini.svg"
     )
 
     /// Same code path with an editable URL. Near-zero work, and it covers a local Ollama or
     /// LM Studio and anything self-hosted without provider-specific code — as well as
     /// keeping the abstraction honest.
+    ///
+    /// Just "Custom" to the user. It was "Custom (OpenAI-compatible)", which named the
+    /// protocol in the one place nobody can act on it; what it means — any server that
+    /// speaks the OpenAI chat API, and nothing else — is said in the editor instead.
     static let custom = Entry(
         id: "custom",
-        displayName: "Custom (OpenAI-compatible)",
+        displayName: "Custom",
         defaultBaseURL: "",
         defaultModel: "",
         keyURL: nil,
         // A model served on this machine wants no key.
         requiresKey: false,
         requiresCustomBaseURL: true,
-        suggestedModels: [
-            "http://localhost:11434/v1 — Ollama on this Mac",
-            "http://localhost:1234/v1 — LM Studio",
+        suggestedModels: [],
+        suggestedEndpoints: [
+            "http://localhost:11434/v1",
+            "http://localhost:1234/v1",
         ]
     )
+
+    /// One sentence on what Custom takes, for the editor and onboarding. The answer to
+    /// "what if my server is not OpenAI-compatible" is that it will not work: the app
+    /// speaks that one API, and so do all five providers above.
+    static let customExplanation =
+        "Any server that speaks the OpenAI chat API: Ollama, LM Studio, vLLM and most "
+        + "hosted providers. Anything else won\u{2019}t work. Ollama on this Mac is the "
+        + "first address, LM Studio the second."
 
     static let all: [Entry] = [groq, cerebras, ollama, openRouter, gemini, custom]
 

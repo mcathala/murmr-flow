@@ -100,6 +100,13 @@ cp resources/fonts/*.ttf "$APP/Contents/Resources/Fonts/"
 cp resources/fonts/*-OFL.txt "$APP/Contents/Resources/Fonts/"
 
 # ---------------------------------------------------------------------------
+# Provider marks
+# ---------------------------------------------------------------------------
+# The logos beside each clean-up provider. Sources and licences: resources/providers/SOURCES.md.
+mkdir -p "$APP/Contents/Resources/Providers"
+cp resources/providers/*.svg resources/providers/*.png "$APP/Contents/Resources/Providers/"
+
+# ---------------------------------------------------------------------------
 # App icon
 # ---------------------------------------------------------------------------
 # Built by its own script, cached on the SVG's hash — see that script. Info.plist names it

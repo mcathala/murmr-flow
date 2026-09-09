@@ -278,6 +278,7 @@ struct OnboardingView: View {
     private func choiceChip(
         _ title: String,
         flag: String? = nil,
+        image: NSImage? = nil,
         fills: Bool = false,
         isOn: Bool,
         action: @escaping () -> Void
@@ -287,6 +288,15 @@ struct OnboardingView: View {
                 if let flag {
                     // The system face, not Mona Sans: flags are emoji and only render there.
                     Text(flag).font(.system(size: 13))
+                }
+                if let image {
+                    // A provider's mark, the same one Settings shows beside its row.
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 13, height: 13)
+                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                 }
                 Text(title)
                     .font(Theme.Text.body)
@@ -611,7 +621,11 @@ struct OnboardingView: View {
         return VStack(alignment: .leading, spacing: 10) {
             FlowLayout(spacing: 6) {
                 ForEach(ProviderCatalog.all) { candidate in
-                    choiceChip(candidate.displayName, isOn: candidate.id == providers.activeID) {
+                    choiceChip(
+                        candidate.displayName,
+                        image: ProviderMark.image(for: candidate),
+                        isOn: candidate.id == providers.activeID
+                    ) {
                         // Choosing here *is* choosing the one in use: on a first launch
                         // there is nothing else it could mean.
                         dictation.activateProvider(candidate.id)
@@ -686,7 +700,8 @@ struct OnboardingView: View {
         let host = entry.keyURL.flatMap { URL(string: $0)?.host } ?? ""
         let lines: [String] = entry.requiresCustomBaseURL
             ? [
-                "Enter the address of any OpenAI-compatible server. A local Ollama is "
+                "Enter the address of a server that speaks the OpenAI chat API — Ollama, "
+                    + "LM Studio, vLLM. Others won\u{2019}t work. Ollama on this Mac is "
                     + "http://localhost:11434/v1.",
                 "Type the name of the model it serves.",
                 "Add a key only if the server asks for one.",

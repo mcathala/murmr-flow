@@ -222,13 +222,11 @@ struct AICleanupPane: View {
         return Card(highlighted: isActive) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
-                    Monogram(name: entry.displayName)
+                    ProviderMark(entry: entry)
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(entry.displayName).font(.callout.weight(.semibold))
-                        Text(providers.state(for: entry.id).model.isEmpty
-                             ? "No model set"
-                             : providers.state(for: entry.id).model)
+                        Text(subtitle(for: entry))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -269,6 +267,16 @@ struct AICleanupPane: View {
         editing = editing == id ? nil : id
     }
 
+    /// The model in use, or what the row is for when nothing is set yet. Custom says
+    /// what kind of server it takes, since its name no longer does.
+    private func subtitle(for entry: ProviderCatalog.Entry) -> String {
+        let model = providers.state(for: entry.id).model
+        if !model.isEmpty { return model }
+        return entry.requiresCustomBaseURL
+            ? "Your own server: Ollama, LM Studio, vLLM…"
+            : "No model set"
+    }
+
     // MARK: - Editor
 
     /// Expands in place, and holds *everything* about this provider. The model used to sit
@@ -279,13 +287,32 @@ struct AICleanupPane: View {
             Divider()
 
             if entry.requiresCustomBaseURL {
+                // What kind of server this takes, before the field that takes it. The
+                // provider's name used to carry this as "(OpenAI-compatible)", which named
+                // the protocol without saying what it meant or what happens otherwise.
+                Text(ProviderCatalog.customExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 LabeledContent("Endpoint") {
-                    TextField("https://…", text: binding(\.baseURL, for: entry.id))
+                    TextField("http://…", text: binding(\.baseURL, for: entry.id))
                         .textFieldStyle(.roundedBorder)
                         .focused($focused, equals: .baseURL(entry.id))
                         .onSubmit { retest(entry.id) }
                 }
                 .font(.caption)
+
+                if !entry.suggestedEndpoints.isEmpty {
+                    SuggestionChips(
+                        items: entry.suggestedEndpoints,
+                        current: providers.state(for: entry.id).baseURL,
+                        help: "Use this address"
+                    ) { url in
+                        providers.update(baseURL: url, for: entry.id)
+                        retest(entry.id)
+                    }
+                }
             }
 
             LabeledContent("Model") {
