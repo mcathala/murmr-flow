@@ -112,8 +112,10 @@ struct PromptsSection: View {
 
             // The ways out of an edit you regret. Reset appears only once a built-in has
             // drifted from our wording; Delete is there for every prompt, ours included,
-            // except the last one standing. Duplicate is gone — New prompt starts from plain
-            // instructions, which is a better start than a copy.
+            // except the last one standing and the ones a mode is using — deleting those
+            // would silently move that mode onto whichever prompt came first, so the
+            // button says why it won't rather than doing that. Duplicate is gone — New
+            // prompt starts from plain instructions, which is a better start than a copy.
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 if let shipped = PromptStore.shipped(preset), shipped != preset {
@@ -127,9 +129,28 @@ struct PromptsSection: View {
                 }
                 .controlSize(.small)
                 .foregroundStyle(Theme.Palette.danger)
-                .disabled(!prompts.canDelete(preset))
+                .disabled(!prompts.canDelete(preset) || usedBy(preset) != nil)
+                .help(deleteHelp(preset))
             }
         }
+    }
+
+    /// Which mode, if any, is using this prompt right now.
+    private func usedBy(_ preset: PromptPreset) -> String? {
+        switch (prompts.dictationPromptID == preset.id, prompts.notetakerPromptID == preset.id) {
+        case (true, true): "Dictation and Notetaker"
+        case (true, false): "Dictation"
+        case (false, true): "Notetaker"
+        case (false, false): nil
+        }
+    }
+
+    private func deleteHelp(_ preset: PromptPreset) -> String {
+        if let mode = usedBy(preset) {
+            return "\(mode) uses this style. Pick another one first."
+        }
+        if !prompts.canDelete(preset) { return "The last style can\u{2019}t be deleted." }
+        return "Delete this style"
     }
 
     // MARK: - Bindings
@@ -184,10 +205,21 @@ struct AssignmentToggle: View {
     let title: String
     let symbol: String
     let isOn: Bool
+    /// Whether clicking the lit pill does anything. On a style row it does not — a mode
+    /// always has *some* prompt — but the pane's header row uses the same pill as an
+    /// on/off switch, and there the lit click is the off.
+    var togglesOff = false
+    /// Tooltips for the two states, when "Used for" / "Use for" are the wrong verbs.
+    var help: (on: String, off: String)?
     let action: () -> Void
 
+    private var tooltip: String {
+        if let help { return isOn ? help.on : help.off }
+        return isOn ? "Used for \(title)" : "Use for \(title)"
+    }
+
     var body: some View {
-        Button(action: { if !isOn { action() } }) {
+        Button(action: { if !isOn || togglesOff { action() } }) {
             HStack(spacing: 4) {
                 Image(systemName: symbol).font(.system(size: 8))
                 Text(title).font(.caption2.weight(.medium))
@@ -203,7 +235,7 @@ struct AssignmentToggle: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help(isOn ? "Used for \(title)" : "Use for \(title)")
-        .accessibilityLabel(isOn ? "Used for \(title)" : "Use for \(title)")
+        .help(tooltip)
+        .accessibilityLabel(tooltip)
     }
 }

@@ -109,6 +109,9 @@ final class DictationCoordinator {
     /// Which provider is mid-test, if any. The *result* lives with the provider in
     /// `ProviderStore`, so it survives switching away and relaunching.
     private(set) var testingProviderID: String?
+    /// The provider asked for while another test was running. One slot: only the newest
+    /// request matters, because it describes the current configuration.
+    private var pendingTestID: String?
 
     /// Microphone loudness, 0…1, for the waveform.
     private(set) var micLevel: Float = 0
@@ -502,8 +505,16 @@ final class DictationCoordinator {
     /// Takes an id so a provider can be proved without being made active — setting up a
     /// second endpoint used to mean switching to it first, which took the working one out
     /// of service to try an untested one.
+    ///
+    /// Tests are run by every change that could alter the answer — a key, a model, an
+    /// endpoint — so two can be asked for faster than one finishes. The second waits, and
+    /// only the newest waits: five quick edits produce two tests, not five, and the last
+    /// one is about what is configured now.
     func testProvider(_ id: String) {
-        guard testingProviderID == nil else { return }
+        guard testingProviderID == nil else {
+            pendingTestID = id
+            return
+        }
         guard let config = providers.config(for: id) else {
             providers.setVerification(.failed("No endpoint or model is set."), for: id)
             return
@@ -511,7 +522,13 @@ final class DictationCoordinator {
         testingProviderID = id
 
         Task { @MainActor in
-            defer { testingProviderID = nil }
+            defer {
+                testingProviderID = nil
+                if let next = pendingTestID {
+                    pendingTestID = nil
+                    testProvider(next)
+                }
+            }
 
             let clock = ContinuousClock()
             let started = clock.now
