@@ -42,6 +42,11 @@ struct DictationCoordinatorTests {
                 url: Scratch.folder("history").appendingPathComponent("dictations.jsonl")
             )
             let providers = ProviderStore(defaults: defaults)
+            // The Custom provider needs no key, so "usable" does not depend on what is in
+            // this machine's Keychain. The first run of these tests passed here and
+            // failed on CI for exactly that reason: a Groq key on the developer's Mac.
+            providers.update(baseURL: "http://localhost:11434/v1", model: "test-model", for: "custom")
+            providers.activeID = "custom"
             let prompts = PromptStore(defaults: defaults)
             let speech = SpeechModelStore(defaults: defaults)
 
