@@ -36,6 +36,25 @@ labels.
 `build.sh` accepts `CONFIG=release`, `UNIVERSAL=1`, `VERSION=` and
 `SIGNING_IDENTITY=`.
 
+## Tests
+
+```sh
+swift test
+```
+
+With Command Line Tools but no Xcode, `swift-testing` is off the default search
+paths and that fails with `no such module 'Testing'`. Point at the CLT copy:
+
+```sh
+FW=/Library/Developer/CommandLineTools/Library/Developer/Frameworks
+LIB=/Library/Developer/CommandLineTools/Library/Developer/usr/lib
+swift test --arch arm64 -Xswiftc -F"$FW" -Xlinker -F"$FW" \
+  -Xlinker -rpath -Xlinker "$FW" -Xlinker -rpath -Xlinker "$LIB"
+```
+
+The snapshot suites write PNGs when `MURMR_SNAPSHOT_DIR` is set, which is the
+quickest way to look at a view without launching the app.
+
 ## Scripts
 
 | Script | Does |
