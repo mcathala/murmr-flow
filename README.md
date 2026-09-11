@@ -59,8 +59,12 @@ quickest way to look at a view without launching the app.
 
 | Script | Does |
 |---|---|
+| `dev.sh` | The developer loop: rebuild, install, relaunch (`--fresh` for a new-user run) |
 | `build.sh` | Compile, assemble the `.app`, sign it |
 | `install.sh` | Copy to `/Applications` and launch |
+| `build-adapter.sh` | Build the vendored mediaremote-adapter framework (own cache) |
+| `build-icon.sh` | Rasterise the app icon from the brand SVG (own cache) |
+| `release.sh` | Build, zip, tag, publish to GitHub Releases |
 | `verify-signing.sh` | Print signature, Team ID, CDHash, entitlements |
 | `make-cert.sh` | Create a persistent self-signed certificate |
 | `reset-permissions.sh` | Revoke permission grants to retest the flow |
