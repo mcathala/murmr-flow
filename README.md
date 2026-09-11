@@ -36,12 +36,35 @@ labels.
 `build.sh` accepts `CONFIG=release`, `UNIVERSAL=1`, `VERSION=` and
 `SIGNING_IDENTITY=`.
 
+## Tests
+
+```sh
+swift test
+```
+
+With Command Line Tools but no Xcode, `swift-testing` is off the default search
+paths and that fails with `no such module 'Testing'`. Point at the CLT copy:
+
+```sh
+FW=/Library/Developer/CommandLineTools/Library/Developer/Frameworks
+LIB=/Library/Developer/CommandLineTools/Library/Developer/usr/lib
+swift test --arch arm64 -Xswiftc -F"$FW" -Xlinker -F"$FW" \
+  -Xlinker -rpath -Xlinker "$FW" -Xlinker -rpath -Xlinker "$LIB"
+```
+
+The snapshot suites write PNGs when `MURMR_SNAPSHOT_DIR` is set, which is the
+quickest way to look at a view without launching the app.
+
 ## Scripts
 
 | Script | Does |
 |---|---|
+| `dev.sh` | The developer loop: rebuild, install, relaunch (`--fresh` for a new-user run) |
 | `build.sh` | Compile, assemble the `.app`, sign it |
 | `install.sh` | Copy to `/Applications` and launch |
+| `build-adapter.sh` | Build the vendored mediaremote-adapter framework (own cache) |
+| `build-icon.sh` | Rasterise the app icon from the brand SVG (own cache) |
+| `release.sh` | Build, zip, tag, publish to GitHub Releases |
 | `verify-signing.sh` | Print signature, Team ID, CDHash, entitlements |
 | `make-cert.sh` | Create a persistent self-signed certificate |
 | `reset-permissions.sh` | Revoke permission grants to retest the flow |
