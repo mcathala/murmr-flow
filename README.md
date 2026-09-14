@@ -52,6 +52,26 @@ labels.
 `build.sh` accepts `CONFIG=release`, `UNIVERSAL=1`, `VERSION=` and
 `SIGNING_IDENTITY=`.
 
+## AI clean-up
+
+Clean-up turns the raw transcript into punctuated, filler-free text. It is optional,
+and it is the one step that sends anything off the machine. Any server that speaks the
+OpenAI chat API works; Settings › AI clean-up offers:
+
+| Provider | Needs a key |
+|---|---|
+| Groq | yes |
+| Cerebras | yes |
+| Ollama Cloud | yes |
+| OpenRouter | yes |
+| Google Gemini | yes |
+| Custom — any OpenAI-compatible URL | no, unless the server asks for one |
+
+Custom is how a local model runs: point it at Ollama (`http://localhost:11434/v1`) or
+LM Studio (`http://localhost:1234/v1`) and nothing leaves the machine at all. If the
+provider is slow, down or rejects the request, the raw transcript is typed instead —
+a dictation is never lost to a failed clean-up.
+
 ## Tests
 
 ```sh
