@@ -31,7 +31,9 @@ labels.
 ## Requirements
 
 - macOS 14 or later, Apple Silicon
-- Xcode 26 (or matching Command Line Tools)
+- Xcode 26, or the matching Command Line Tools on their own. The build works with
+  either; only `swift test` needs the extra flags described under [Tests](#tests) when
+  Xcode is absent.
 - A code signing certificate — an `Apple Development` one is ideal:
 
   ```sh
