@@ -12,6 +12,22 @@ labels.
 > **Work in progress.** Both jobs work end to end. Still a personal daily-driver
 > rather than something to hand to anyone who can't run a build script.
 
+## What stays on the machine
+
+- **Speech-to-text** runs on-device with NVIDIA's Parakeet models, through
+  [FluidAudio](https://github.com/FluidInference/FluidAudio) on the Neural Engine. The
+  model (~600 MB) is downloaded on first use and cached; audio is never uploaded.
+- **Dictation audio** lives in memory only and is gone once the text is typed. The
+  dictation log — raw and cleaned text, when, and which app it went to — is at
+  `~/Library/Application Support/Murmr Flow/dictations.jsonl`.
+- **Meeting audio** is written to a temporary folder while recording and deleted as
+  soon as the note is saved. The note is the only copy.
+- **Notes** are plain Markdown files with YAML front matter in `~/Documents/MurmurNotes`.
+  Edit or delete them in any editor; the app re-reads the folder.
+- **API keys** are stored in the macOS Keychain.
+- **What leaves the machine** is the transcript text, sent to the clean-up provider you
+  configure, and nothing if you configure none.
+
 ## Requirements
 
 - macOS 14 or later, Apple Silicon
