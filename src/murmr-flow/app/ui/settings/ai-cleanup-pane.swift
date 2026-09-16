@@ -107,36 +107,24 @@ struct AICleanupPane: View {
         settings.cleanupEnabled || settings.notetakerCleanupEnabled
     }
 
+    /// The one switch, which moves both jobs together.
+    ///
+    /// The two were separate controls because the trade differs — dictation clean-up costs
+    /// seconds before text appears, a meeting is already over — but two switches for one
+    /// question was a header row nobody read twice, and the store keeps both so an install
+    /// that had only one of them on stays that way until this is touched.
+    private var cleanupOn: Binding<Bool> {
+        Binding(
+            get: { isCleaningSomething },
+            set: { on in
+                settings.cleanupEnabled = on
+                settings.notetakerCleanupEnabled = on
+            }
+        )
+    }
+
     var body: some View {
         PaneScroll(title: "AI clean-up") {
-            // One row, two pills: the same control the style rows use to say which job
-            // a prompt is for, so the pane reads as one table — this row is the header.
-            // The difference is that these switch *off* too; a lit style pill does not.
-            SettingRow(title: "Activate for") {
-                HStack(spacing: 8) {
-                    // Empty space the width of the rows' Edit button and key slot, so the
-                    // two pills sit in the same column as the ones below them.
-                    Color.clear
-                        .frame(
-                            width: PromptsSection.editWidth + PromptsSection.keyWidth + 8,
-                            height: 1
-                        )
-                        .accessibilityHidden(true)
-                    AssignmentToggle(
-                        title: "Dictation", symbol: "mic.fill",
-                        isOn: settings.cleanupEnabled,
-                        togglesOff: true,
-                        help: (on: "Turn off for dictation", off: "Clean up dictation")
-                    ) { settings.cleanupEnabled.toggle() }
-                    AssignmentToggle(
-                        title: "Notetaker", symbol: "text.document",
-                        isOn: settings.notetakerCleanupEnabled,
-                        togglesOff: true,
-                        help: (on: "Turn off for Notetaker", off: "Clean up Notetaker")
-                    ) { settings.notetakerCleanupEnabled.toggle() }
-                }
-            }
-
             if isCleaningSomething, !providers.isUsable(providers.activeID) {
                 WarningRow(
                     message: "\(providers.activeEntry.displayName) isn't ready, so "
@@ -216,7 +204,7 @@ struct AICleanupPane: View {
 
     private var switchedOff: some View {
         Text("Dictation and Notetaker both keep the raw transcript. No provider, no key, "
-             + "no network.")
+             + "no network. The switch is on the provider, under Provider.")
             .font(.callout)
             .foregroundStyle(.secondary)
     }
@@ -258,7 +246,18 @@ struct AICleanupPane: View {
                     }
                     .controlSize(.small)
 
-                    if !isActive {
+                    if isActive {
+                        // Clean-up on or off, on the row that says which provider would
+                        // do it. It was a header row of its own above the tabs, which put
+                        // the switch one subject away from the thing it switches — and
+                        // made the first row of the pane something nobody needed twice.
+                        Toggle("", isOn: cleanupOn)
+                            .labelsHidden()
+                            .help(isCleaningSomething
+                                  ? "Turn clean-up off — dictations and notes keep the raw transcript"
+                                  : "Clean up dictations and notes through this provider")
+                            .accessibilityLabel("AI clean-up")
+                    } else {
                         Button("Use") { dictation.activateProvider(entry.id) }
                             .controlSize(.small)
                             .buttonStyle(.borderedProminent)

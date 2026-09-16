@@ -67,19 +67,6 @@ struct PromptsSection: View {
                     Text(preset.name).font(.callout.weight(.semibold))
                     Spacer(minLength: 0)
 
-                    // Left to right: what this style *is*, then how you reach it, then
-                    // what uses it. Edit and the key are about the style itself; the two
-                    // pills are its claims on the two jobs, and they end the row because
-                    // they are what the eye runs down the list to compare.
-                    Button(isOpen ? "Done" : "Edit") { toggle(preset) }
-                        .controlSize(.small)
-                        // Fixed, because "Done" is wider than "Edit" and opening one row
-                        // would otherwise shunt every control to its right.
-                        .frame(width: Self.editWidth)
-
-                    keySlot(preset)
-                        .frame(width: Self.keyWidth)
-
                     // Which mode uses this prompt, and the way to change it, in one control
                     // per mode on every row. The lit one reads as a badge; the others are a
                     // click away. Nothing turns a mode's prompt *off* here — clean-up has
@@ -92,6 +79,11 @@ struct PromptsSection: View {
                         title: "Notetaker", symbol: "text.document",
                         isOn: prompts.notetakerPromptID == preset.id
                     ) { prompts.notetakerPromptID = preset.id }
+
+                    keySlot(preset)
+
+                    Button(isOpen ? "Done" : "Edit") { toggle(preset) }
+                        .controlSize(.small)
                 }
                 // The whole header opens the editor, not only the button: the row is the
                 // thing you want to edit, and a 40-point target at its far end is not.
@@ -126,12 +118,6 @@ struct PromptsSection: View {
         selected = selected == preset.id ? nil : preset.id
     }
 
-    /// The two columns left of the pills, at one width down the list — the same reason the
-    /// pills themselves are one width. A keycap is far wider than "Add key", so without
-    /// this a single bound style would push that row's pills out of the column and the
-    /// list would stop reading as a table.
-    static let editWidth: CGFloat = 52
-    static let keyWidth: CGFloat = 116
 
     // MARK: - The style's own key
 

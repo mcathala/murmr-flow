@@ -57,24 +57,10 @@ struct PromptRowsSnapshotTests {
         else { return }
         try png.write(to: URL(fileURLWithPath: directory).appendingPathComponent("prompts.png"))
 
-        // The pane's header row above the rows, so the two pills can be seen lined up with
-        // the rows' — that alignment is the reason they are pills. Composed here rather
-        // than rendering `AICleanupPane`: `ImageRenderer` draws a `ScrollView` as nothing.
+        // The Styles tab as a whole: the styles, then the apps that override them.
+        // Composed here rather than rendering `AICleanupPane`, because `ImageRenderer`
+        // draws a `ScrollView` as nothing.
         let pane = VStack(alignment: .leading, spacing: 14) {
-            SettingRow(title: "Activate for") {
-                HStack(spacing: 8) {
-                    Color.clear.frame(
-                        width: PromptsSection.editWidth + PromptsSection.keyWidth + 8,
-                        height: 1
-                    )
-                    AssignmentToggle(
-                        title: "Dictation", symbol: "mic.fill", isOn: true, togglesOff: true
-                    ) {}
-                    AssignmentToggle(
-                        title: "Notetaker", symbol: "text.document", isOn: false, togglesOff: true
-                    ) {}
-                }
-            }
             PromptsSection(prompts: prompts, bindKey: { _, _ in nil })
             AppStylesSection(prompts: prompts)
         }
