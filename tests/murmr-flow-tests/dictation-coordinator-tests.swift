@@ -26,6 +26,7 @@ struct DictationCoordinatorTests {
         let providers: ProviderStore
         let prompts: PromptStore
         let speech: SpeechModelStore
+        let frontmost: FakeFrontmost
         let coordinator: DictationCoordinator
 
         init() {
@@ -49,6 +50,7 @@ struct DictationCoordinatorTests {
             providers.activeID = "custom"
             let prompts = PromptStore(defaults: defaults)
             let speech = SpeechModelStore(defaults: defaults)
+            let frontmost = FakeFrontmost()
 
             self.mic = mic
             self.transcriber = transcriber
@@ -61,6 +63,7 @@ struct DictationCoordinatorTests {
             self.providers = providers
             self.prompts = prompts
             self.speech = speech
+            self.frontmost = frontmost
             coordinator = DictationCoordinator(
                 settings: settings,
                 loader: SpeechModelLoader(),
@@ -75,15 +78,17 @@ struct DictationCoordinatorTests {
                 cleanup: cleaner,
                 media: media,
                 inject: { try sink.inject($0) },
+                frontmost: { frontmost.app },
                 assumeModelsLoaded: true
             )
             coordinator.onStageChange = { stages.stages.append($0) }
         }
 
-        /// One whole dictation: press, the transcriber hears `text`, release.
-        func dictate(_ text: String) async {
+        /// One whole dictation: press, the transcriber hears `text`, release. `styleID` is
+        /// set when the key held was a style's own.
+        func dictate(_ text: String, styleID: UUID? = nil) async {
             transcriber.outputs = [.success(text)]
-            coordinator.beginDictation()
+            coordinator.beginDictation(styleID: styleID)
             await coordinator.endDictation()
         }
     }
@@ -294,5 +299,89 @@ struct DictationCoordinatorTests {
         await Scratch.waitUntil { rig.coordinator.testingProviderID == nil }
 
         #expect(rig.providers.state(for: "groq").verification == .failed("invalid key"))
+    }
+
+    // MARK: - Which style ran
+
+    @Test("A rule for the app in front picks the style")
+    func styleFollowsTheApp() async {
+        let rig = Rig()
+        let formal = rig.prompts.presets.first { $0.name == "Formal" }!
+        rig.frontmost.set("Mail", "com.apple.mail")
+        rig.prompts.setRule(
+            AppStyleRule(
+                bundleID: "com.apple.mail", appName: "Mail", outcome: .style(formal.id)
+            )
+        )
+
+        await rig.dictate("hello there")
+
+        #expect(rig.cleaner.templates.last == formal.template)
+        #expect(rig.history.dictations.first?.promptName == "Formal")
+    }
+
+    @Test("A style's own key beats the rule for the app in front")
+    func keyBeatsTheApp() async {
+        let rig = Rig()
+        let formal = rig.prompts.presets.first { $0.name == "Formal" }!
+        let structure = rig.prompts.presets.first { $0.name == "Structure" }!
+        rig.frontmost.set("Mail", "com.apple.mail")
+        rig.prompts.setRule(
+            AppStyleRule(
+                bundleID: "com.apple.mail", appName: "Mail", outcome: .style(formal.id)
+            )
+        )
+
+        await rig.dictate("hello there", styleID: structure.id)
+
+        #expect(rig.cleaner.templates.last == structure.template)
+    }
+
+    @Test("Off means no request is made, and the words are typed as heard")
+    func offMakesNoRequest() async {
+        let rig = Rig()
+        rig.frontmost.set("Terminal", "com.apple.Terminal")
+        rig.prompts.setRule(
+            AppStyleRule(bundleID: "com.apple.Terminal", appName: "Terminal", outcome: .off)
+        )
+
+        await rig.dictate("cd slash user slash local")
+
+        // The fake upper-cases whatever it cleans, so untouched text is the proof.
+        #expect(rig.sink.texts.last == "cd slash user slash local")
+        #expect(rig.cleaner.providerIDs.last == "none")
+        #expect(rig.history.dictations.first?.promptName == "Off")
+    }
+
+    @Test("Off is a choice, not a fault, so nothing is reported as gone wrong")
+    func offIsNotAFailure() async {
+        let rig = Rig()
+        rig.frontmost.set("Terminal", "com.apple.Terminal")
+        rig.prompts.setRule(
+            AppStyleRule(bundleID: "com.apple.Terminal", appName: "Terminal", outcome: .off)
+        )
+
+        await rig.dictate("ls minus l")
+
+        #expect(rig.coordinator.lastRun?.note == nil)
+        #expect(rig.coordinator.stage == .idle)
+    }
+
+    @Test("The style is settled at key-down, so a rule added mid-dictation doesn't apply")
+    func settledAtKeyDown() async {
+        let rig = Rig()
+        let formal = rig.prompts.presets.first { $0.name == "Formal" }!
+        rig.frontmost.set("Mail", "com.apple.mail")
+        rig.transcriber.outputs = [.success("hello there")]
+
+        rig.coordinator.beginDictation()
+        rig.prompts.setRule(
+            AppStyleRule(
+                bundleID: "com.apple.mail", appName: "Mail", outcome: .style(formal.id)
+            )
+        )
+        await rig.coordinator.endDictation()
+
+        #expect(rig.cleaner.templates.last == rig.prompts.dictationPrompt.template)
     }
 }
