@@ -289,10 +289,14 @@ struct Badge: View {
 /// A mode's claim on a prompt: lit when this prompt is the one it uses.
 ///
 /// Both modes are named on every row, at one width, so the two make a column that lines
-/// up down the list and the eye can read it as a table: which prompt, which mode. The lit
-/// one is the `Badge` — same capsule, same gold; the others are the same words, quiet.
-/// Icons alone were tried first, and a row of unlit circles beside one gold chip read as
+/// up down the list and the eye can read it as a table: which prompt, which mode. Icons
+/// alone were tried first, and a row of unlit circles beside one gold chip read as
 /// clutter rather than as a control.
+///
+/// The lit one is **filled** gold with the ground's own navy on it, the way a ticked
+/// checkbox is filled. Outlined gold on a gold word was the same weight as the row's other
+/// controls, so which style a job used had to be looked for; filled, it is the one thing on
+/// the row you cannot miss, which is what the column is scanned for.
 struct AssignmentToggle: View {
     let title: String
     let symbol: String
@@ -314,15 +318,12 @@ struct AssignmentToggle: View {
         Button(action: { if !isOn || togglesOff { action() } }) {
             HStack(spacing: 4) {
                 Image(systemName: symbol).font(.system(size: 8))
-                Text(title).font(.caption2.weight(.medium))
+                Text(title).font(.caption2.weight(isOn ? .semibold : .medium))
             }
             .frame(width: 84, height: 20)
-            .foregroundStyle(isOn ? Theme.Palette.gold : Theme.Palette.faint)
+            .foregroundStyle(isOn ? Theme.Palette.abyss : Theme.Palette.faint)
             .background(
-                Capsule().fill(isOn ? Theme.Palette.gold.opacity(0.10) : Color.white.opacity(0.04))
-            )
-            .overlay(
-                Capsule().stroke(isOn ? Theme.Palette.gold : Color.clear, lineWidth: 1)
+                Capsule().fill(isOn ? Theme.Palette.gold : Color.white.opacity(0.04))
             )
             .contentShape(Capsule())
         }
