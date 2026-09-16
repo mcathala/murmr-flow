@@ -65,7 +65,13 @@ struct PromptsSection: View {
 
     private func row(_ preset: PromptPreset) -> some View {
         let isOpen = selected == preset.id
-        return Card(highlighted: isOpen) {
+        // Gold on the card's edge means "this is the one in use" — the palette's one rule
+        // for an accent border, and the same thing it means on the provider rows. A style
+        // no job uses is a row you can skip, and until the whole card said so the only
+        // sign was one pill among four controls. Being *open* is not the same claim: the
+        // editor unfolding underneath already says that, and spending the accent on it
+        // meant the row you were reading looked like the row in use.
+        return Card(highlighted: usedBy(preset) != nil) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Text(preset.name).font(.callout.weight(.semibold))
