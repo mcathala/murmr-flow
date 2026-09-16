@@ -139,10 +139,14 @@ struct AICleanupPane: View {
 
             switch facet {
             case .provider:
-                if isCleaningSomething {
-                    SectionLabel(title: "In use")
-                    row(providers.activeEntry, isActive: true)
+                // The in-use row shows whatever the switch is set to, because the switch
+                // is *on* it. Hiding the list while clean-up was off took the way back on
+                // with it, and the only way out was to quit — a switch you can turn off
+                // and not on is not a switch.
+                SectionLabel(title: "In use")
+                row(providers.activeEntry, isActive: true)
 
+                if isCleaningSomething {
                     if !providers.others.isEmpty {
                         SectionLabel(title: "Other providers")
                         ForEach(providers.others) { entry in
@@ -150,7 +154,9 @@ struct AICleanupPane: View {
                         }
                     }
                 } else {
-                    switchedOff
+                    // No list of alternatives while nothing is being cleaned: choosing
+                    // between providers is a question that only starts once one is used.
+                    switchedOff(sayWhere: false)
                 }
             case .prompts:
                 if isCleaningSomething {
@@ -158,7 +164,7 @@ struct AICleanupPane: View {
                 } else {
                     // The list stays, dimmed: what the styles are is worth seeing before
                     // deciding to switch clean-up on. Editing them can wait until it is.
-                    switchedOff
+                    switchedOff(sayWhere: true)
                     styles
                         .opacity(0.45)
                         .disabled(true)
@@ -202,11 +208,17 @@ struct AICleanupPane: View {
         AppStylesSection(prompts: prompts)
     }
 
-    private var switchedOff: some View {
-        Text("Dictation and Notetaker both keep the raw transcript. No provider, no key, "
-             + "no network. The switch is on the provider, under Provider.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
+    /// `sayWhere` sends the reader to the switch, which is worth a clause on a tab that
+    /// does not have it and would be pointing at itself on the one that does.
+    private func switchedOff(sayWhere: Bool) -> some View {
+        Text(
+            "Dictation and Notetaker both keep the raw transcript. No provider, no key, "
+                + "no network."
+                + (sayWhere ? " The switch is on the provider, under Provider." : "")
+        )
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Names only what is actually switched on, so the warning can't claim dictation is

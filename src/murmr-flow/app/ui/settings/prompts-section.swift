@@ -37,6 +37,10 @@ struct PromptsSection: View {
     /// tighter block of their own.
     var body: some View {
         Group {
+            // Named, because By app below is — two lists in one tab, and only one of them
+            // labelled, reads as a list with an afterthought stuck to it.
+            SectionLabel(title: "Styles")
+
             ForEach(prompts.presets) { preset in
                 row(preset)
             }
