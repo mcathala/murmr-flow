@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import SwiftUI
 import Testing
 
@@ -19,6 +20,26 @@ struct PromptRowsSnapshotTests {
         let suite = UserDefaults(suiteName: "murmr-prompt-rows-\(UUID().uuidString)")!
         let prompts = PromptStore(defaults: suite)
         prompts.dictationPromptID = PromptStore.builtIns[1].id
+        // One style with a key of its own and two apps with rules, so the row's key slot
+        // and the By app list are both in the picture rather than in their empty states.
+        prompts.setHotkey(
+            Hotkey(
+                keyCode: 58, modifierRawValue: CGEventFlags.maskSecondaryFn.rawValue,
+                isModifierOnly: true
+            ),
+            for: PromptStore.builtIns[2].id
+        )
+        prompts.setRule(
+            AppStyleRule(
+                bundleID: "com.apple.mail", appName: "Mail",
+                outcome: .style(PromptStore.builtIns[2].id)
+            )
+        )
+        prompts.setRule(
+            AppStyleRule(
+                bundleID: "com.apple.Terminal", appName: "Terminal", outcome: .off
+            )
+        )
 
         let view = VStack(spacing: 8) {
             PromptsSection(prompts: prompts)
@@ -36,22 +57,12 @@ struct PromptRowsSnapshotTests {
         else { return }
         try png.write(to: URL(fileURLWithPath: directory).appendingPathComponent("prompts.png"))
 
-        // The pane's header row above the rows, so the two pills can be seen lined up with
-        // the rows' — that alignment is the reason they are pills. Composed here rather
-        // than rendering `AICleanupPane`: `ImageRenderer` draws a `ScrollView` as nothing.
+        // The Styles tab as a whole: the styles, then the apps that override them.
+        // Composed here rather than rendering `AICleanupPane`, because `ImageRenderer`
+        // draws a `ScrollView` as nothing.
         let pane = VStack(alignment: .leading, spacing: 14) {
-            SettingRow(title: "Activate for") {
-                HStack(spacing: 8) {
-                    AssignmentToggle(
-                        title: "Dictation", symbol: "mic.fill", isOn: true, togglesOff: true
-                    ) {}
-                    AssignmentToggle(
-                        title: "Notetaker", symbol: "text.document", isOn: false, togglesOff: true
-                    ) {}
-                    Button("Edit") {}.controlSize(.small).hidden()
-                }
-            }
-            PromptsSection(prompts: prompts)
+            PromptsSection(prompts: prompts, bindKey: { _, _ in nil })
+            AppStylesSection(prompts: prompts)
         }
         .frame(width: 640)
         .padding(24)

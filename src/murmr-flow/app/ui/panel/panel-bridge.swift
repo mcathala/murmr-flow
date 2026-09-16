@@ -120,8 +120,17 @@ final class PanelBridge {
 
         panel.onPromptChosen = { [weak self] id in
             guard let self else { return }
-            if self.panel.model.mode == .note {
+            let model = self.panel.model
+            if model.mode == .note {
                 self.prompts.notetakerPromptID = id
+            } else if let bundleID = model.targetBundleID,
+                      var rule = self.prompts.appRules.first(where: { $0.bundleID == bundleID }) {
+                // A rule for this app is what is deciding, and the bubble says so — so a
+                // rule is what changes. Setting the standing style here instead would look
+                // like the pill ignoring the click: the rule would still win, and the
+                // bubble would still read the same.
+                rule.outcome = .style(id)
+                self.prompts.setRule(rule)
             } else {
                 self.prompts.dictationPromptID = id
             }
@@ -142,8 +151,30 @@ final class PanelBridge {
 
     private func refreshPrompts() {
         panel.model.promptOptions = prompts.presets.map { (id: $0.id, name: $0.name) }
-        panel.model.promptName = prompts.dictationPrompt.name
-        panel.model.notePromptName = prompts.notetakerPrompt?.name ?? "As spoken"
+        refreshStyle()
+    }
+
+    /// The style the bubble names, and why.
+    ///
+    /// A dictation that is already running keeps the style it was started with — that was
+    /// settled at key-down and is what will actually run, so showing anything else would be
+    /// a promise the finished text would break. Otherwise the answer is resolved fresh
+    /// from the app in front, which is what makes the bubble change as you move between
+    /// windows.
+    private func refreshStyle() {
+        let model = panel.model
+        let noteName = prompts.notetakerPrompt?.name ?? "As spoken"
+        if model.notePromptName != noteName { model.notePromptName = noteName }
+        guard model.mode != .note else {
+            if model.promptDetail != nil { model.promptDetail = nil }
+            return
+        }
+        let choice = (dictation.stage.isBusy ? dictation.currentStyle : nil)
+            ?? prompts.choice(forApp: model.targetBundleID)
+        // Only on a change. This runs on the pump, ten times a second, and an assignment
+        // to an observed property counts as one whether or not the value moved.
+        if model.promptName != choice.displayName { model.promptName = choice.displayName }
+        if model.promptDetail != choice.detail { model.promptDetail = choice.detail }
     }
 
     /// Mirrors Settings for whichever job the pill is showing, so a change made in the
@@ -250,6 +281,10 @@ final class PanelBridge {
         else { return }
         panel.model.targetAppName = app.localizedName
         panel.model.targetAppIcon = app.icon
+        panel.model.targetBundleID = app.bundleIdentifier
+        // The app decides the style, so knowing the app is what makes the bubble able to
+        // say which style is coming — before a word is spoken, which is the whole point.
+        refreshStyle()
     }
 
     // MARK: - Continuous values
@@ -275,6 +310,7 @@ final class PanelBridge {
         let sizeBefore = panel.model.size
         refreshHotkey()
         refreshTranslation()
+        refreshStyle()
         // The bubble appearing or going changes the window's height even when the phase
         // has not moved — a settings change in the window, or the satellite flipping the
         // mode between two jobs with different translation states.

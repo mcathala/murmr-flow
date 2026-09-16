@@ -10,16 +10,37 @@ import SwiftUI
 /// The assignment is shown *on the prompt* — one toggle per mode on every row — rather
 /// than as two dropdowns elsewhere, so the whole arrangement reads in one look and
 /// changes in one click.
+///
+/// A style can also hold **a key of its own**, in the same row and for the same reason:
+/// which jobs use this style, and how you reach it, are the same question. Holding that key
+/// dictates in that style wherever you are, which is why it outranks a rule for the app in
+/// front — pressing a key is the more deliberate act.
 struct PromptsSection: View {
 
     let prompts: PromptStore
+
+    /// Binds a key to a style, or clears it with nil, and answers with why it refused.
+    /// A closure rather than a store, so this view never learns what a watcher is — and so
+    /// a snapshot can render the rows with nothing to arm.
+    var bindKey: ((Hotkey?, UUID) -> String?)?
+
     @State private var selected: UUID?
+
+    /// Which row is listening for a key, if any. One at a time: two recorders would both
+    /// swallow the same keypress.
+    @State private var recordingKey: UUID?
+    @State private var recorder = HotkeyRecorder()
+    @State private var rejected: String?
 
     /// A `Group`, not a `VStack`: the rows become siblings in the enclosing `PaneScroll`,
     /// so they are spaced like every other card in the section instead of forming a
     /// tighter block of their own.
     var body: some View {
         Group {
+            // Named, because By app below is — two lists in one tab, and only one of them
+            // labelled, reads as a list with an afterthought stuck to it.
+            SectionLabel(title: "Styles")
+
             ForEach(prompts.presets) { preset in
                 row(preset)
             }
@@ -44,7 +65,13 @@ struct PromptsSection: View {
 
     private func row(_ preset: PromptPreset) -> some View {
         let isOpen = selected == preset.id
-        return Card(highlighted: isOpen) {
+        // Gold on the card's edge means "this is the one in use" — the palette's one rule
+        // for an accent border, and the same thing it means on the provider rows. A style
+        // no job uses is a row you can skip, and until the whole card said so the only
+        // sign was one pill among four controls. Being *open* is not the same claim: the
+        // editor unfolding underneath already says that, and spending the accent on it
+        // meant the row you were reading looked like the row in use.
+        return Card(highlighted: usedBy(preset) != nil) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Text(preset.name).font(.callout.weight(.semibold))
@@ -63,6 +90,8 @@ struct PromptsSection: View {
                         isOn: prompts.notetakerPromptID == preset.id
                     ) { prompts.notetakerPromptID = preset.id }
 
+                    keySlot(preset)
+
                     Button(isOpen ? "Done" : "Edit") { toggle(preset) }
                         .controlSize(.small)
                 }
@@ -72,16 +101,80 @@ struct PromptsSection: View {
                 .contentShape(Rectangle())
                 .onTapGesture { toggle(preset) }
 
+                if recordingKey == preset.id {
+                    Text("Press a key\u{2026} Escape cancels. Modifiers can be combined — "
+                         + "fn with \u{2325}, say.")
+                        .font(Theme.Text.small)
+                        .foregroundStyle(Theme.Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let rejected, recordingKey == nil,
+                          prompts.hotkey(for: preset.id) == nil {
+                    Text(rejected)
+                        .font(Theme.Text.small)
+                        .foregroundStyle(Theme.Palette.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 // Only the open one shows its instructions — five prompts expanded at
                 // once would be a wall, and you only ever edit one at a time. So a closed
                 // row is a name and its assignments.
                 if isOpen { editor(preset) }
             }
         }
+        .onDisappear { stopRecording() }
     }
 
     private func toggle(_ preset: PromptPreset) {
         selected = selected == preset.id ? nil : preset.id
+    }
+
+
+    // MARK: - The style's own key
+
+    /// Three states in one slot: listening, bound, or free. Kept narrow so the rows still
+    /// line up as a table — the sentence explaining what to press goes under the row,
+    /// where there is room for it.
+    @ViewBuilder
+    private func keySlot(_ preset: PromptPreset) -> some View {
+        if recordingKey == preset.id {
+            Button("Cancel") { stopRecording() }
+                .controlSize(.small)
+        } else if let key = prompts.hotkey(for: preset.id) {
+            HStack(spacing: 5) {
+                Button { record(preset) } label: { Keycap(text: key.displayName) }
+                    .buttonStyle(.plain)
+                    .help("Hold \(key.displayName) to dictate in \(preset.name) — click to change")
+                Button {
+                    rejected = nil
+                    _ = bindKey?(nil, preset.id)
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.Palette.faint)
+                .help("Clear this key")
+            }
+        } else {
+            Button("Add key") { record(preset) }
+                .controlSize(.small)
+                .help("Hold a key of your own to dictate in \(preset.name)")
+        }
+    }
+
+    private func record(_ preset: PromptPreset) {
+        rejected = nil
+        recordingKey = preset.id
+        recorder.onFinish = { captured in
+            defer { recordingKey = nil }
+            guard let captured else { return }  // Escape
+            rejected = bindKey?(captured, preset.id)
+        }
+        recorder.start()
+    }
+
+    private func stopRecording() {
+        recorder.stop()
+        recordingKey = nil
     }
 
     private func editor(_ preset: PromptPreset) -> some View {
@@ -126,6 +219,11 @@ struct PromptsSection: View {
                 Button("Delete") {
                     selected = nil
                     prompts.delete(preset)
+                    // The store drops the style's key with it, but the *watcher* for that
+                    // key is the app's, and it would go on starting dictations for a style
+                    // that no longer exists. Clearing through the same door that binds is
+                    // what takes it down.
+                    _ = bindKey?(nil, preset.id)
                 }
                 .controlSize(.small)
                 .foregroundStyle(Theme.Palette.danger)
@@ -197,10 +295,14 @@ struct Badge: View {
 /// A mode's claim on a prompt: lit when this prompt is the one it uses.
 ///
 /// Both modes are named on every row, at one width, so the two make a column that lines
-/// up down the list and the eye can read it as a table: which prompt, which mode. The lit
-/// one is the `Badge` — same capsule, same gold; the others are the same words, quiet.
-/// Icons alone were tried first, and a row of unlit circles beside one gold chip read as
+/// up down the list and the eye can read it as a table: which prompt, which mode. Icons
+/// alone were tried first, and a row of unlit circles beside one gold chip read as
 /// clutter rather than as a control.
+///
+/// The lit one is **filled** gold with the ground's own navy on it, the way a ticked
+/// checkbox is filled. Outlined gold on a gold word was the same weight as the row's other
+/// controls, so which style a job used had to be looked for; filled, it is the one thing on
+/// the row you cannot miss, which is what the column is scanned for.
 struct AssignmentToggle: View {
     let title: String
     let symbol: String
@@ -222,15 +324,12 @@ struct AssignmentToggle: View {
         Button(action: { if !isOn || togglesOff { action() } }) {
             HStack(spacing: 4) {
                 Image(systemName: symbol).font(.system(size: 8))
-                Text(title).font(.caption2.weight(.medium))
+                Text(title).font(.caption2.weight(isOn ? .semibold : .medium))
             }
             .frame(width: 84, height: 20)
-            .foregroundStyle(isOn ? Theme.Palette.gold : Theme.Palette.faint)
+            .foregroundStyle(isOn ? Theme.Palette.abyss : Theme.Palette.faint)
             .background(
-                Capsule().fill(isOn ? Theme.Palette.gold.opacity(0.10) : Color.white.opacity(0.04))
-            )
-            .overlay(
-                Capsule().stroke(isOn ? Theme.Palette.gold : Color.clear, lineWidth: 1)
+                Capsule().fill(isOn ? Theme.Palette.gold : Color.white.opacity(0.04))
             )
             .contentShape(Capsule())
         }

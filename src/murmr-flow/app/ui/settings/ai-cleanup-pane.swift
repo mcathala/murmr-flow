@@ -42,10 +42,12 @@ import SwiftUI
 /// it has been proved. Editing one leaves the other alone.
 struct AICleanupPane: View {
 
-    @Bindable var settings: SettingsStore
-    let dictation: DictationCoordinator
-    let prompts: PromptStore
-    let dictionary: DictionaryStore
+    let services: AppServices
+
+    private var settings: SettingsStore { services.settings }
+    private var dictation: DictationCoordinator { services.dictation }
+    private var prompts: PromptStore { services.prompts }
+    private var dictionary: DictionaryStore { services.dictionary }
 
     /// Which row has its editor open. Independent of which provider is active, which is
     /// the whole point.
@@ -105,34 +107,24 @@ struct AICleanupPane: View {
         settings.cleanupEnabled || settings.notetakerCleanupEnabled
     }
 
+    /// The one switch, which moves both jobs together.
+    ///
+    /// The two were separate controls because the trade differs — dictation clean-up costs
+    /// seconds before text appears, a meeting is already over — but two switches for one
+    /// question was a header row nobody read twice, and the store keeps both so an install
+    /// that had only one of them on stays that way until this is touched.
+    private var cleanupOn: Binding<Bool> {
+        Binding(
+            get: { isCleaningSomething },
+            set: { on in
+                settings.cleanupEnabled = on
+                settings.notetakerCleanupEnabled = on
+            }
+        )
+    }
+
     var body: some View {
         PaneScroll(title: "AI clean-up") {
-            // One row, two pills: the same control the style rows use to say which job
-            // a prompt is for, so the pane reads as one table — this row is the header.
-            // The difference is that these switch *off* too; a lit style pill does not.
-            SettingRow(title: "Activate for") {
-                HStack(spacing: 8) {
-                    AssignmentToggle(
-                        title: "Dictation", symbol: "mic.fill",
-                        isOn: settings.cleanupEnabled,
-                        togglesOff: true,
-                        help: (on: "Turn off for dictation", off: "Clean up dictation")
-                    ) { settings.cleanupEnabled.toggle() }
-                    AssignmentToggle(
-                        title: "Notetaker", symbol: "text.document",
-                        isOn: settings.notetakerCleanupEnabled,
-                        togglesOff: true,
-                        help: (on: "Turn off for Notetaker", off: "Clean up Notetaker")
-                    ) { settings.notetakerCleanupEnabled.toggle() }
-                    // Invisible, the width of the rows' Edit button, so the two pills sit
-                    // in the same column as the ones below them.
-                    Button("Edit") {}
-                        .controlSize(.small)
-                        .hidden()
-                        .accessibilityHidden(true)
-                }
-            }
-
             if isCleaningSomething, !providers.isUsable(providers.activeID) {
                 WarningRow(
                     message: "\(providers.activeEntry.displayName) isn't ready, so "
@@ -147,10 +139,14 @@ struct AICleanupPane: View {
 
             switch facet {
             case .provider:
-                if isCleaningSomething {
-                    SectionLabel(title: "In use")
-                    row(providers.activeEntry, isActive: true)
+                // The in-use row shows whatever the switch is set to, because the switch
+                // is *on* it. Hiding the list while clean-up was off took the way back on
+                // with it, and the only way out was to quit — a switch you can turn off
+                // and not on is not a switch.
+                SectionLabel(title: "In use")
+                row(providers.activeEntry, isActive: true)
 
+                if isCleaningSomething {
                     if !providers.others.isEmpty {
                         SectionLabel(title: "Other providers")
                         ForEach(providers.others) { entry in
@@ -158,16 +154,18 @@ struct AICleanupPane: View {
                         }
                     }
                 } else {
-                    switchedOff
+                    // No list of alternatives while nothing is being cleaned: choosing
+                    // between providers is a question that only starts once one is used.
+                    switchedOff(sayWhere: false)
                 }
             case .prompts:
                 if isCleaningSomething {
-                    PromptsSection(prompts: prompts)
+                    styles
                 } else {
                     // The list stays, dimmed: what the styles are is worth seeing before
                     // deciding to switch clean-up on. Editing them can wait until it is.
-                    switchedOff
-                    PromptsSection(prompts: prompts)
+                    switchedOff(sayWhere: true)
+                    styles
                         .opacity(0.45)
                         .disabled(true)
                 }
@@ -198,11 +196,29 @@ struct AICleanupPane: View {
         }
     }
 
-    private var switchedOff: some View {
-        Text("Dictation and Notetaker both keep the raw transcript. No provider, no key, "
-             + "no network.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
+    /// The styles themselves, then which app gets which. One list makes the other
+    /// readable: a rule naming a style you cannot see above it would be a setting with its
+    /// subject somewhere else.
+    @ViewBuilder
+    private var styles: some View {
+        PromptsSection(
+            prompts: prompts,
+            bindKey: { key, styleID in services.changeStyleHotkey(key, for: styleID) }
+        )
+        AppStylesSection(prompts: prompts)
+    }
+
+    /// `sayWhere` sends the reader to the switch, which is worth a clause on a tab that
+    /// does not have it and would be pointing at itself on the one that does.
+    private func switchedOff(sayWhere: Bool) -> some View {
+        Text(
+            "Dictation and Notetaker both keep the raw transcript. No provider, no key, "
+                + "no network."
+                + (sayWhere ? " The switch is on the provider, under Provider." : "")
+        )
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Names only what is actually switched on, so the warning can't claim dictation is
@@ -242,7 +258,18 @@ struct AICleanupPane: View {
                     }
                     .controlSize(.small)
 
-                    if !isActive {
+                    if isActive {
+                        // Clean-up on or off, on the row that says which provider would
+                        // do it. It was a header row of its own above the tabs, which put
+                        // the switch one subject away from the thing it switches — and
+                        // made the first row of the pane something nobody needed twice.
+                        Toggle("", isOn: cleanupOn)
+                            .labelsHidden()
+                            .help(isCleaningSomething
+                                  ? "Turn clean-up off — dictations and notes keep the raw transcript"
+                                  : "Clean up dictations and notes through this provider")
+                            .accessibilityLabel("AI clean-up")
+                    } else {
                         Button("Use") { dictation.activateProvider(entry.id) }
                             .controlSize(.small)
                             .buttonStyle(.borderedProminent)

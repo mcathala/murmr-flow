@@ -57,6 +57,9 @@ final class FakeCleaner: Cleaning, @unchecked Sendable {
     private(set) var providerIDs: [String] = []
     private(set) var transcripts: [String] = []
     private(set) var contexts: [PromptLibrary.Context] = []
+    /// The template each call was given, so a test can tell which *style* ran — which is
+    /// the whole question once an app rule or a key can pick one.
+    private(set) var templates: [String] = []
 
     func clean(
         transcript: String, config: ProviderConfig?, prompt: PromptLibrary,
@@ -65,7 +68,11 @@ final class FakeCleaner: Cleaning, @unchecked Sendable {
         providerIDs.append(config?.providerID ?? "none")
         transcripts.append(transcript)
         contexts.append(context)
+        templates.append(prompt.template)
         if delay > .zero { try? await Task.sleep(for: delay) }
+        // No provider, no clean-up — the same contract the real service keeps, so a test
+        // can assert on the words rather than only on who was asked.
+        guard config != nil else { return .raw(transcript, note: nil) }
         return outcome(transcript)
     }
 
@@ -186,6 +193,19 @@ final class InjectionSink {
 @MainActor
 final class StageLog<Stage> {
     var stages: [Stage] = []
+}
+
+/// The app in front, as a test decides it. The real seam asks the workspace, which in a
+/// test process answers with whatever happens to be running.
+@MainActor
+final class FakeFrontmost {
+    var app: TargetApp?
+
+    init(_ app: TargetApp? = nil) { self.app = app }
+
+    func set(_ name: String, _ bundleID: String) {
+        app = TargetApp(name: name, bundleID: bundleID)
+    }
 }
 
 enum Scratch {

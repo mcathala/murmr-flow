@@ -147,6 +147,10 @@ final class DictationCoordinator {
     let speech: SpeechModelStore
     private let cleanup: any Cleaning
     private let hotkey = HotkeyMonitor()
+    /// One more watcher per style that holds a key of its own, so holding that key
+    /// dictates in that style. Keyed by style id, because that is what the press has to
+    /// carry through to the clean-up.
+    private var styleMonitors: [UUID: HotkeyMonitor] = [:]
     private let media: any MediaPausing
     /// How finished text reaches the app in front. The real one pastes; a test's reads.
     private let inject: @MainActor (String) throws -> Void
@@ -163,7 +167,17 @@ final class DictationCoordinator {
 
     /// Captured when recording starts. The HUD is non-activating so this should not
     /// change under us, but the paste needs to land where the user was actually typing.
-    private var targetApp: NSRunningApplication?
+    private var targetApp: TargetApp?
+
+    /// Which style this dictation is running, and what chose it — a key, a rule for the
+    /// app in front, or neither. Resolved at key-down rather than at the end, because the
+    /// pill says which style is coming *while* you speak, and a decision made afterwards
+    /// could not be shown then.
+    private(set) var currentStyle: StyleChoice?
+
+    /// The app the text will go to. A closure so a test can put one in front; the real one
+    /// asks the workspace.
+    private let frontmost: @MainActor () -> TargetApp?
 
     /// Whether the finished text is pasted where the cursor is. Off while onboarding's
     /// try-it page is up: there is no field to paste into, the page shows the words
@@ -188,12 +202,18 @@ final class DictationCoordinator {
         cleanup: any Cleaning = CleanupService(),
         media: any MediaPausing = MediaPlaybackController(),
         inject: @escaping @MainActor (String) throws -> Void = TextInjector.inject,
+        frontmost: @escaping @MainActor () -> TargetApp? = {
+            NSWorkspace.shared.frontmostApplication.map {
+                TargetApp(name: $0.localizedName, bundleID: $0.bundleIdentifier)
+            }
+        },
         assumeModelsLoaded: Bool = false
     ) {
         self.recorder = recorder
         self.cleanup = cleanup
         self.media = media
         self.inject = inject
+        self.frontmost = frontmost
         self.assumeModelsLoaded = assumeModelsLoaded
         self.settings = settings
         self.loader = loader
@@ -211,28 +231,56 @@ final class DictationCoordinator {
 
     func installHotkey() {
         do {
-            hotkey.onPress = { [weak self] in
-                guard let self else { return }
-                if self.settings.holdToTalk {
-                    self.beginDictation()
-                } else if self.stage.isRecording {
-                    // Toggle mode: the same key both starts and stops, so a long
-                    // dictation doesn't mean holding a key for two minutes.
-                    Task { @MainActor in await self.endDictation() }
-                } else {
-                    self.beginDictation()
-                }
-            }
-            hotkey.onRelease = { [weak self] in
-                guard let self, self.settings.holdToTalk else { return }
-                Task { @MainActor in await self.endDictation() }
-            }
+            hotkey.onPress = { [weak self] in self?.press(styleID: nil) }
+            hotkey.onRelease = { [weak self] in self?.release() }
             try hotkey.start(hotkey: settings.hotkey)
             hotkeyActive = true
         } catch {
             hotkeyActive = false
             stage = .failed(.speechModel, error.localizedDescription)
         }
+        installStyleHotkeys()
+    }
+
+    /// Re-arms one watcher per style that has a key.
+    ///
+    /// Rebuilt wholesale rather than patched, so a key that was cleared genuinely stops
+    /// being watched. The chords coexist with the plain dictation key the same way the
+    /// meeting key does: fn on its own drops its pending press the moment another modifier
+    /// joins, so fn and fn + ⌥ are two keys rather than one that fires twice.
+    func installStyleHotkeys() {
+        for monitor in styleMonitors.values { monitor.stop() }
+        styleMonitors = [:]
+        guard hotkeyActive else { return }
+
+        for preset in prompts.presets {
+            guard let key = prompts.hotkey(for: preset.id) else { continue }
+            let monitor = HotkeyMonitor()
+            let id = preset.id
+            monitor.onPress = { [weak self] in self?.press(styleID: id) }
+            monitor.onRelease = { [weak self] in self?.release() }
+            guard (try? monitor.start(hotkey: key)) != nil else { continue }
+            styleMonitors[id] = monitor
+        }
+    }
+
+    /// What a key going down means. The same rule for every key: hold-to-talk starts,
+    /// press-to-toggle starts or finishes.
+    private func press(styleID: UUID?) {
+        if settings.holdToTalk {
+            beginDictation(styleID: styleID)
+        } else if stage.isRecording {
+            // Toggle mode: the same key both starts and stops, so a long dictation
+            // doesn't mean holding a key for two minutes.
+            Task { @MainActor in await endDictation() }
+        } else {
+            beginDictation(styleID: styleID)
+        }
+    }
+
+    private func release() {
+        guard settings.holdToTalk else { return }
+        Task { @MainActor in await endDictation() }
     }
 
     func changeHotkey(to newHotkey: Hotkey) {
@@ -241,9 +289,19 @@ final class DictationCoordinator {
         installHotkey()
     }
 
+    /// Binds a key to a style, or clears it, and starts watching for it straight away.
+    /// Both halves together, because a key recorded in Settings that only worked after a
+    /// restart would read as a key that did not work.
+    func changeStyleHotkey(_ newHotkey: Hotkey?, for styleID: UUID) {
+        prompts.setHotkey(newHotkey, for: styleID)
+        installStyleHotkeys()
+    }
+
     // MARK: - The loop
 
-    func beginDictation() {
+    /// Starts a dictation. `styleID` is set when a style's own key was the one held,
+    /// which is the one thing that outranks a rule for the app in front.
+    func beginDictation(styleID: UUID? = nil) {
         guard !stage.isBusy else { return }
         guard !isSuspended else {
             stage = .failed(.microphone, "A meeting is being recorded. Stop it first.")
@@ -279,8 +337,10 @@ final class DictationCoordinator {
             return
         }
 
-        // Remember where the text has to go before anything else can steal focus.
-        targetApp = NSWorkspace.shared.frontmostApplication
+        // Remember where the text has to go before anything else can steal focus, and
+        // settle the style while we know both halves of the question.
+        targetApp = frontmost()
+        currentStyle = prompts.choice(forApp: targetApp?.bundleID, heldStyleID: styleID)
 
         do {
             recorder.inputDeviceID = devices?.selectedInputDeviceID
@@ -364,13 +424,20 @@ final class DictationCoordinator {
 
             // From here on, text reaches the user no matter what fails.
             stage = .cleaning
-            let outcome = await cleanup.clean(
+            // Settled at key-down, so the style that ran is the one the pill named while
+            // you were speaking. Only a dictation begun some other way resolves here.
+            let style = currentStyle ?? prompts.choice(forApp: targetApp?.bundleID)
+            // No style means the app in front is one this person set to Off: the words are
+            // typed exactly as heard, and no request is made at all. Dictionary swaps still
+            // run — they are local string work, which is why they live behind this seam.
+            let runsCleanup = settings.cleanupEnabled && style.preset != nil
+            var outcome = await cleanup.clean(
                 transcript: raw,
-                config: settings.cleanupEnabled ? providers.activeConfig : nil,
-                prompt: PromptLibrary(template: prompts.dictationPrompt.template),
+                config: runsCleanup ? providers.activeConfig : nil,
+                prompt: PromptLibrary(template: style.preset?.template ?? ""),
                 context: PromptLibrary.Context(
                     transcript: raw,
-                    frontmostApp: targetApp?.bundleIdentifier,
+                    frontmostApp: targetApp?.bundleID,
                     // The live preview stays in the spoken language; only the finished
                     // text moves. Translating a half-sentence ten times a second would
                     // cost latency to show something that is about to be replaced.
@@ -379,6 +446,15 @@ final class DictationCoordinator {
                 dictionary: dictionary.entries(usedIn: .dictation),
                 timeout: CleanupService.dictationTimeout
             )
+            if style.preset == nil {
+                // "No cleanup provider configured" is the right note for a provider that
+                // was never set up and the wrong one for a rule that asked for nothing to
+                // run. Off is a choice, not a fault, so it goes unremarked.
+                outcome = CleanupService.Outcome(
+                    text: outcome.text, usedRawFallback: outcome.usedRawFallback,
+                    note: nil, latency: outcome.latency
+                )
+            }
 
             stage = .injecting
             var note = outcome.note
@@ -402,7 +478,7 @@ final class DictationCoordinator {
                 usedRawFallback: outcome.usedRawFallback,
                 note: note?.isEmpty == true ? nil : note,
                 insertionFailed: insertionFailed,
-                targetApp: targetApp?.localizedName,
+                targetApp: targetApp?.name,
                 timing: Timing(
                     audioDuration: transcription.audioDuration,
                     transcribeTime: transcribeTime,
@@ -420,9 +496,9 @@ final class DictationCoordinator {
                     rawText: raw,
                     finalText: outcome.text,
                     usedRawFallback: outcome.usedRawFallback,
-                    promptName: prompts.dictationPrompt.name,
-                    targetAppName: targetApp?.localizedName,
-                    targetBundleID: targetApp?.bundleIdentifier
+                    promptName: style.displayName,
+                    targetAppName: targetApp?.name,
+                    targetBundleID: targetApp?.bundleID
                 )
             )
             stage = .idle
@@ -529,15 +605,23 @@ final class DictationCoordinator {
     /// dictation with the untranslated text and no way back. And the record is replaced
     /// only when the clean-up actually ran: a fallback would overwrite good text with the
     /// raw transcript it was made from.
+    ///
+    /// The style is resolved the way the first run resolved it, from the app the text went
+    /// to — otherwise a dictation that landed in Mail as Formal would come back as
+    /// something else for no reason the person could see. A rule saying Off is the one
+    /// thing overruled: pressing Re-run is an explicit request for a clean-up, and Off only
+    /// governs what happens on its own.
     @discardableResult
     func rerunCleanup(on record: DictationRecord) async -> String? {
         if let blocker = rerunBlocker { return blocker }
         guard let config = providers.activeConfig else { return "No AI is connected" }
+        let style = prompts.choice(forApp: record.targetBundleID)
+        let preset = style.preset ?? prompts.dictationPrompt
 
         let outcome = await cleanup.clean(
             transcript: record.rawText,
             config: config,
-            prompt: PromptLibrary(template: prompts.dictationPrompt.template),
+            prompt: PromptLibrary(template: preset.template),
             context: PromptLibrary.Context(
                 transcript: record.rawText,
                 frontmostApp: record.targetBundleID,
@@ -559,7 +643,7 @@ final class DictationCoordinator {
                 rawText: record.rawText,
                 finalText: outcome.text,
                 usedRawFallback: false,
-                promptName: prompts.dictationPrompt.name,
+                promptName: preset.name,
                 targetAppName: record.targetAppName,
                 targetBundleID: record.targetBundleID
             )

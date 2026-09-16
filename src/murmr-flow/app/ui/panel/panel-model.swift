@@ -95,12 +95,20 @@ final class PanelModel {
     /// you find out afterwards, from the wrong window.
     var targetAppName: String?
     var targetAppIcon: NSImage?
+    /// The app's bundle id, which is what a per-app style rule is keyed by. Kept beside
+    /// the name because the row has to resolve the style *before* you speak, and a name is
+    /// not something a rule can be looked up by.
+    var targetBundleID: String?
 
     /// The key that starts a dictation, shown as a keycap. Nil when there isn't one, so
     /// the row does not claim a shortcut that will not fire.
     var hotkeyLabel: String?
 
     var promptName: String = "Default"
+    /// Why that style and not the standing one — the app whose rule chose it, or the key
+    /// that was held. Nil when nothing overrode the standing style, which is when there is
+    /// nothing worth saying.
+    var promptDetail: String?
     var notePromptName: String = "Meeting"
     var promptOptions: [(id: UUID, name: String)] = []
 

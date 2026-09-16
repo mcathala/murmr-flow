@@ -206,7 +206,7 @@ final class AppServices {
         armHotkeyIfPossible()
         armMeetingHotkey()
         Task { await updates.checkIfStale() }
-        FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
+        FnKeyOwner.update(for: allHotkeys)
         Self.log.notice("hotkey armed: \(self.dictation.hotkeyActive, privacy: .public)")
 
         // Load the model now rather than during the first dictation. Otherwise the user
@@ -258,7 +258,45 @@ final class AppServices {
     func changeMeetingHotkey(to hotkey: Hotkey?) {
         settings.meetingHotkey = hotkey
         armMeetingHotkey()
-        FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
+        FnKeyOwner.update(for: allHotkeys)
+    }
+
+    /// Binds a key to a style, or clears it with nil. Returns why it refused, or nil when
+    /// it took.
+    ///
+    /// Goes through here rather than through the store directly for two reasons. The
+    /// watcher and the system's fn action both have to follow — a style key on fn parks the
+    /// 🌐 key exactly as the dictation key does. And this is the only place that can see
+    /// *every* key at once, which is what makes "that one is taken" answerable: a style
+    /// quietly sharing a chord with the dictation key would leave one of them never firing,
+    /// with nothing on screen to explain it.
+    @discardableResult
+    func changeStyleHotkey(_ hotkey: Hotkey?, for styleID: UUID) -> String? {
+        if let hotkey {
+            if let taken = whatUses(hotkey, excludingStyle: styleID) {
+                return "\(hotkey.displayName) is already \(taken)."
+            }
+        }
+        dictation.changeStyleHotkey(hotkey, for: styleID)
+        FnKeyOwner.update(for: allHotkeys)
+        return nil
+    }
+
+    /// What already answers to this key, named as the sentence that says so needs it, or
+    /// nil when nothing does.
+    func whatUses(_ hotkey: Hotkey, excludingStyle styleID: UUID? = nil) -> String? {
+        if hotkey == settings.hotkey { return "the dictation key" }
+        if hotkey == settings.meetingHotkey { return "the Notetaker key" }
+        if let style = prompts.style(usingHotkey: hotkey, excluding: styleID) {
+            return "the key for \(style.name)"
+        }
+        return nil
+    }
+
+    /// Every key the app watches for. The fn question is asked of all of them at once:
+    /// one key using fn is enough to have to park the system's own action.
+    private var allHotkeys: [Hotkey?] {
+        [settings.hotkey, settings.meetingHotkey] + prompts.allStyleHotkeys
     }
 
     /// Un-hides the pill. Wired to the app coming forward: hiding it is one click on the
@@ -271,7 +309,7 @@ final class AppServices {
 
     func changeDictationHotkey(to hotkey: Hotkey) {
         dictation.changeHotkey(to: hotkey)
-        FnKeyOwner.update(for: [settings.hotkey, settings.meetingHotkey])
+        FnKeyOwner.update(for: allHotkeys)
     }
 
     /// The system gets its fn key back. Called from `applicationWillTerminate`; a crash

@@ -336,20 +336,45 @@ struct PanelView: View {
         )
     }
 
-    /// The active job's style, named by the app's own mark for AI clean-up.
+    /// The active job's style, named by the app's own mark for AI clean-up — and, when
+    /// something other than the standing style chose it, what did.
+    ///
+    /// Gold for a style that was chosen *for* you, plain for the one that always applies.
+    /// The palette's rule is that gold means live or chosen, and a rule firing is exactly
+    /// that; without the distinction, a style arriving because you happen to be in Mail
+    /// would look identical to one you picked, which is how a helpful setting starts
+    /// reading as the app changing its mind on its own.
     private var promptBubble: some View {
         Button {
             model.onPickPrompt?(NSEvent.mouseLocation)
         } label: {
             bubbleLabel(
                 symbol: "sparkles",
-                text: model.mode == .note ? model.notePromptName : model.promptName,
-                active: false
+                text: promptLabel,
+                active: model.promptDetail != nil
             )
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Theme.Palette.text)
-        .help("Style — click to change")
+        .foregroundStyle(model.promptDetail != nil ? Theme.Palette.gold : Theme.Palette.text)
+        .help(promptHelp)
+    }
+
+    /// `Formal · Mail`. The reason is capped rather than wrapped: the bubbles float over a
+    /// pill of fixed width, so a long app name has to give way instead of running past it.
+    private var promptLabel: String {
+        guard model.mode != .note else { return model.notePromptName }
+        guard let detail = model.promptDetail else { return model.promptName }
+        let short = detail.count > 16
+            ? detail.prefix(15).trimmingCharacters(in: .whitespaces) + "\u{2026}"
+            : detail
+        return "\(model.promptName) \u{00B7} \(short)"
+    }
+
+    private var promptHelp: String {
+        guard model.mode != .note, let detail = model.promptDetail else {
+            return "Style — click to change"
+        }
+        return "\(model.promptName), because of \(detail) — click to change"
     }
 
     private func bubbleLabel(symbol: String, text: String, active: Bool) -> some View {
