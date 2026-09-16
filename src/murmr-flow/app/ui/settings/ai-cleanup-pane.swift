@@ -114,6 +114,14 @@ struct AICleanupPane: View {
             // The difference is that these switch *off* too; a lit style pill does not.
             SettingRow(title: "Activate for") {
                 HStack(spacing: 8) {
+                    // Empty space the width of the rows' Edit button and key slot, so the
+                    // two pills sit in the same column as the ones below them.
+                    Color.clear
+                        .frame(
+                            width: PromptsSection.editWidth + PromptsSection.keyWidth + 8,
+                            height: 1
+                        )
+                        .accessibilityHidden(true)
                     AssignmentToggle(
                         title: "Dictation", symbol: "mic.fill",
                         isOn: settings.cleanupEnabled,
@@ -126,12 +134,6 @@ struct AICleanupPane: View {
                         togglesOff: true,
                         help: (on: "Turn off for Notetaker", off: "Clean up Notetaker")
                     ) { settings.notetakerCleanupEnabled.toggle() }
-                    // Invisible, the width of the rows' Edit button, so the two pills sit
-                    // in the same column as the ones below them.
-                    Button("Edit") {}
-                        .controlSize(.small)
-                        .hidden()
-                        .accessibilityHidden(true)
                 }
             }
 

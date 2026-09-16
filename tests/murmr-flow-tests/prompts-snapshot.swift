@@ -63,13 +63,16 @@ struct PromptRowsSnapshotTests {
         let pane = VStack(alignment: .leading, spacing: 14) {
             SettingRow(title: "Activate for") {
                 HStack(spacing: 8) {
+                    Color.clear.frame(
+                        width: PromptsSection.editWidth + PromptsSection.keyWidth + 8,
+                        height: 1
+                    )
                     AssignmentToggle(
                         title: "Dictation", symbol: "mic.fill", isOn: true, togglesOff: true
                     ) {}
                     AssignmentToggle(
                         title: "Notetaker", symbol: "text.document", isOn: false, togglesOff: true
                     ) {}
-                    Button("Edit") {}.controlSize(.small).hidden()
                 }
             }
             PromptsSection(prompts: prompts, bindKey: { _, _ in nil })
