@@ -10,10 +10,27 @@ import SwiftUI
 /// The assignment is shown *on the prompt* — one toggle per mode on every row — rather
 /// than as two dropdowns elsewhere, so the whole arrangement reads in one look and
 /// changes in one click.
+///
+/// A style can also hold **a key of its own**, in the same row and for the same reason:
+/// which jobs use this style, and how you reach it, are the same question. Holding that key
+/// dictates in that style wherever you are, which is why it outranks a rule for the app in
+/// front — pressing a key is the more deliberate act.
 struct PromptsSection: View {
 
     let prompts: PromptStore
+
+    /// Binds a key to a style, or clears it with nil, and answers with why it refused.
+    /// A closure rather than a store, so this view never learns what a watcher is — and so
+    /// a snapshot can render the rows with nothing to arm.
+    var bindKey: ((Hotkey?, UUID) -> String?)?
+
     @State private var selected: UUID?
+
+    /// Which row is listening for a key, if any. One at a time: two recorders would both
+    /// swallow the same keypress.
+    @State private var recordingKey: UUID?
+    @State private var recorder = HotkeyRecorder()
+    @State private var rejected: String?
 
     /// A `Group`, not a `VStack`: the rows become siblings in the enclosing `PaneScroll`,
     /// so they are spaced like every other card in the section instead of forming a
@@ -63,6 +80,8 @@ struct PromptsSection: View {
                         isOn: prompts.notetakerPromptID == preset.id
                     ) { prompts.notetakerPromptID = preset.id }
 
+                    keySlot(preset)
+
                     Button(isOpen ? "Done" : "Edit") { toggle(preset) }
                         .controlSize(.small)
                 }
@@ -72,16 +91,79 @@ struct PromptsSection: View {
                 .contentShape(Rectangle())
                 .onTapGesture { toggle(preset) }
 
+                if recordingKey == preset.id {
+                    Text("Press a key\u{2026} Escape cancels. Modifiers can be combined — "
+                         + "fn with \u{2325}, say.")
+                        .font(Theme.Text.small)
+                        .foregroundStyle(Theme.Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let rejected, recordingKey == nil,
+                          prompts.hotkey(for: preset.id) == nil {
+                    Text(rejected)
+                        .font(Theme.Text.small)
+                        .foregroundStyle(Theme.Palette.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 // Only the open one shows its instructions — five prompts expanded at
                 // once would be a wall, and you only ever edit one at a time. So a closed
                 // row is a name and its assignments.
                 if isOpen { editor(preset) }
             }
         }
+        .onDisappear { stopRecording() }
     }
 
     private func toggle(_ preset: PromptPreset) {
         selected = selected == preset.id ? nil : preset.id
+    }
+
+    // MARK: - The style's own key
+
+    /// Three states in one slot: listening, bound, or free. Kept narrow so the rows still
+    /// line up as a table — the sentence explaining what to press goes under the row,
+    /// where there is room for it.
+    @ViewBuilder
+    private func keySlot(_ preset: PromptPreset) -> some View {
+        if recordingKey == preset.id {
+            Button("Cancel") { stopRecording() }
+                .controlSize(.small)
+        } else if let key = prompts.hotkey(for: preset.id) {
+            HStack(spacing: 5) {
+                Button { record(preset) } label: { Keycap(text: key.displayName) }
+                    .buttonStyle(.plain)
+                    .help("Hold \(key.displayName) to dictate in \(preset.name) — click to change")
+                Button {
+                    rejected = nil
+                    _ = bindKey?(nil, preset.id)
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.Palette.faint)
+                .help("Clear this key")
+            }
+        } else {
+            Button("Add key") { record(preset) }
+                .controlSize(.small)
+                .help("Hold a key of your own to dictate in \(preset.name)")
+        }
+    }
+
+    private func record(_ preset: PromptPreset) {
+        rejected = nil
+        recordingKey = preset.id
+        recorder.onFinish = { captured in
+            defer { recordingKey = nil }
+            guard let captured else { return }  // Escape
+            rejected = bindKey?(captured, preset.id)
+        }
+        recorder.start()
+    }
+
+    private func stopRecording() {
+        recorder.stop()
+        recordingKey = nil
     }
 
     private func editor(_ preset: PromptPreset) -> some View {
@@ -126,6 +208,11 @@ struct PromptsSection: View {
                 Button("Delete") {
                     selected = nil
                     prompts.delete(preset)
+                    // The store drops the style's key with it, but the *watcher* for that
+                    // key is the app's, and it would go on starting dictations for a style
+                    // that no longer exists. Clearing through the same door that binds is
+                    // what takes it down.
+                    _ = bindKey?(nil, preset.id)
                 }
                 .controlSize(.small)
                 .foregroundStyle(Theme.Palette.danger)

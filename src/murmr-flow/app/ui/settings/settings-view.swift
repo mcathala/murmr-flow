@@ -63,12 +63,7 @@ struct SettingsPaneView: View {
         case .speechModel:
             SpeechModelPane(loader: services.dictation.loader, dictation: services.dictation)
         case .aiCleanup:
-            AICleanupPane(
-                settings: services.settings,
-                dictation: services.dictation,
-                prompts: services.prompts,
-                dictionary: services.dictionary
-            )
+            AICleanupPane(services: services)
         case .hotkeys:
             HotkeysPane(services: services)
         case .privacyData:

@@ -42,10 +42,12 @@ import SwiftUI
 /// it has been proved. Editing one leaves the other alone.
 struct AICleanupPane: View {
 
-    @Bindable var settings: SettingsStore
-    let dictation: DictationCoordinator
-    let prompts: PromptStore
-    let dictionary: DictionaryStore
+    let services: AppServices
+
+    private var settings: SettingsStore { services.settings }
+    private var dictation: DictationCoordinator { services.dictation }
+    private var prompts: PromptStore { services.prompts }
+    private var dictionary: DictionaryStore { services.dictionary }
 
     /// Which row has its editor open. Independent of which provider is active, which is
     /// the whole point.
@@ -162,12 +164,12 @@ struct AICleanupPane: View {
                 }
             case .prompts:
                 if isCleaningSomething {
-                    PromptsSection(prompts: prompts)
+                    styles
                 } else {
                     // The list stays, dimmed: what the styles are is worth seeing before
                     // deciding to switch clean-up on. Editing them can wait until it is.
                     switchedOff
-                    PromptsSection(prompts: prompts)
+                    styles
                         .opacity(0.45)
                         .disabled(true)
                 }
@@ -196,6 +198,18 @@ struct AICleanupPane: View {
         } message: {
             Text("Clean-up through this provider stops until a key is added again.")
         }
+    }
+
+    /// The styles themselves, then which app gets which. One list makes the other
+    /// readable: a rule naming a style you cannot see above it would be a setting with its
+    /// subject somewhere else.
+    @ViewBuilder
+    private var styles: some View {
+        PromptsSection(
+            prompts: prompts,
+            bindKey: { key, styleID in services.changeStyleHotkey(key, for: styleID) }
+        )
+        AppStylesSection(prompts: prompts)
     }
 
     private var switchedOff: some View {

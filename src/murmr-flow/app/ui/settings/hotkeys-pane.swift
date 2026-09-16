@@ -178,10 +178,13 @@ struct HotkeysPane: View {
             defer { recording = nil }
             guard let captured else { return }  // Escape
 
-            // The two binds must not be the same key, or one of them silently never wins.
-            let other = slot == .dictate ? settings.meetingHotkey : settings.hotkey
-            if captured == other {
-                rejected = "\(captured.displayName) is already used by the other hotkey."
+            // No two binds may be the same key, or one of them silently never wins —
+            // and styles hold keys now too, so "the other hotkey" is no longer the whole
+            // question. `AppServices` is the one place that can see all of them.
+            let current = slot == .dictate ? settings.hotkey : settings.meetingHotkey
+            if captured == current { return }
+            if let taken = services.whatUses(captured) {
+                rejected = "\(captured.displayName) is already \(taken)."
                 return
             }
 
