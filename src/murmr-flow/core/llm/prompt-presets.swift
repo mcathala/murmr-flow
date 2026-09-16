@@ -23,12 +23,17 @@ struct PromptPreset: Codable, Identifiable, Sendable, Equatable {
     }
 }
 
-/// The presets we ship, and the user's edits to them.
+/// The presets we ship, the user's edits to them, and how each one is reached.
 ///
 /// Stored as JSON in `UserDefaults`, seeded once from the built-ins. A built-in that is
 /// still word for word one we shipped follows our later improvements; one the user has
 /// touched is theirs and keeps their wording, with a per-preset Reset for when they'd
 /// rather have ours back.
+///
+/// **The assignments live here too** — which style each job uses, which style an app
+/// gets, and which style a key holds. They are all the same question asked three ways, and
+/// keeping them beside the presets is what lets deleting a style take its rules and its key
+/// with it rather than leaving a rule pointing at nothing.
 @MainActor
 @Observable
 final class PromptStore {
@@ -42,6 +47,10 @@ final class PromptStore {
         /// The built-in wording as last written by the app, per id. "Untouched" is a
         /// comparison with this, so the code needs no list of every wording ever shipped.
         static let shipped = "prompts.shippedTemplates"
+        static let appRules = "prompts.appRules"
+        /// Keyed by uuid *string*: a `[UUID: Hotkey]` encodes as a flat alternating array,
+        /// which round-trips but is unreadable to anyone looking at the plist.
+        static let styleKeys = "prompts.styleHotkeys"
     }
 
     private(set) var presets: [PromptPreset]
@@ -57,6 +66,14 @@ final class PromptStore {
     var notetakerPromptID: UUID? {
         didSet { defaults.set(notetakerPromptID?.uuidString, forKey: Key.note) }
     }
+
+    /// One rule per app, in the order they were added. Dictation only: Notetaker has no
+    /// app in front of it.
+    private(set) var appRules: [AppStyleRule] = []
+
+    /// A style's own key, by style id. Holding it dictates in that style wherever you are,
+    /// which is why it beats an app rule — pressing a key is the more deliberate act.
+    private(set) var styleHotkeys: [String: Hotkey] = [:]
 
     private let defaults: UserDefaults
 
@@ -135,6 +152,24 @@ final class PromptStore {
             ?? loaded.first { $0.id == ID.meeting }?.id
             ?? loaded.first?.id
 
+        // Rules and keys for styles that no longer exist are dropped on load rather than
+        // guarded against at every read: a rule pointing at a deleted style would silently
+        // fall back, and the row would say a style is in use when it is not.
+        let ids = Set(loaded.map(\.id))
+        if let data = defaults.data(forKey: Key.appRules),
+           let stored = try? JSONDecoder().decode([AppStyleRule].self, from: data) {
+            appRules = stored.filter { rule in
+                guard let id = rule.styleID else { return true }
+                return ids.contains(id)
+            }
+        }
+        if let data = defaults.data(forKey: Key.styleKeys),
+           let stored = try? JSONDecoder().decode([String: Hotkey].self, from: data) {
+            styleHotkeys = stored.filter { key, _ in
+                UUID(uuidString: key).map(ids.contains) ?? false
+            }
+        }
+
         // Writes back the merged list, so a newly shipped built-in is stored once rather
         // than re-merged on every launch.
         persist()
@@ -151,6 +186,81 @@ final class PromptStore {
     }
 
     func preset(id: UUID) -> PromptPreset? { presets.first { $0.id == id } }
+
+    // MARK: - Which style, and why
+
+    /// The style one dictation should use.
+    ///
+    /// Three sources, in this order:
+    ///
+    ///  1. **The key that was held.** Pressing a style's own key is the most deliberate
+    ///     thing the person can do, so nothing outranks it.
+    ///  2. **A rule for the app the text is going to.** Deterministic, decided before the
+    ///     prompt is built, and nothing about it leaves the machine.
+    ///  3. **The style assigned to Dictation**, which is what happens when neither applies.
+    ///
+    /// A key or a rule naming a style that has since been deleted falls through to the next
+    /// source rather than refusing: the answer is always *some* style, or Off.
+    func choice(forApp bundleID: String?, heldStyleID: UUID? = nil) -> StyleChoice {
+        if let heldStyleID, let preset = preset(id: heldStyleID) {
+            let key = styleHotkeys[heldStyleID.uuidString]?.displayName
+            return StyleChoice(preset: preset, source: key.map { .key($0) } ?? .standing)
+        }
+        if let bundleID, let rule = appRules.first(where: { $0.bundleID == bundleID }) {
+            switch rule.outcome {
+            case .off:
+                return StyleChoice(preset: nil, source: .app(rule.appName))
+            case .style(let id):
+                if let preset = preset(id: id) {
+                    return StyleChoice(preset: preset, source: .app(rule.appName))
+                }
+            }
+        }
+        return StyleChoice(preset: dictationPrompt, source: .standing)
+    }
+
+    // MARK: - Rules
+
+    /// Adds a rule, or replaces the one that app already had. One rule per app: two would
+    /// mean an order nobody chose deciding which wins.
+    func setRule(_ rule: AppStyleRule) {
+        if let index = appRules.firstIndex(where: { $0.bundleID == rule.bundleID }) {
+            appRules[index] = rule
+        } else {
+            appRules.append(rule)
+        }
+        persist()
+    }
+
+    func removeRule(bundleID: String) {
+        appRules.removeAll { $0.bundleID == bundleID }
+        persist()
+    }
+
+    // MARK: - Keys
+
+    func hotkey(for styleID: UUID) -> Hotkey? { styleHotkeys[styleID.uuidString] }
+
+    /// Binds a key to a style, or clears it with nil. The caller re-arms the watchers —
+    /// this only records the choice, the same way the dictation key does.
+    func setHotkey(_ hotkey: Hotkey?, for styleID: UUID) {
+        styleHotkeys[styleID.uuidString] = hotkey
+        persist()
+    }
+
+    /// The style already holding this key, if any. `excluding` is the style being edited,
+    /// so re-recording the key it already has is not a clash with itself.
+    func style(usingHotkey hotkey: Hotkey, excluding styleID: UUID? = nil) -> PromptPreset? {
+        for (id, bound) in styleHotkeys where bound == hotkey {
+            guard let uuid = UUID(uuidString: id), uuid != styleID else { continue }
+            if let preset = preset(id: uuid) { return preset }
+        }
+        return nil
+    }
+
+    /// Every key a style holds, for the one caller that has to know whether *any* of our
+    /// keys uses fn — the system's own fn action is parked while one does.
+    var allStyleHotkeys: [Hotkey] { Array(styleHotkeys.values) }
 
     // MARK: - Editing
 
@@ -240,6 +350,10 @@ final class PromptStore {
         if notetakerPromptID == preset.id {
             notetakerPromptID = (presets.first { $0.id == ID.meeting } ?? presets.first)?.id
         }
+        // The style is gone, so the rules and the key that pointed at it go with it. A
+        // rule left behind would read as a working setting and quietly do nothing.
+        appRules.removeAll { $0.styleID == preset.id }
+        styleHotkeys[preset.id.uuidString] = nil
         persist()
     }
 
@@ -255,6 +369,8 @@ final class PromptStore {
     }
 
     private func persist() {
+        defaults.set(try? JSONEncoder().encode(appRules), forKey: Key.appRules)
+        defaults.set(try? JSONEncoder().encode(styleHotkeys), forKey: Key.styleKeys)
         guard let data = try? JSONEncoder().encode(presets) else { return }
         defaults.set(data, forKey: Key.presets)
         // Every built-in's current shipped wording, so the next launch can tell an
