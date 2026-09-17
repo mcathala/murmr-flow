@@ -2,9 +2,10 @@ import SwiftUI
 
 /// Dictation, and what it produced.
 ///
-/// The Cleaned/Raw toggle is the point of this screen. Until the raw transcript was kept,
-/// there was no way to tell whether the model had improved your words or mangled them —
-/// and no way to try a different prompt without saying it all again.
+/// The card shows the finished text, which is the text you dictated for. The raw
+/// transcript is still kept and is what Re-run clean-up works from — it was once shown
+/// beside the cleaned one, behind a switch, and the switch turned out to be answering a
+/// question nobody asks twice.
 struct DictationView: View {
 
     let dictation: DictationCoordinator
@@ -13,7 +14,6 @@ struct DictationView: View {
 
     private var settings: SettingsStore { dictation.settings }
 
-    @State private var showingRaw = false
     /// A set, so a batch can go at once. Same reasoning as Notes: one-at-a-time is fine
     /// for a mistake and useless for a clear-out.
     @State private var selection: Set<UUID> = []
@@ -37,14 +37,15 @@ struct DictationView: View {
                 HStack(spacing: 8) {
                     SectionLabel(title: "History")
                     Spacer(minLength: 0)
-                    if selection.count < history.dictations.count {
-                        Button("Select all") { selection = Set(history.dictations.map(\.id)) }
-                            .controlSize(.small)
+                    // One control, two states. It was Select all beside Clear, and Clear
+                    // emptied the *selection* — sitting in a list header next to Select
+                    // all, it read as "clear the history", which is the one reading that
+                    // would have cost somebody their dictations.
+                    let all = selection.count == history.dictations.count
+                    Button(all ? "Deselect all" : "Select all") {
+                        selection = all ? [] : Set(history.dictations.map(\.id))
                     }
-                    if !selection.isEmpty {
-                        Button("Clear") { selection = [] }
-                            .controlSize(.small)
-                    }
+                    .controlSize(.small)
                 }
                 list
             }
@@ -201,27 +202,32 @@ struct DictationView: View {
                     Text(Self.stamp(record.date))
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if let app = record.targetAppName {
+                    if let icon = AppIconCache.icon(forBundleID: record.targetBundleID) {
+                        // The icon, not the name: it is recognised rather than read, and
+                        // the app is the one thing on this row you know at a glance.
+                        Image(nsImage: icon)
+                            .resizable()
+                            .frame(width: 15, height: 15)
+                            .help(record.targetAppName ?? "")
+                    } else if let app = record.targetAppName {
                         Text("· \(app)").font(.caption).foregroundStyle(.tertiary)
                     }
                     Spacer(minLength: 0)
-                    Picker("", selection: $showingRaw) {
-                        Text("Cleaned").tag(false)
-                        Text("Raw").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
                 }
 
-                Text(showingRaw ? record.rawText : record.finalText)
+                // Always the finished text. There was a Cleaned / Raw switch here, and it
+                // was answering a question nobody asks twice: the cleaned text is the one
+                // you dictated *for*, and when clean-up did not run the finished text and
+                // the raw one are the same words anyway. The raw transcript is still kept
+                // — it is what Re-run clean-up works from.
+                Text(record.finalText)
                     .font(.body)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if record.usedRawFallback {
-                    Text("Clean-up didn't run for this one, so both views are the same.")
+                    Text("Clean-up didn\u{2019}t run, so this is exactly what was heard.")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -246,13 +252,12 @@ struct DictationView: View {
 
                 HStack(spacing: 8) {
                     Button("Copy") {
-                        TextInjector.copyToClipboard(
-                            showingRaw ? record.rawText : record.finalText
-                        )
+                        TextInjector.copyToClipboard(record.finalText)
                     }
-                    Button("Insert again") {
-                        try? TextInjector.inject(showingRaw ? record.rawText : record.finalText)
-                    }
+                    // "Insert again" was here. The text already went where it was meant
+                    // to; pressing this later put it wherever the cursor happened to be
+                    // by then, which is rarely what anyone wanted and occasionally
+                    // landed a paragraph in the wrong document.
                     Button(isRerunning ? "Re-running…" : "Re-run clean-up") {
                         isRerunning = true
                         rerunNote = nil
@@ -265,11 +270,16 @@ struct DictationView: View {
                     .help(dictation.rerunBlocker
                           ?? "Clean this transcript up again with the current style")
                     Spacer(minLength: 0)
-                    Button {
-                        selection = [record.id]
-                        confirmingDelete = true
-                    } label: {
-                        Image(systemName: "trash")
+                    // One word for deleting, everywhere. A trash icon here and the word
+                    // Delete on the card for several was two shapes for one action — and
+                    // an icon floating at the right edge stacked into a column with
+                    // Select all below it, which reads as one group and is three scopes.
+                    //
+                    // And no dialog. One dictation is a line of text that is still in the
+                    // log a keystroke ago; asking costs more than losing it does.
+                    Button("Delete", role: .destructive) {
+                        history.delete(ids: [record.id])
+                        selection = []
                     }
                     .help("Delete this dictation")
                 }
