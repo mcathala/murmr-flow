@@ -496,6 +496,13 @@ final class DictationCoordinator {
                     rawText: raw,
                     finalText: outcome.text,
                     usedRawFallback: outcome.usedRawFallback,
+                    // Said here, where both halves of the answer are in hand: whether a
+                    // clean-up was wanted at all, and what came back if it was.
+                    notCleaned: outcome.usedRawFallback
+                        ? (runsCleanup
+                            ? .failed(outcome.note ?? "The AI didn\u{2019}t reply.")
+                            : .byChoice)
+                        : nil,
                     promptName: style.displayName,
                     targetAppName: targetApp?.name,
                     targetBundleID: targetApp?.bundleID
@@ -643,6 +650,7 @@ final class DictationCoordinator {
                 rawText: record.rawText,
                 finalText: outcome.text,
                 usedRawFallback: false,
+                notCleaned: nil,
                 promptName: preset.name,
                 targetAppName: record.targetAppName,
                 targetBundleID: record.targetBundleID

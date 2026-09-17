@@ -240,10 +240,21 @@ struct DictationView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if record.usedRawFallback {
-                    Text("Clean-up didn\u{2019}t run, so this is exactly what was heard.")
+                // Nothing at all when this is what you asked for. A dictation you set an
+                // app to Off for does not need a warning about being off, and the row's
+                // own style column already says so — one orange line for all four reasons
+                // taught you to ignore the colour.
+                if let why = record.notCleaned?.failure {
+                    Text(why)
                         .font(.caption)
                         .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if record.usedRawFallback, record.notCleaned == nil {
+                    // Written before the app kept the reason. Neither a fault nor a
+                    // choice, so it is stated without alarm.
+                    Text("Not cleaned up.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 // What the pill said in passing, kept here where there is room to read
