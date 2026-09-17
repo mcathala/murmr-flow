@@ -397,18 +397,16 @@ struct NotetakerView: View {
                     .foregroundStyle(Theme.Palette.muted)
             }
 
-            Text("Kept word for word, and used to write the note when you stop.")
-                .font(Theme.Text.small)
-                .foregroundStyle(Theme.Palette.faint)
-
             Divider()
 
-            // No placeholder art and no empty state: the cursor is already here and the
-            // meeting is already running.
+            // `.plain` so the editor has no chrome and no insets of its own — which is
+            // what lets the hint below sit exactly where the first character will, rather
+            // than a few points off it.
             TextEditor(text: Binding(
                 get: { meetings.liveNotes },
                 set: { meetings.liveNotes = $0 }
             ))
+            .textEditorStyle(.plain)
             .font(Theme.Text.body)
             .lineSpacing(4)
             .scrollContentBackground(.hidden)
@@ -418,8 +416,6 @@ struct NotetakerView: View {
                     Text("Write anything worth keeping. Headings and - bullets work.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Palette.faint)
-                        .padding(.top, 8)
-                        .padding(.leading, 5)
                         .allowsHitTesting(false)
                 }
             }

@@ -185,14 +185,18 @@ struct NoteFile: Identifiable, Sendable, Hashable {
     enum SummaryLine: Identifiable, Sendable, Equatable {
         case heading(String)
         case bullet(String)
-        case task(done: Bool, String)
+        /// `index` is the task's position among the note's tasks, which is how the file
+        /// counts them when one is ticked. Carried on the line rather than counted again
+        /// by the view: a view that counts while it draws gets a different answer every
+        /// time SwiftUI decides to draw it.
+        case task(done: Bool, index: Int, String)
         case paragraph(String)
 
         var id: String {
             switch self {
             case .heading(let text): "h:\(text)"
             case .bullet(let text): "b:\(text)"
-            case .task(let done, let text): "t:\(done):\(text)"
+            case .task(let done, let index, let text): "t:\(done):\(index):\(text)"
             case .paragraph(let text): "p:\(text)"
             }
         }
@@ -208,6 +212,7 @@ struct NoteFile: Identifiable, Sendable, Hashable {
         guard let end = summaryEnd(in: lines) else { return [] }
 
         var out: [SummaryLine] = []
+        var tasks = 0
         for raw in lines[0..<end] {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.isEmpty { continue }
@@ -217,7 +222,8 @@ struct NoteFile: Identifiable, Sendable, Hashable {
                 out.append(.heading(line.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)))
             } else if line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") {
                 let done = line.hasPrefix("- [x] ")
-                out.append(.task(done: done, String(line.dropFirst(6))))
+                out.append(.task(done: done, index: tasks, String(line.dropFirst(6))))
+                tasks += 1
             } else if line.hasPrefix("- ") || line.hasPrefix("• ") {
                 out.append(.bullet(String(line.dropFirst(2))))
             } else {

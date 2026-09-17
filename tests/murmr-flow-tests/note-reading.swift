@@ -236,8 +236,8 @@ struct TranscriptSnapshotTests {
             .bullet("The model runs on the machine, about 600 MB."),
             .bullet("Only text reaches a provider."),
             .heading("Next steps"),
-            .task(done: false, "Record a real meeting (You)"),
-            .task(done: true, "Check the token ceiling (Them)"),
+            .task(done: false, index: 0, "Record a real meeting (You)"),
+            .task(done: true, index: 1, "Check the token ceiling (Them)"),
         ])
     }
 

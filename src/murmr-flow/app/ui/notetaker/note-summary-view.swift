@@ -17,17 +17,14 @@ struct NoteSummaryView: View {
     var onToggleTask: ((Int) -> Void)?
 
     var body: some View {
-        // Tasks are numbered as they appear, because that is how the file counts them
-        // when one is ticked — matching on the words would tick the wrong one of two
-        // tasks that happen to read the same.
-        var taskNumber = -1
-        return VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                 switch line {
                 case .heading(let text):
                     Text(text)
                         .font(Theme.Text.heading)
                         .foregroundStyle(Theme.Palette.text)
+                        .textSelection(.enabled)
                         // Space above a heading, none above the first: a gap at the top of
                         // the note would read as the pane being misaligned.
                         .padding(.top, index == 0 ? 0 : 16)
@@ -36,8 +33,7 @@ struct NoteSummaryView: View {
                 case .bullet(let text):
                     row(marker: bullet, text: text)
 
-                case .task(let done, let text):
-                    let number = { taskNumber += 1; return taskNumber }()
+                case .task(let done, let number, let text):
                     row(marker: checkbox(done, at: number), text: text)
 
                 case .paragraph(let text):
@@ -45,11 +41,11 @@ struct NoteSummaryView: View {
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Palette.text)
                         .lineSpacing(3)
+                        .textSelection(.enabled)
                         .padding(.bottom, 5)
                 }
             }
         }
-        .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -62,6 +58,10 @@ struct NoteSummaryView: View {
                 .font(Theme.Text.body)
                 .foregroundStyle(Theme.Palette.text)
                 .lineSpacing(3)
+                // On the text itself. Applied to the whole note it made the container
+                // selectable, and a selectable container eats the clicks meant for the
+                // boxes sitting inside it — which is why ticking one did nothing.
+                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
