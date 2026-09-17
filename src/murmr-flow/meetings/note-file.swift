@@ -260,8 +260,17 @@ struct NoteFile: Identifiable, Sendable, Hashable {
     /// second is anyone's to revise. Rewriting the whole file from parsed pieces would put
     /// the first at risk of a parsing bug.
     static func replacingSummary(in text: String, with markdown: String) -> String {
-        let lines = text.components(separatedBy: "\n")
-        guard let end = summaryEnd(in: lines) else { return text }
+        var lines = text.components(separatedBy: "\n")
+        var boundary = summaryEnd(in: lines)
+        if boundary == nil, let firstTurn = lines.firstIndex(where: { isTurnLine($0) }) {
+            // A note written before the app knew how to write one has no headings at all,
+            // and its body *is* the transcript. Marking where that starts is what lets a
+            // note be written for it afterwards, and it changes not a word of what is
+            // already there.
+            lines.insert(contentsOf: [transcriptHeading, ""], at: firstTurn)
+            boundary = firstTurn
+        }
+        guard let end = boundary else { return text }
 
         // Everything up to and including the title line stays: front matter, blank lines,
         // and the `# Heading` the file repeats for portability.
@@ -290,6 +299,39 @@ struct NoteFile: Identifiable, Sendable, Hashable {
             : "\(kept)\n\n\(body)\n\n\(rest)"
     }
 
+    /// Puts edited own-notes back, leaving the written note and the transcript alone.
+    ///
+    /// The section is created when it is not there yet, because someone who writes their
+    /// own notes into a meeting they forgot to type in during should not have to go and
+    /// make a heading by hand.
+    static func replacingOwnNotes(in text: String, with markdown: String) -> String {
+        let lines = text.components(separatedBy: "\n")
+        let body = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let start = index(of: ownNotesHeading, in: lines) {
+            let end = index(of: transcriptHeading, in: lines) ?? lines.count
+            let head = lines[0..<start].joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let rest = end < lines.count
+                ? lines[end...].joined(separator: "\n")
+                : ""
+            let section = body.isEmpty ? "" : "\(ownNotesHeading)\n\n\(body)\n\n"
+            return rest.isEmpty ? "\(head)\n\n\(section)" : "\(head)\n\n\(section)\(rest)"
+        }
+
+        guard !body.isEmpty else { return text }
+        // No section yet: it goes immediately above the transcript, which is where one
+        // written during the meeting would have been.
+        guard let end = index(of: transcriptHeading, in: lines) else {
+            return "\(text.trimmingCharacters(in: .whitespacesAndNewlines))\n\n"
+                + "\(ownNotesHeading)\n\n\(body)\n"
+        }
+        let head = lines[0..<end].joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let rest = lines[end...].joined(separator: "\n")
+        return "\(head)\n\n\(ownNotesHeading)\n\n\(body)\n\n\(rest)"
+    }
+
     /// Ticks or unticks the `n`th task in the note, counting from the top.
     ///
     /// By position rather than by text, because two tasks can legitimately read the same
@@ -316,6 +358,12 @@ struct NoteFile: Identifiable, Sendable, Hashable {
             seen += 1
         }
         return text
+    }
+
+    /// Whether a line opens a turn: `**You** · `0:00``.
+    static func isTurnLine(_ line: String) -> Bool {
+        guard let pattern = try? Regex(#"^\*\*(.+?)\*\*\s+·\s+`(.+?)`\s*$"#) else { return false }
+        return (try? pattern.wholeMatch(in: line.trimmingCharacters(in: .whitespaces))) != nil
     }
 
     /// Splits a note body into turns.

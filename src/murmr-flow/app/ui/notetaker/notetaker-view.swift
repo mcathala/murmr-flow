@@ -24,6 +24,13 @@ struct NotetakerView: View {
     /// instead of to whichever one is now on screen.
     @State private var editing: String?
     @State private var editingURL: URL?
+    /// Which pane the person chose, or nil to let the note decide.
+    @State private var chosenPane: NotePane?
+    /// Which pane the open editor belongs to, so Done writes back to the half it came
+    /// from rather than to whichever one is showing by then.
+    @State private var editingPane: NotePane = .enhanced
+    @State private var showingTranscript = false
+    @State private var enhanceFailure: String?
     @State private var confirmingDelete = false
     @State private var confirmingDiscard = false
 
@@ -62,6 +69,11 @@ struct NotetakerView: View {
             // the text came from, so this is safe even though the selection has moved on.
             commitEdit()
             renaming = nil
+            // A pane chosen for one note says nothing about the next one, which may not
+            // even have that half.
+            chosenPane = nil
+            showingTranscript = false
+            enhanceFailure = nil
         }
         .onChange(of: meetings.stage) { _, stage in
             // A meeting that just finished should appear without being asked for.
@@ -356,7 +368,7 @@ struct NotetakerView: View {
                         WarningRow(message: message)
                     }
                     Divider()
-                    transcript(of: note)
+                    reading(note)
                 }
                 .padding(20)
             }
@@ -416,6 +428,9 @@ struct NotetakerView: View {
                     Text("Write anything worth keeping. Headings and - bullets work.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Palette.faint)
+                        // Clear of the caret, which sits at the text origin. Level with
+                        // it the caret is drawn through the first letter.
+                        .padding(.leading, 3)
                         .allowsHitTesting(false)
                 }
             }
@@ -424,19 +439,31 @@ struct NotetakerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// You and Them as turns, which is what the file actually holds.
+    /// The note, as two ways of looking at the same meeting.
     ///
-    /// This pane used to print the body verbatim, so it showed `**Them** · ` and backticks
-    /// on screen — markup in the one place the app is meant to be reading to you.
+    /// **The transcript is folded away.** It is the evidence, not the note: it is there so
+    /// a claim can be checked and so the file is the whole record, and a reader who wanted
+    /// forty turns would not have asked for a note. Granola hides it for the same reason.
     @ViewBuilder
-    private func transcript(of note: NoteFile) -> some View {
+    private func reading(_ note: NoteFile) -> some View {
         let body = notes.body(of: note)
         let summary = NoteFile.summary(in: body)
+        let own = NoteFile.ownNotes(in: body)
         let turns = NoteFile.turns(in: body)
+        let pane = shownPane(summary: summary, own: own)
 
-        // The note first, then what was said. It is why the file was opened, and until it
-        // was drawn here the reading pane showed only the turns — the one thing the
-        // Notetaker now writes was visible in every editor except this app.
+        if !turns.isEmpty || !summary.isEmpty || own != nil {
+            PaneTabs(
+                tabs: NotePane.allCases,
+                title: \.title,
+                selection: Binding(get: { pane }, set: { selected in
+                    commitEdit()
+                    chosenPane = selected
+                }),
+                alignment: .leading
+            )
+        }
+
         if editing != nil, editingURL == note.url {
             // Markdown, in the app's mono face. The file is the source of truth and it is
             // Markdown, so an editor that hid that would be inventing a second format —
@@ -452,36 +479,38 @@ struct NotetakerView: View {
             .padding(8)
             .frame(minHeight: 360)
             .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: Theme.Radius.row))
-        } else if !summary.isEmpty {
-            NoteSummaryView(lines: summary) { index in
-                notes.toggleTask(index, in: note)
+        } else {
+            switch pane {
+            case .enhanced:
+                if summary.isEmpty {
+                    emptyEnhanced(note, hasTranscript: !turns.isEmpty)
+                } else {
+                    NoteSummaryView(lines: summary) { index in
+                        notes.toggleTask(index, in: note)
+                    }
+                }
+            case .mine:
+                if let own {
+                    Text(own)
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Palette.text)
+                        .lineSpacing(3)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("You didn\u{2019}t write anything during this meeting. Edit to add "
+                         + "something now.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
 
-        if let own = NoteFile.ownNotes(in: body) {
-            SectionLabel(title: "Your notes")
-                .padding(.top, summary.isEmpty && editing == nil ? 0 : 20)
-                .padding(.bottom, 6)
-            Text(own)
-                .font(Theme.Text.body)
-                .foregroundStyle(Theme.Palette.text)
-                .lineSpacing(3)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-
-        if !summary.isEmpty || editing != nil || NoteFile.ownNotes(in: body) != nil {
-            if !turns.isEmpty {
-                SectionLabel(title: "Transcript")
-                    .padding(.top, 20)
-                    .padding(.bottom, 4)
-            }
-        }
-
-        if turns.isEmpty, summary.isEmpty, editing == nil, NoteFile.ownNotes(in: body) == nil {
-            // A note somebody wrote by hand, or one with nothing in it. Files are the
-            // source of truth, so it still has to display.
+        // A file somebody wrote by hand: no note, no notes of their own, no turns. It
+        // still has to display — files are the source of truth.
+        if summary.isEmpty, own == nil, turns.isEmpty, editing == nil {
             Text(body)
                 .font(Theme.Text.body)
                 .foregroundStyle(Theme.Palette.muted)
@@ -489,8 +518,59 @@ struct NotetakerView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-        } else if !turns.isEmpty {
-            TranscriptView(turns: turns)
+        }
+
+        if !turns.isEmpty {
+            DisclosureGroup(isExpanded: $showingTranscript) {
+                TranscriptView(turns: turns)
+                    .padding(.top, 10)
+            } label: {
+                Text("Transcript · \(turns.count) turns")
+                    .font(Theme.Text.label)
+                    .tracking(Theme.labelTracking)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Theme.Palette.faint)
+            }
+            .padding(.top, 20)
+        }
+    }
+
+    /// Which of the two panes is showing. The stored choice when there is one, and
+    /// otherwise the one with something in it — landing on an empty pane when the other
+    /// holds the whole meeting is the app being right and useless at once.
+    private func shownPane(summary: [NoteFile.SummaryLine], own: String?) -> NotePane {
+        if let chosenPane { return chosenPane }
+        if summary.isEmpty, own != nil { return .mine }
+        return .enhanced
+    }
+
+    /// No note yet, and why that is nearly always temporary.
+    @ViewBuilder
+    private func emptyEnhanced(_ note: NoteFile, hasTranscript: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(hasTranscript
+                 ? "No note was written for this meeting."
+                 : "Nothing was transcribed, so there is nothing to write a note from.")
+                .font(Theme.Text.body)
+                .foregroundStyle(Theme.Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if hasTranscript {
+                HStack(spacing: 8) {
+                    Button("Enhance note now") {
+                        Task { enhanceFailure = await meetings.writeNote(for: note) }
+                    }
+                    .controlSize(.small)
+                    .disabled(meetings.isWritingNote)
+
+                    if meetings.isWritingNote {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                if let enhanceFailure {
+                    WarningRow(message: enhanceFailure)
+                }
+            }
         }
     }
 
@@ -529,20 +609,26 @@ struct NotetakerView: View {
 
                     Spacer(minLength: 0)
 
-                    if let markdown = NoteFile.summaryMarkdown(in: notes.body(of: note)) {
-                        Button(editing == nil ? "Edit note" : "Done") {
-                            if editing == nil {
-                                editing = markdown
-                                editingURL = note.url
-                            } else {
-                                commitEdit()
-                            }
+                    Button(editing == nil ? "Edit" : "Done") {
+                        if editing == nil {
+                            let body = notes.body(of: note)
+                            let pane = shownPane(
+                                summary: NoteFile.summary(in: body),
+                                own: NoteFile.ownNotes(in: body)
+                            )
+                            editingPane = pane
+                            editing = pane == .enhanced
+                                ? (NoteFile.summaryMarkdown(in: body) ?? "")
+                                : (NoteFile.ownNotes(in: body) ?? "")
+                            editingURL = note.url
+                        } else {
+                            commitEdit()
                         }
-                        .controlSize(.small)
-                        .help(editing == nil
-                              ? "Correct the note. The transcript below is left alone."
-                              : "Save the note back to its file")
                     }
+                    .controlSize(.small)
+                    .help(editing == nil
+                          ? "Correct this half of the note. The transcript is left alone."
+                          : "Save it back to the file")
 
                     Button("Copy") {
                         TextInjector.copyToClipboard(notes.body(of: note))
@@ -584,7 +670,10 @@ struct NotetakerView: View {
         guard let text = editing, let url = editingURL,
               let note = notes.notes.first(where: { $0.url == url })
         else { return }
-        notes.saveSummary(text, in: note)
+        switch editingPane {
+        case .enhanced: notes.saveSummary(text, in: note)
+        case .mine: notes.saveOwnNotes(text, in: note)
+        }
     }
 
     /// Renaming edits the note's front matter, not its filename — the filename stays

@@ -457,3 +457,100 @@ struct OwnNotesTests {
         #expect(!rendered.contains("typed these notes"))
     }
 }
+
+/// Editing your own half of a note, and writing one for a meeting that has none.
+@MainActor
+@Suite("Your notes, edited")
+struct OwnNotesEditingTests {
+
+    @Test("your notes can be corrected without touching the note or the transcript")
+    func replacesOwnNotes() {
+        let file = """
+            # Weekly sync
+
+            ### Where we are
+            - The model runs on the machine.
+
+            ## My notes
+
+            ask abuot the celiing
+
+            ## Transcript
+
+            **You** · `0:00`
+
+            Right, can you hear me?
+            """
+        let edited = NoteFile.replacingOwnNotes(in: file, with: "ask about the ceiling")
+        #expect(edited.contains("ask about the ceiling"))
+        #expect(!edited.contains("abuot"))
+        #expect(edited.contains("The model runs on the machine."))
+        #expect(edited.contains("Right, can you hear me?"))
+    }
+
+    @Test("a meeting you typed nothing in gains the section when you write one")
+    func createsTheSection() {
+        let file = """
+            # Weekly sync
+
+            ### Where we are
+            - The model runs on the machine.
+
+            ## Transcript
+
+            **You** · `0:00`
+
+            Right, can you hear me?
+            """
+        let edited = NoteFile.replacingOwnNotes(in: file, with: "a thought I had after")
+        let (_, body) = NoteFile.split(edited)
+        #expect(NoteFile.ownNotes(in: body) == "a thought I had after")
+        // And it lands above the transcript, where one typed during the meeting would be.
+        let own = try! #require(edited.range(of: "## My notes"))
+        let transcript = try! #require(edited.range(of: "## Transcript"))
+        #expect(own.lowerBound < transcript.lowerBound)
+        #expect(NoteFile.summary(in: body).count == 2)
+    }
+
+    @Test("clearing your notes removes the section rather than leaving a heading")
+    func clearsTheSection() {
+        let file = """
+            # Weekly sync
+
+            ## My notes
+
+            something
+
+            ## Transcript
+
+            **You** · `0:00`
+
+            Right.
+            """
+        let edited = NoteFile.replacingOwnNotes(in: file, with: "")
+        #expect(!edited.contains("## My notes"))
+        #expect(edited.contains("Right."))
+    }
+
+    @Test("a note written for an older file marks where its transcript starts")
+    func olderFileGainsAHeading() {
+        // Written before the app knew how to write a note: no headings, body is the turns.
+        let file = """
+            ---
+            title: Old meeting
+            ---
+
+            # Old meeting
+
+            **You** · `0:00`
+
+            We should ship on Friday.
+            """
+        let edited = NoteFile.replacingSummary(in: file, with: "### Decided\n- Ship Friday.")
+        let (_, body) = NoteFile.split(edited)
+        #expect(NoteFile.summary(in: body) == [.heading("Decided"), .bullet("Ship Friday.")])
+        // Not a word of what was there has changed.
+        #expect(NoteFile.turns(in: body).first?.text == "We should ship on Friday.")
+        #expect(edited.contains("title: Old meeting"))
+    }
+}

@@ -198,6 +198,19 @@ final class NoteStore {
         }
     }
 
+    /// Saves edited own-notes back into the file, leaving the rest alone.
+    func saveOwnNotes(_ markdown: String, in note: NoteFile) {
+        guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { return }
+        let updated = NoteFile.replacingOwnNotes(in: text, with: markdown)
+        guard updated != text else { return }
+        do {
+            try updated.write(to: note.url, atomically: true, encoding: .utf8)
+            reload()
+        } catch {
+            Self.log.error("saving your notes failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Ticks or unticks one of the note's tasks, by position.
     func toggleTask(_ index: Int, in note: NoteFile) {
         guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { return }

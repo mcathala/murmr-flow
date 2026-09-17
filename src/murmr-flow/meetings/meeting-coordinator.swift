@@ -411,6 +411,51 @@ final class MeetingCoordinator {
         return (transcript.adding(note: text, writtenBy: preset.name), nil)
     }
 
+    /// True while a note is being written for a meeting already on disk.
+    var isWritingNote = false
+
+    /// Writes the note for a meeting that has already been saved, from its transcript and
+    /// whatever the person typed during it.
+    ///
+    /// The same pass that runs when a meeting ends, reachable afterwards — because the
+    /// reasons there is no note are all temporary ones: the provider was down, the style
+    /// was unset, clean-up was off. Returns why it could not, or nil when it did.
+    @discardableResult
+    func writeNote(for note: NoteFile) async -> String? {
+        guard !isWritingNote else { return nil }
+        guard let preset = prompts.summaryPrompt else {
+            return "No style is set for Summary."
+        }
+        guard providers.activeConfig != nil else { return "No AI is connected." }
+
+        let body = notes.body(of: note)
+        let turns = NoteFile.turns(in: body).map {
+            CleanupService.Turn(speaker: $0.speaker, text: $0.text)
+        }
+        guard !turns.isEmpty else { return "There is no transcript to write from." }
+
+        isWritingNote = true
+        defer { isWritingNote = false }
+
+        let outcome = await cleanup.writeNote(
+            from: turns,
+            config: providers.activeConfig,
+            prompt: PromptLibrary(template: preset.template),
+            context: PromptLibrary.Context(
+                transcript: "",
+                ownNotes: NoteFile.ownNotes(in: body),
+                outputLanguage: settings.notetakerTargetLanguage
+            ),
+            dictionary: dictionary.entries(usedIn: .notetaker),
+            timeout: CleanupService.noteTimeout
+        )
+        guard let text = outcome.text else {
+            return outcome.note ?? "Nothing came back."
+        }
+        notes.saveSummary(text, in: note)
+        return nil
+    }
+
     /// Two optional sentences as one, or nil when there is nothing to say.
     private static func joined(_ parts: String?...) -> String? {
         let text = parts.compactMap { $0 }.joined(separator: " ")
