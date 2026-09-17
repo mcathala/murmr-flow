@@ -446,6 +446,11 @@ struct NotetakerView: View {
     /// forty turns would not have asked for a note. Granola hides it for the same reason.
     @ViewBuilder
     private func reading(_ note: NoteFile) -> some View {
+        // This pane's content comes from the file rather than from anything SwiftUI can
+        // see change, so it says out loud that it depends on the folder having been
+        // re-read. Without it, ticking a task rewrote the file and the box stayed
+        // unticked until you left the note and came back.
+        let _ = notes.revision
         let body = notes.body(of: note)
         let summary = NoteFile.summary(in: body)
         let own = NoteFile.ownNotes(in: body)

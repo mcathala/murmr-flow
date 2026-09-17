@@ -21,6 +21,15 @@ final class NoteStore {
     /// Newest first.
     private(set) var notes: [NoteFile] = []
 
+    /// Bumped whenever the folder is re-read.
+    ///
+    /// `notes` alone is not enough to notice a file changing. A `NoteFile` holds what the
+    /// list row needs — title, date, duration, snippet — so ticking a task inside a note
+    /// produces an array equal to the one before it, and a pane that reads the file's
+    /// *contents* has nothing to tell it to look again. Reading this is how such a pane
+    /// says "I depend on what is on disk, not only on which files are there".
+    private(set) var revision = 0
+
     /// Where this store reads and writes. The app's is `defaultFolder`; a test's is a
     /// scratch directory, which is what lets saving, renaming and deleting be exercised
     /// without touching anyone's real notes.
@@ -114,6 +123,7 @@ final class NoteStore {
     // MARK: - Reading
 
     func reload() {
+        revision += 1
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else {
             notes = []
             return

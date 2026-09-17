@@ -554,3 +554,45 @@ struct OwnNotesEditingTests {
         #expect(edited.contains("title: Old meeting"))
     }
 }
+
+/// The signal a pane watches to know a file it is showing has changed underneath it.
+@MainActor
+@Suite("Noticing a file changed")
+struct NoteRevisionTests {
+
+    @Test("ticking a task changes the file without changing the list")
+    func revisionMovesWhenNotesDoNot() throws {
+        let folder = Scratch.folder("revision")
+        let url = folder.appendingPathComponent("2026-09-16 15-21 Meeting.md")
+        try """
+            ---
+            title: Weekly sync
+            date: 2026-09-16T15:21:00+02:00
+            duration: 76
+            ---
+
+            # Weekly sync
+
+            ### Next steps
+            - [ ] send the runbook
+
+            ## Transcript
+
+            **You** · `0:00`
+
+            Right.
+            """.write(to: url, atomically: true, encoding: .utf8)
+
+        let store = NoteStore(folder: folder)
+        let note = try #require(store.notes.first)
+        let before = store.revision
+
+        store.toggleTask(0, in: note)
+
+        // The row is identical — same title, date, duration and snippet — which is exactly
+        // why the pane needs something else to watch.
+        #expect(store.notes == [note])
+        #expect(store.revision > before)
+        #expect(store.body(of: note).contains("- [x] send the runbook"))
+    }
+}
