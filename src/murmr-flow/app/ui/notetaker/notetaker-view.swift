@@ -366,9 +366,22 @@ struct NotetakerView: View {
     @ViewBuilder
     private func transcript(of note: NoteFile) -> some View {
         let body = notes.body(of: note)
+        let summary = NoteFile.summary(in: body)
         let turns = NoteFile.turns(in: body)
 
-        if turns.isEmpty {
+        // The note first, then what was said. It is why the file was opened, and until it
+        // was drawn here the reading pane showed only the turns — the one thing the
+        // Notetaker now writes was visible in every editor except this app.
+        if !summary.isEmpty {
+            NoteSummaryView(lines: summary)
+            if !turns.isEmpty {
+                SectionLabel(title: "Transcript")
+                    .padding(.top, 20)
+                    .padding(.bottom, 4)
+            }
+        }
+
+        if turns.isEmpty, summary.isEmpty {
             // A note somebody wrote by hand, or one with nothing in it. Files are the
             // source of truth, so it still has to display.
             Text(body)
@@ -378,7 +391,7 @@ struct NotetakerView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-        } else {
+        } else if !turns.isEmpty {
             TranscriptView(turns: turns)
         }
     }
