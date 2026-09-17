@@ -10,10 +10,16 @@ import SwiftUI
 ///
 /// Saving is debounced rather than triggered by a button. The file is the only copy, and a
 /// note nobody remembered to save is worse than a note saved a beat late.
-struct NoteEditorPane: View {
+struct NoteEditorPane<Tabs: View>: View {
 
     let placeholder: String
+    /// Offered on an empty page, where the page itself is the empty state — a note that
+    /// can be written for you and a note you can write are the same blank sheet.
+    var emptyAction: (title: String, run: () -> Void)?
     let onSave: (String) -> Void
+    /// Which half of the note is showing. Handed in rather than built here so it can share
+    /// a line with the bar, which is the one row the pane has to spare.
+    @ViewBuilder let tabs: Tabs
 
     @State private var draft: String
     @State private var selection = NSRange(location: 0, length: 0)
@@ -26,17 +32,28 @@ struct NoteEditorPane: View {
 
     /// How long typing has to stop before the file is written. Long enough that a sentence
     /// is one write, short enough that nothing is lost to a closed lid.
-    private static let settle: Duration = .milliseconds(700)
+    private var settle: Duration { .milliseconds(700) }
 
-    init(text: String, placeholder: String, onSave: @escaping (String) -> Void) {
+    init(
+        text: String,
+        placeholder: String,
+        emptyAction: (title: String, run: () -> Void)? = nil,
+        onSave: @escaping (String) -> Void,
+        @ViewBuilder tabs: () -> Tabs
+    ) {
         _draft = State(initialValue: text)
         self.placeholder = placeholder
+        self.emptyAction = emptyAction
         self.onSave = onSave
+        self.tabs = tabs()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            toolbar
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
+                tabs
+                toolbar
+            }
             editor
         }
     }
@@ -96,7 +113,6 @@ struct NoteEditorPane: View {
                 "checklist", help: "Task", on: block == .task
             ) { apply(.setBlock(.task)) }
 
-            Spacer(minLength: 0)
         }
         .font(Theme.Text.small)
         .foregroundStyle(Theme.Palette.muted)
@@ -160,7 +176,7 @@ struct NoteEditorPane: View {
                 dirty = true
                 saving?.cancel()
                 saving = Task {
-                    try? await Task.sleep(for: Self.settle)
+                    try? await Task.sleep(for: settle)
                     guard !Task.isCancelled else { return }
                     onSave(text)
                 }
@@ -179,11 +195,17 @@ struct NoteEditorPane: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .topLeading) {
             if draft.isEmpty {
-                Text(placeholder)
-                    .font(Theme.Text.body)
-                    .foregroundStyle(Theme.Palette.faint)
-                    .padding(.leading, 3)
-                    .allowsHitTesting(false)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(placeholder)
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Palette.faint)
+                        .padding(.leading, 3)
+                        .allowsHitTesting(false)
+                    if let emptyAction {
+                        Button(emptyAction.title, action: emptyAction.run)
+                            .controlSize(.small)
+                    }
+                }
             }
         }
         .onDisappear {

@@ -51,6 +51,7 @@ struct NoteTextEditor: NSViewRepresentable {
         view.isAutomaticQuoteSubstitutionEnabled = false
         view.isAutomaticDashSubstitutionEnabled = false
         view.isAutomaticTextReplacementEnabled = false
+        view.layoutManager?.delegate = view
         view.string = text
         view.applyStyling()
         return view
@@ -94,6 +95,9 @@ struct NoteTextEditor: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let view = notification.object as? NoteTextView else { return }
+            // Markers are shown on the line the caret is on, so moving the caret is a
+            // reason to lay the text out again.
+            view.applyStyling()
             guard parent.selection != view.selectedRange() else { return }
             parent.selection = view.selectedRange()
         }
@@ -101,10 +105,67 @@ struct NoteTextEditor: NSViewRepresentable {
 }
 
 /// The text view itself: styling, a click that ticks a box, and a height that fits.
-final class NoteTextView: NSTextView {
+final class NoteTextView: NSTextView, @MainActor NSLayoutManagerDelegate {
 
     var onToggleTask: ((Int) -> Void)?
     var onFocusChange: ((Bool) -> Void)?
+
+    /// Character ranges that are in the text but not drawn: the `**` around a bold word,
+    /// on every line except the one being edited.
+    private var hiddenRanges: [NSRange] = []
+
+    /// Glyphs are generated once and cached, so a range that has just become hidden — or
+    /// just stopped being — has to be asked for again.
+    private func setHidden(_ ranges: [NSRange]) {
+        guard ranges != hiddenRanges else { return }
+        hiddenRanges = ranges
+        guard let manager = layoutManager else { return }
+        let whole = NSRange(location: 0, length: (string as NSString).length)
+        manager.invalidateGlyphs(forCharacterRange: whole, changeInLength: 0, actualCharacterRange: nil)
+        manager.invalidateLayout(forCharacterRange: whole, actualCharacterRange: nil)
+        invalidateIntrinsicContentSize()
+    }
+
+    /// Where the markers are dropped on the floor.
+    ///
+    /// `.null` is the layout manager's own way of saying "this character takes no glyph
+    /// and no width". The alternative — deleting the markers from the text and putting
+    /// them back on save — would mean the file and the page holding different strings,
+    /// and every offset in this file would have to be translated between them.
+    func layoutManager(
+        _ layoutManager: NSLayoutManager,
+        shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
+        properties: UnsafePointer<NSLayoutManager.GlyphProperty>,
+        characterIndexes: UnsafePointer<Int>,
+        font: NSFont,
+        forGlyphRange glyphRange: NSRange
+    ) -> Int {
+        guard !hiddenRanges.isEmpty else { return 0 }
+
+        var changed = false
+        var updated = [NSLayoutManager.GlyphProperty](repeating: [], count: glyphRange.length)
+        for offset in 0..<glyphRange.length {
+            let index = characterIndexes[offset]
+            if hiddenRanges.contains(where: { NSLocationInRange(index, $0) }) {
+                updated[offset] = .null
+                changed = true
+            } else {
+                updated[offset] = properties[offset]
+            }
+        }
+        guard changed else { return 0 }
+
+        updated.withUnsafeBufferPointer { buffer in
+            layoutManager.setGlyphs(
+                glyphs,
+                properties: buffer.baseAddress!,
+                characterIndexes: characterIndexes,
+                font: font,
+                forGlyphRange: glyphRange
+            )
+        }
+        return glyphRange.length
+    }
 
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
@@ -260,7 +321,41 @@ final class NoteTextView: NSTextView {
                 )
             }
         }
+
+        // Inline emphasis: the weight goes on, the asterisks come off.
+        //
+        // The line the caret is on keeps its markers. They are the only way to take a
+        // bold off by hand, and text that silently rearranges itself as the caret arrives
+        // is worse than a pair of visible asterisks.
+        let caretLine = text.length > 0
+            ? text.lineRange(for: NSRange(location: min(selectedRange().location, text.length - 1), length: 0))
+            : NSRange(location: 0, length: 0)
+
+        var hide: [NSRange] = []
+        for span in MarkdownEdit.emphasis(in: text) {
+            let existing = span.inner.length > 0
+                ? storage.attribute(.font, at: span.inner.location, effectiveRange: nil) as? NSFont
+                : nil
+            let base = existing ?? body
+            let trait: NSFontTraitMask = span.isBold ? .boldFontMask : .italicFontMask
+            storage.addAttribute(
+                .font,
+                value: NSFontManager.shared.convert(base, toHaveTrait: trait),
+                range: span.inner
+            )
+            guard !isEditing || NSIntersectionRange(span.whole, caretLine).length == 0 else { continue }
+            hide.append(span.opening)
+            hide.append(span.closing)
+        }
+
         storage.endEditing()
+        setHidden(hide)
         invalidateIntrinsicContentSize()
+    }
+
+    /// Whether the caret is in this view. Markers stay hidden on a page nobody is typing
+    /// on, so a note reads as a note until the moment it is being written.
+    private var isEditing: Bool {
+        window?.firstResponder === self
     }
 }

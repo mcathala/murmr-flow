@@ -138,3 +138,64 @@ struct MarkdownStateTests {
         #expect(named.contains(.heading(1)))
     }
 }
+
+/// Finding the emphasis in a line, which is what decides where the markers are hidden and
+/// where the weight goes.
+@Suite("Markdown emphasis")
+struct MarkdownEmphasisTests {
+
+    private func spans(_ text: String) -> [MarkdownEdit.Emphasis] {
+        MarkdownEdit.emphasis(in: text as NSString)
+    }
+
+    @Test("a bold run gives its markers and its words apart")
+    func findsBold() throws {
+        let text = "a **word** here"
+        let found = try #require(spans(text).first)
+        #expect(found.isBold)
+        #expect((text as NSString).substring(with: found.inner) == "word")
+        #expect((text as NSString).substring(with: found.opening) == "**")
+        #expect((text as NSString).substring(with: found.closing) == "**")
+    }
+
+    @Test("the outer asterisk of a bold pair is never read as an italic one")
+    func boldIsNotTwoItalics() {
+        let found = spans("a **word** here")
+        #expect(found.count == 1)
+        #expect(found[0].isBold)
+    }
+
+    @Test("italics are found on their own")
+    func findsItalic() throws {
+        let text = "a *word* here"
+        let found = try #require(spans(text).first)
+        #expect(!found.isBold)
+        #expect((text as NSString).substring(with: found.inner) == "word")
+    }
+
+    @Test("both kinds in one line, in the order they appear")
+    func findsBoth() {
+        let found = spans("**one** and *two*")
+        #expect(found.count == 2)
+        #expect(found[0].isBold)
+        #expect(!found[1].isBold)
+    }
+
+    @Test("a marker has to sit against a word, so arithmetic is left alone")
+    func ignoresLooseAsterisks() {
+        // An editor that silently italicised this would be worse than one doing nothing.
+        #expect(spans("4 * 3 * 2").isEmpty)
+        #expect(spans("a ** b").isEmpty)
+    }
+
+    @Test("an unclosed marker is not emphasis")
+    func ignoresUnclosed() {
+        #expect(spans("**half a thought").isEmpty)
+        #expect(spans("a * b").isEmpty)
+    }
+
+    @Test("emphasis does not run across a line break")
+    func staysOnItsLine() {
+        #expect(spans("*one\ntwo*").isEmpty)
+    }
+}

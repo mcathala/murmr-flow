@@ -115,6 +115,66 @@ enum MarkdownEdit {
         return (updated, NSRange(location: end, length: 0))
     }
 
+    /// A run of emphasis found in the text: where the markers are, and what they wrap.
+    struct Emphasis: Equatable {
+        /// `**` or `*`.
+        let marker: String
+        /// The markers themselves, which is what gets hidden.
+        let opening: NSRange
+        let closing: NSRange
+        /// The words between them, which is what gets the weight.
+        let inner: NSRange
+
+        var isBold: Bool { marker == "**" }
+        /// Markers and words together, for deciding which line it belongs to.
+        var whole: NSRange {
+            NSRange(location: opening.location, length: closing.location + closing.length - opening.location)
+        }
+    }
+
+    /// Every `**bold**` and `*italic*` in the text.
+    ///
+    /// Bold is matched first and its ranges are then off limits, so the outer asterisk of
+    /// a bold pair is never read as the start of an italic one — which would leave half a
+    /// marker drawn and half hidden.
+    ///
+    /// A marker has to sit against a word: `4 * 3 * 2` is arithmetic, and an editor that
+    /// silently italicised it would be worse than one that did nothing.
+    static func emphasis(in text: NSString) -> [Emphasis] {
+        var found: [Emphasis] = []
+        var taken: [NSRange] = []
+
+        func scan(_ pattern: String, marker: String) {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+            let whole = NSRange(location: 0, length: text.length)
+            for match in regex.matches(in: text as String, range: whole) {
+                let inner = match.range(at: 1)
+                guard inner.location != NSNotFound else { continue }
+                let overlaps = taken.contains { NSIntersectionRange($0, match.range).length > 0 }
+                guard !overlaps else { continue }
+                let markerLength = (marker as NSString).length
+                found.append(
+                    Emphasis(
+                        marker: marker,
+                        opening: NSRange(location: match.range.location, length: markerLength),
+                        closing: NSRange(
+                            location: match.range.location + match.range.length - markerLength,
+                            length: markerLength
+                        ),
+                        inner: inner
+                    )
+                )
+                taken.append(match.range)
+            }
+        }
+
+        // No newline inside a run: emphasis belongs to one line, and a stray marker two
+        // paragraphs down must not reach back and swallow everything between.
+        scan(#"\*\*(?![\s*])((?:[^*\n]|\*(?!\*))+?)(?<![\s*])\*\*"#, marker: "**")
+        scan(#"(?<!\*)\*(?![\s*])([^*\n]+?)(?<![\s*])\*(?!\*)"#, marker: "*")
+        return found.sorted { $0.opening.location < $1.opening.location }
+    }
+
     /// Whether the selection is already wrapped in a marker, so the button showing it can
     /// be lit the way the bullet and task buttons are.
     ///

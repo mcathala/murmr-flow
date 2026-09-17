@@ -454,43 +454,44 @@ struct NotetakerView: View {
         let turns = NoteFile.turns(in: body)
         let pane = shownPane(summary: summary, own: own)
 
-        if !turns.isEmpty || !summary.isEmpty || own != nil {
-            PaneTabs(
-                tabs: NotePane.allCases,
-                title: \.title,
-                selection: Binding(get: { pane }, set: { chosenPane = $0 }),
-                alignment: .leading
-            )
-        }
-
         switch pane {
         case .enhanced:
-            // The offer and the page together: no note yet means it can be written for
-            // you or written by you, and neither should cost a mode.
-            if summary.isEmpty {
-                emptyEnhanced(note, hasTranscript: !turns.isEmpty)
-            }
             NoteEditorPane(
                 text: NoteFile.summaryMarkdown(in: body) ?? "",
-                placeholder: "Type here, or use ### and - to shape it."
-            ) { text in
-                notes.saveSummary(text, in: note)
-                resyncSelection()
-            }
+                placeholder: "Type here, or use ### and - to shape it.",
+                // The page is its own empty state: a note that can be written for you and
+                // a note you can write are the same blank sheet.
+                emptyAction: turns.isEmpty ? nil : (
+                    title: meetings.isWritingNote ? "Writing\u{2026}" : "Enhance note now",
+                    run: { enhance(note) }
+                ),
+                onSave: { text in
+                    notes.saveSummary(text, in: note)
+                    resyncSelection()
+                },
+                tabs: { paneTabs(pane) }
+            )
             // Deliberately not keyed on the revision: our own saves bump that, and
             // rebuilding the page on each one would pull the text out from under the
             // caret. It is keyed on the things that genuinely mean "different words":
             // another note, another tab, or a note written for this one just now.
             .id("enhanced:\(note.url.path):\(enhanceStamp)")
+
         case .mine:
             NoteEditorPane(
                 text: own ?? "",
-                placeholder: "Nothing you wrote during this meeting. Type here to add some."
-            ) { text in
-                notes.saveOwnNotes(text, in: note)
-                resyncSelection()
-            }
+                placeholder: "Nothing you wrote during this meeting. Type here to add some.",
+                onSave: { text in
+                    notes.saveOwnNotes(text, in: note)
+                    resyncSelection()
+                },
+                tabs: { paneTabs(pane) }
+            )
             .id("mine:\(note.url.path)")
+        }
+
+        if let enhanceFailure {
+            WarningRow(message: enhanceFailure)
         }
 
         // A file somebody wrote by hand: no note, no notes of their own, no turns. It
@@ -520,6 +521,27 @@ struct NotetakerView: View {
         }
     }
 
+    /// Writes a note for a meeting that has none, then rebuilds the page around words it
+    /// has never seen.
+    private func enhance(_ note: NoteFile) {
+        Task {
+            enhanceFailure = await meetings.writeNote(for: note)
+            resyncSelection()
+            if enhanceFailure == nil { enhanceStamp += 1 }
+        }
+    }
+
+    /// The two halves, as a control that shares its line with the edit bar.
+    private func paneTabs(_ pane: NotePane) -> some View {
+        PaneTabs(
+            tabs: NotePane.allCases,
+            title: \.title,
+            selection: Binding(get: { pane }, set: { chosenPane = $0 }),
+            alignment: .leading
+        )
+        .fixedSize()
+    }
+
     /// Which of the two panes is showing. The stored choice when there is one, and
     /// otherwise the one with something in it — landing on an empty pane when the other
     /// holds the whole meeting is the app being right and useless at once.
@@ -527,40 +549,6 @@ struct NotetakerView: View {
         if let chosenPane { return chosenPane }
         if summary.isEmpty, own != nil { return .mine }
         return .enhanced
-    }
-
-    /// No note yet, and why that is nearly always temporary.
-    @ViewBuilder
-    private func emptyEnhanced(_ note: NoteFile, hasTranscript: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(hasTranscript
-                 ? "No note was written for this meeting."
-                 : "Nothing was transcribed, so there is nothing to write a note from.")
-                .font(Theme.Text.body)
-                .foregroundStyle(Theme.Palette.muted)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if hasTranscript {
-                HStack(spacing: 8) {
-                    Button("Enhance note now") {
-                        Task {
-                            enhanceFailure = await meetings.writeNote(for: note)
-                            resyncSelection()
-                            if enhanceFailure == nil { enhanceStamp += 1 }
-                        }
-                    }
-                    .controlSize(.small)
-                    .disabled(meetings.isWritingNote)
-
-                    if meetings.isWritingNote {
-                        ProgressView().controlSize(.small)
-                    }
-                }
-                if let enhanceFailure {
-                    WarningRow(message: enhanceFailure)
-                }
-            }
-        }
     }
 
     /// What clean-up couldn't do to the meeting that just finished, if anything.
