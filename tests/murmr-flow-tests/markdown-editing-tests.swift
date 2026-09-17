@@ -147,3 +147,105 @@ struct MarkdownRoundTripTests {
         #expect(edits[0].range.location > edits[1].range.location)
     }
 }
+
+/// The ways a style applied on the page could fail to survive the file.
+///
+/// Everything here starts from the page — a range someone selected and a button they
+/// pressed — rather than from Markdown, because that is the direction that loses things:
+/// the file is written from it and read back, and anything the writing cannot express is
+/// gone by the next launch.
+@Suite("Emphasis written from the page")
+struct EmphasisWritingTests {
+
+    private func round(_ text: String, _ runs: [MarkdownEdit.EmphasisRun]) -> (String, [MarkdownEdit.EmphasisRun]) {
+        let file = MarkdownEdit.markdown(text: text, runs: runs)
+        let (back, read) = MarkdownEdit.stripEmphasis(file)
+        return (back, read)
+    }
+
+    @Test("a style applied across two lines survives")
+    func acrossALineBreak() {
+        // Select two lines, press bold. Nothing stops anyone doing this.
+        let runs = [MarkdownEdit.EmphasisRun(range: NSRange(location: 0, length: 3), style: .bold)]
+        let (text, read) = round("a\nb", runs)
+        #expect(text == "a\nb")
+        #expect(read.count == 2)
+        #expect(read.allSatisfy { $0.style == .bold })
+    }
+
+    @Test("a style with a space at its edge survives")
+    func trailingSpace() {
+        // Double-clicking a word and dragging one character further is enough.
+        let runs = [MarkdownEdit.EmphasisRun(range: NSRange(location: 0, length: 5), style: .bold)]
+        let (text, read) = round("word here", runs)
+        #expect(text == "word here")
+        #expect(read.first?.style == .bold)
+        #expect((text as NSString).substring(with: read[0].range) == "word")
+    }
+
+    @Test("a style on nothing but spaces is dropped rather than written")
+    func onlySpaces() {
+        let runs = [MarkdownEdit.EmphasisRun(range: NSRange(location: 1, length: 1), style: .bold)]
+        #expect(MarkdownEdit.markdown(text: "a b", runs: runs) == "a b")
+    }
+
+    @Test("an emoji is not cut in half on the way through")
+    func keepsEmoji() {
+        // The text is walked to take the markers out, and a two-unit character split down
+        // the middle comes back as a replacement glyph.
+        let (text, _) = MarkdownEdit.stripEmphasis("a **🎙 note** here")
+        #expect(text == "a 🎙 note here")
+    }
+
+    @Test("styles that meet across a line keep to their own lines")
+    func runsAreSplitPerLine() {
+        let runs = [MarkdownEdit.EmphasisRun(range: NSRange(location: 0, length: 7), style: [.bold, .underline])]
+        let (text, read) = round("one\ntwo", runs)
+        #expect(text == "one\ntwo")
+        #expect(read.count == 2)
+        #expect(read.allSatisfy { $0.style == [.bold, .underline] })
+    }
+}
+
+/// Shapes the reader cannot take apart. None of them may lose a character.
+@Suite("Emphasis it cannot read")
+struct EmphasisLimitTests {
+
+    @Test("nested emphasis is read as far as it can be, and loses nothing")
+    func nested() {
+        let source = "**a *b* c**"
+        let (text, runs) = MarkdownEdit.stripEmphasis(source)
+        // The inner one is understood; the outer markers stay as text.
+        #expect(runs.count == 1)
+        #expect(runs[0].style == .italic)
+        #expect((text as NSString).substring(with: runs[0].range) == "b")
+        // The file is what matters, and it comes back exactly.
+        #expect(MarkdownEdit.markdown(text: text, runs: runs) == source)
+    }
+
+    @Test("an unclosed tag is text, not an underline to the end of the note")
+    func unclosedTag() {
+        let source = "a <u>start and no finish"
+        let (text, runs) = MarkdownEdit.stripEmphasis(source)
+        #expect(runs.isEmpty)
+        #expect(text == source)
+    }
+
+    @Test("markers with nothing between them are left alone")
+    func emptyMarkers() {
+        for source in ["****", "**", "<u></u>", "* *"] {
+            let (text, runs) = MarkdownEdit.stripEmphasis(source)
+            #expect(runs.isEmpty, "\(source)")
+            #expect(text == source, "\(source)")
+        }
+    }
+
+    @Test("a note of nothing but emoji comes back whole")
+    func emojiOnly() {
+        let source = "🎙 **🎧 notes** 📝"
+        let (text, runs) = MarkdownEdit.stripEmphasis(source)
+        #expect(text == "🎙 🎧 notes 📝")
+        #expect((text as NSString).substring(with: runs[0].range) == "🎧 notes")
+        #expect(MarkdownEdit.markdown(text: text, runs: runs) == source)
+    }
+}

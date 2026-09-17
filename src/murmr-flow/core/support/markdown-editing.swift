@@ -135,6 +135,10 @@ enum MarkdownEdit {
     /// Done as a style *per character* and then gathered back into runs, which is what
     /// makes overlap a non-question: a word that is bold and underlined is not two runs
     /// fighting, it is one character set with two bits in it.
+    /// Nesting is the one shape this does not read: `**a *b* c**` gives back an italic
+    /// `b` with the outer asterisks left standing as text. They survive a round trip
+    /// untouched, so nothing is lost — it reads worse than it should, and everything the
+    /// app itself writes is flat.
     static func stripEmphasis(_ markdown: String) -> (text: String, runs: [EmphasisRun]) {
         var text = markdown as NSString
         var styles = [EmphasisStyle](repeating: [], count: text.length)
@@ -147,20 +151,25 @@ enum MarkdownEdit {
                     styles[index].insert(style)
                 }
             }
+            // Copied a stretch at a time, never a unit at a time. A character outside the
+            // basic plane — an emoji — is two UTF-16 units, and asking for one of them on
+            // its own hands back a replacement glyph: the note's own words would come
+            // back broken, which is far worse than losing a bold.
             var out = ""
             var kept: [EmphasisStyle] = []
             var index = 0
-            let sorted = cuts.sorted { $0.location < $1.location }
-            var next = 0
-            while index < text.length {
-                if next < sorted.count, index == sorted[next].location {
-                    index += sorted[next].length
-                    next += 1
-                    continue
+            for cut in cuts.sorted(by: { $0.location < $1.location }) {
+                if cut.location > index {
+                    let segment = NSRange(location: index, length: cut.location - index)
+                    out += text.substring(with: segment)
+                    kept.append(contentsOf: styles[segment.location..<(segment.location + segment.length)])
                 }
-                out += text.substring(with: NSRange(location: index, length: 1))
-                kept.append(styles[index])
-                index += 1
+                index = max(index, cut.location + cut.length)
+            }
+            if index < text.length {
+                let tail = NSRange(location: index, length: text.length - index)
+                out += text.substring(with: tail)
+                kept.append(contentsOf: styles[tail.location..<(tail.location + tail.length)])
             }
             text = out as NSString
             styles = kept
@@ -229,20 +238,59 @@ enum MarkdownEdit {
     /// Puts the markers back, for the file.
     ///
     /// Applied from the end backwards, so an insertion never moves the range of the run
-    /// after it.
+    /// after it — and only after every run has been made into something the reader will
+    /// recognise on the way back in. See `writable`.
     static func markdown(text: String, runs: [EmphasisRun]) -> String {
         var out = text as NSString
-        for run in runs.sorted(by: { $0.range.location > $1.range.location }) {
-            guard run.range.location >= 0,
-                  run.range.location + run.range.length <= out.length,
-                  run.range.length > 0, !run.style.isEmpty
-            else { continue }
+        for run in writable(runs, in: out).sorted(by: { $0.range.location > $1.range.location }) {
             let words = out.substring(with: run.range)
             out = out.replacingCharacters(
                 in: run.range, with: wrapping(run.style, around: words)
             ) as NSString
         }
         return out as String
+    }
+
+    /// Cuts a run down to something the file can actually say.
+    ///
+    /// A page lets you select anything and press Bold; Markdown does not let you write
+    /// most of it. Two rules, and both were losing formatting silently until a run written
+    /// one launch came back plain the next:
+    ///
+    /// **A run stops at a line break.** `**a\nb**` is not emphasis to any reader, so a
+    /// style dragged across two lines becomes one run per line.
+    ///
+    /// **A marker has to touch a word.** `**word **` does not parse, so the spaces at
+    /// either end are left outside — and a run that is nothing but spaces is not written
+    /// at all.
+    static func writable(_ runs: [EmphasisRun], in text: NSString) -> [EmphasisRun] {
+        var out: [EmphasisRun] = []
+        for run in runs {
+            guard !run.style.isEmpty, run.range.length > 0,
+                  run.range.location >= 0,
+                  run.range.location + run.range.length <= text.length
+            else { continue }
+
+            text.enumerateSubstrings(in: run.range, options: [.byLines]) { _, line, _, _ in
+                var start = line.location
+                var end = line.location + line.length
+                while start < end, text.substring(with: NSRange(location: start, length: 1))
+                    .trimmingCharacters(in: .whitespaces).isEmpty {
+                    start += 1
+                }
+                while end > start, text.substring(with: NSRange(location: end - 1, length: 1))
+                    .trimmingCharacters(in: .whitespaces).isEmpty {
+                    end -= 1
+                }
+                guard end > start else { return }
+                out.append(
+                    EmphasisRun(
+                        range: NSRange(location: start, length: end - start), style: run.style
+                    )
+                )
+            }
+        }
+        return out
     }
 
     /// The prefix changes that make every line the selection touches the given kind.

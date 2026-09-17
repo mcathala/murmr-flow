@@ -435,6 +435,10 @@ final class NoteTextView: NSTextView {
         guard range.length > 0 else { return }
         let removing = hasEmphasis(style)
 
+        // Announced before it happens, so ⌘Z knows there was something to undo. A text
+        // view only records what it is told about; changing the storage behind its back
+        // leaves the undo stack describing a document that no longer exists.
+        guard shouldChangeText(in: range, replacementString: nil) else { return }
         storage.beginEditing()
         storage.enumerateAttribute(Self.emphasisKey, in: range, options: []) { value, sub, _ in
             var current = MarkdownEdit.EmphasisStyle(rawValue: (value as? Int) ?? 0)
@@ -460,6 +464,10 @@ final class NoteTextView: NSTextView {
             block, in: string, selection: selectedRange()
         )
         guard !edits.isEmpty else { return }
+        guard shouldChangeText(
+            inRanges: edits.map { NSValue(range: $0.range) },
+            replacementStrings: edits.map(\.replacement)
+        ) else { return }
 
         storage.beginEditing()
         for edit in edits where edit.range.location + edit.range.length <= storage.length {
