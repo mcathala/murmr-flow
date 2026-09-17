@@ -62,6 +62,11 @@ struct PaneTabs<Tab: Hashable & Identifiable>: View {
                     selection = tab
                 } label: {
                     Text(title(tab))
+                        // A tab is a word, never a column of letters. Squeezed narrow
+                        // enough this wrapped one character per line, which is what a
+                        // `Text` does when it is given less width than its longest word.
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                         .font(isSelected ? Theme.Text.bodyStrong : Theme.Text.body)
                         .foregroundStyle(
                             isSelected ? Theme.Palette.text : Theme.Palette.muted

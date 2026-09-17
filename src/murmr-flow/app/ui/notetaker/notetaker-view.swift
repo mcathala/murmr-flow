@@ -551,7 +551,10 @@ struct NotetakerView: View {
             selection: Binding(get: { pane }, set: { chosenPane = $0 }),
             alignment: .leading
         )
-        .fixedSize()
+        // Deliberately not `fixedSize`. It shares its line with the edit bar, and a row of
+        // controls that refuses to give up a point pushes the whole pane wider than the
+        // window — which is what it did, over the list and off the right edge.
+        .layoutPriority(1)
     }
 
     /// Which of the two panes is showing. The stored choice when there is one, and
