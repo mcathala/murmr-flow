@@ -22,15 +22,13 @@ struct NotetakerView: View {
     /// The note being edited, and which file it belongs to. Two pieces of state rather
     /// than one, so switching notes mid-edit saves to the file the words came from
     /// instead of to whichever one is now on screen.
-    @State private var editing: String?
-    @State private var editingURL: URL?
     /// Which pane the person chose, or nil to let the note decide.
     @State private var chosenPane: NotePane?
-    /// Which pane the open editor belongs to, so Done writes back to the half it came
-    /// from rather than to whichever one is showing by then.
-    @State private var editingPane: NotePane = .enhanced
     @State private var showingTranscript = false
     @State private var enhanceFailure: String?
+    /// Bumped when a note is written for a meeting that had none, so the page is rebuilt
+    /// around words it has never seen.
+    @State private var enhanceStamp = 0
     @State private var confirmingDelete = false
     @State private var confirmingDiscard = false
 
@@ -65,9 +63,8 @@ struct NotetakerView: View {
         // to rename A and clicking B showed B in edit mode holding A's title, and Save
         // gave B that title.
         .onChange(of: selection) {
-            // Save before the pane changes under the edit. `commitEdit` writes to the file
-            // the text came from, so this is safe even though the selection has moved on.
-            commitEdit()
+            // Each page saves itself as it goes and once more on its way out, so nothing
+            // has to be committed here.
             renaming = nil
             // A pane chosen for one note says nothing about the next one, which may not
             // even have that half.
@@ -461,61 +458,44 @@ struct NotetakerView: View {
             PaneTabs(
                 tabs: NotePane.allCases,
                 title: \.title,
-                selection: Binding(get: { pane }, set: { selected in
-                    commitEdit()
-                    chosenPane = selected
-                }),
+                selection: Binding(get: { pane }, set: { chosenPane = $0 }),
                 alignment: .leading
             )
         }
 
-        if editing != nil, editingURL == note.url {
-            // Markdown, in the app's mono face. The file is the source of truth and it is
-            // Markdown, so an editor that hid that would be inventing a second format —
-            // and the headings and bullets someone types here have to survive a trip
-            // through any other editor unchanged.
-            TextEditor(text: Binding(
-                get: { editing ?? "" },
-                set: { editing = $0 }
-            ))
-            .font(Theme.Text.monoLarge)
-            .lineSpacing(3)
-            .scrollContentBackground(.hidden)
-            .padding(8)
-            .frame(minHeight: 360)
-            .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: Theme.Radius.row))
-        } else {
-            switch pane {
-            case .enhanced:
-                if summary.isEmpty {
-                    emptyEnhanced(note, hasTranscript: !turns.isEmpty)
-                } else {
-                    NoteSummaryView(lines: summary) { index in
-                        notes.toggleTask(index, in: note)
-                    }
-                }
-            case .mine:
-                if let own {
-                    Text(own)
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Palette.text)
-                        .lineSpacing(3)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text("You didn\u{2019}t write anything during this meeting. Edit to add "
-                         + "something now.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Palette.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        switch pane {
+        case .enhanced:
+            // The offer and the page together: no note yet means it can be written for
+            // you or written by you, and neither should cost a mode.
+            if summary.isEmpty {
+                emptyEnhanced(note, hasTranscript: !turns.isEmpty)
             }
+            NoteEditorPane(
+                text: NoteFile.summaryMarkdown(in: body) ?? "",
+                placeholder: "Nothing written yet. Type here, or use ### and - to shape it."
+            ) { text in
+                notes.saveSummary(text, in: note)
+                resyncSelection()
+            }
+            // Deliberately not keyed on the revision: our own saves bump that, and
+            // rebuilding the page on each one would pull the text out from under the
+            // caret. It is keyed on the things that genuinely mean "different words":
+            // another note, another tab, or a note written for this one just now.
+            .id("enhanced:\(note.url.path):\(enhanceStamp)")
+        case .mine:
+            NoteEditorPane(
+                text: own ?? "",
+                placeholder: "Nothing you wrote during this meeting. Type here to add some."
+            ) { text in
+                notes.saveOwnNotes(text, in: note)
+                resyncSelection()
+            }
+            .id("mine:\(note.url.path)")
         }
 
         // A file somebody wrote by hand: no note, no notes of their own, no turns. It
         // still has to display — files are the source of truth.
-        if summary.isEmpty, own == nil, turns.isEmpty, editing == nil {
+        if summary.isEmpty, own == nil, turns.isEmpty {
             Text(body)
                 .font(Theme.Text.body)
                 .foregroundStyle(Theme.Palette.muted)
@@ -563,7 +543,11 @@ struct NotetakerView: View {
             if hasTranscript {
                 HStack(spacing: 8) {
                     Button("Enhance note now") {
-                        Task { enhanceFailure = await meetings.writeNote(for: note) }
+                        Task {
+                            enhanceFailure = await meetings.writeNote(for: note)
+                            resyncSelection()
+                            if enhanceFailure == nil { enhanceStamp += 1 }
+                        }
                     }
                     .controlSize(.small)
                     .disabled(meetings.isWritingNote)
@@ -614,27 +598,6 @@ struct NotetakerView: View {
 
                     Spacer(minLength: 0)
 
-                    Button(editing == nil ? "Edit" : "Done") {
-                        if editing == nil {
-                            let body = notes.body(of: note)
-                            let pane = shownPane(
-                                summary: NoteFile.summary(in: body),
-                                own: NoteFile.ownNotes(in: body)
-                            )
-                            editingPane = pane
-                            editing = pane == .enhanced
-                                ? (NoteFile.summaryMarkdown(in: body) ?? "")
-                                : (NoteFile.ownNotes(in: body) ?? "")
-                            editingURL = note.url
-                        } else {
-                            commitEdit()
-                        }
-                    }
-                    .controlSize(.small)
-                    .help(editing == nil
-                          ? "Correct this half of the note. The transcript is left alone."
-                          : "Save it back to the file")
-
                     Button("Copy") {
                         TextInjector.copyToClipboard(notes.body(of: note))
                     }
@@ -663,21 +626,20 @@ struct NotetakerView: View {
 
     // MARK: - Actions
 
-    /// Writes the edited note back, if anything is being edited.
+    /// Points the selection back at the reloaded files.
     ///
-    /// Called by Done and by anything that navigates away, because an edit lost to a click
-    /// in the sidebar is an edit the person will not make twice.
-    private func commitEdit() {
-        defer {
-            editing = nil
-            editingURL = nil
-        }
-        guard let text = editing, let url = editingURL,
-              let note = notes.notes.first(where: { $0.url == url })
-        else { return }
-        switch editingPane {
-        case .enhanced: notes.saveSummary(text, in: note)
-        case .mine: notes.saveOwnNotes(text, in: note)
+    /// A `NoteFile` carries the row's snippet, and the snippet is the note's first line —
+    /// so editing the note changes the value the selection holds, and the pane that was
+    /// showing it decided nothing was selected any more. Selection is by file, not by the
+    /// contents of one.
+    private func resyncSelection() {
+        let urls = Set(selection.map(\.url))
+        guard !urls.isEmpty else { return }
+        let reloaded = notes.notes.filter { urls.contains($0.url) }
+        guard !reloaded.isEmpty else { return }
+        selection = Set(reloaded)
+        if let anchor, let moved = reloaded.first(where: { $0.url == anchor.url }) {
+            self.anchor = moved
         }
     }
 
