@@ -31,7 +31,8 @@ struct NoteFile: Identifiable, Sendable, Hashable {
     /// nothing did. Recorded because a reader six months later should be able to tell
     /// whether they are looking at what was said or at a machine's version of it.
     static func frontMatter(
-        title: String, date: Date, duration: TimeInterval, cleanup: String? = nil
+        title: String, date: Date, duration: TimeInterval, cleanup: String? = nil,
+        note: String? = nil
     ) -> String {
         var lines = [
             fence,
@@ -41,6 +42,9 @@ struct NoteFile: Identifiable, Sendable, Hashable {
         ]
         if let cleanup, !cleanup.isEmpty {
             lines.append("cleanup: \(escape(cleanup))")
+        }
+        if let note, !note.isEmpty {
+            lines.append("note: \(escape(note))")
         }
         lines.append(fence)
         return lines.joined(separator: "\n")
@@ -111,6 +115,7 @@ struct NoteFile: Identifiable, Sendable, Hashable {
         // Carried across rather than regenerated: renaming a note says nothing about
         // whether it was cleaned up, and dropping the field would quietly claim it wasn't.
         let cleanup = fields["cleanup"]
+        let note = fields["note"]
 
         // The visible heading is regenerated too, so the file doesn't end up claiming two
         // different titles in two places.
@@ -120,7 +125,9 @@ struct NoteFile: Identifiable, Sendable, Hashable {
             .joined(separator: "\n")
 
         return """
-            \(frontMatter(title: title, date: date, duration: duration, cleanup: cleanup))
+            \(frontMatter(
+                title: title, date: date, duration: duration, cleanup: cleanup, note: note
+            ))
 
             # \(title)
 
