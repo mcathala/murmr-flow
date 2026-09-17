@@ -451,6 +451,27 @@ final class NoteTextView: NSTextView {
         return storage.attribute(Self.headingKey, at: index, effectiveRange: nil) as? Int
     }
 
+    /// Return ends a heading.
+    ///
+    /// The level rides on the characters of the line, and a new character takes the
+    /// attributes of the one before it — so pressing Return at the end of a heading made
+    /// the next line a heading, and the one after that, until the whole note was set in
+    /// 15-point bold. Every editor behaves this way; ours has to say so.
+    override func insertNewline(_ sender: Any?) {
+        super.insertNewline(sender)
+        guard let storage = textStorage, storage.length > 0 else { return }
+
+        let caret = min(selectedRange().location, storage.length - 1)
+        let line = (string as NSString).lineRange(for: NSRange(location: caret, length: 0))
+        guard storage.attribute(Self.headingKey, at: caret, effectiveRange: nil) != nil else {
+            return
+        }
+        storage.removeAttribute(Self.headingKey, range: line)
+        typingAttributes[Self.headingKey] = nil
+        applyStyling()
+        didChangeText()
+    }
+
     /// Makes the caret's lines a heading, or plain text when they already are that level.
     func setHeading(_ level: Int?) {
         guard let storage = textStorage, storage.length > 0 else { return }
