@@ -95,3 +95,46 @@ struct MarkdownEditingTests {
         #expect(bullet == "- done thing")
     }
 }
+
+/// Whether a button on the bar should be lit, which is the same question as whether
+/// pressing it would take the formatting off.
+@Suite("Markdown state")
+struct MarkdownStateTests {
+
+    private func at(_ location: Int, _ length: Int = 0) -> NSRange {
+        NSRange(location: location, length: length)
+    }
+
+    @Test("a wrapped selection is wrapped, with or without the markers picked")
+    func readsWrapping() {
+        let text = "a **word** here"
+        #expect(MarkdownEdit.isWrapped("**", in: text, selection: at(4, 4)))
+        #expect(MarkdownEdit.isWrapped("**", in: text, selection: at(2, 8)))
+        #expect(!MarkdownEdit.isWrapped("**", in: text, selection: at(11, 4)))
+    }
+
+    @Test("bold wins over italic, so one word never lights both")
+    func boldBeatsItalic() {
+        let text = "a **word** here"
+        #expect(MarkdownEdit.isWrapped("**", in: text, selection: at(4, 4)))
+        #expect(!MarkdownEdit.isWrapped("*", in: text, selection: at(4, 4)))
+
+        let italic = "a *word* here"
+        #expect(MarkdownEdit.isWrapped("*", in: italic, selection: at(3, 4)))
+    }
+
+    @Test("a selection at the very start is not read as wrapped from outside it")
+    func noUnderflow() {
+        #expect(!MarkdownEdit.isWrapped("**", in: "word", selection: at(0, 4)))
+    }
+
+    @Test("the menu offers every kind a line can be")
+    func menuCoversWhatALineCanBe() {
+        // It named lines it did not then list, so opening it showed nothing chosen.
+        let named = MarkdownEdit.Block.allCases
+        #expect(named.contains(.bullet))
+        #expect(named.contains(.task))
+        #expect(named.contains(.body))
+        #expect(named.contains(.heading(1)))
+    }
+}

@@ -18,6 +18,7 @@ struct NoteEditorPane: View {
     @State private var draft: String
     @State private var selection = NSRange(location: 0, length: 0)
     @State private var saving: Task<Void, Never>?
+    @State private var focused = false
     /// Whether anything has been typed here. Leaving an untouched pane must write
     /// nothing: the file may have been changed by something else since this was seeded,
     /// and saving a draft nobody edited would quietly undo that.
@@ -48,9 +49,21 @@ struct NoteEditorPane: View {
     /// The controls for shaping a line, because the Markdown is visible but knowing to
     /// type `###` is not something anyone should have to be told.
     ///
-    /// The same control applies and removes: pressing Heading 2 on a line that is already
-    /// one makes it plain again. There is no "remove formatting" button anywhere here,
-    /// which is what that buys.
+    /// Three things here are deliberate, and each was wrong in the first version.
+    ///
+    /// **It is only there while you are typing.** A bar for shaping text sitting over a
+    /// page nobody has clicked into is chrome, and it was the first thing under the tabs
+    /// on every note. Its space is held rather than collapsed, so the note does not jump
+    /// when the caret arrives.
+    ///
+    /// **The menu offers every kind of line, including bullet and task.** It read the
+    /// line it was on and could name a kind — "Bullet" — that it then did not list, so
+    /// opening it showed nothing chosen. The two buttons are shortcuts to the two most
+    /// used, not a second half of the same control.
+    ///
+    /// **Everything lights when it is on, or nothing should.** Bullet and task lit and
+    /// bold and italic never did, on the same bar. And the menu was gold while saying
+    /// "Normal text", which is the accent claiming something is set when nothing is.
     private var toolbar: some View {
         HStack(spacing: 6) {
             Menu {
@@ -58,9 +71,7 @@ struct NoteEditorPane: View {
                     get: { block },
                     set: { apply(.setBlock($0)) }
                 )) {
-                    ForEach([MarkdownEdit.Block.body, .heading(1), .heading(2), .heading(3)]) {
-                        Text($0.title).tag($0)
-                    }
+                    ForEach(MarkdownEdit.Block.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.inline)
             } label: {
@@ -69,11 +80,12 @@ struct NoteEditorPane: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .frame(minWidth: 96, alignment: .leading)
+            .foregroundStyle(block == .body ? Theme.Palette.muted : Theme.Palette.gold)
 
             Divider().frame(height: 14)
 
-            command("bold", help: "Bold") { apply(.wrap("**")) }
-            command("italic", help: "Italic") { apply(.wrap("*")) }
+            command("bold", help: "Bold", on: isWrapped("**")) { apply(.wrap("**")) }
+            command("italic", help: "Italic", on: isWrapped("*")) { apply(.wrap("*")) }
 
             Divider().frame(height: 14)
 
@@ -88,6 +100,15 @@ struct NoteEditorPane: View {
         }
         .font(Theme.Text.small)
         .foregroundStyle(Theme.Palette.muted)
+        .opacity(focused ? 1 : 0)
+        // Kept out of the way when it is invisible, so a click meant for the first line
+        // of the note cannot land on a control nobody can see.
+        .allowsHitTesting(focused)
+        .animation(.easeOut(duration: 0.12), value: focused)
+    }
+
+    private func isWrapped(_ marker: String) -> Bool {
+        MarkdownEdit.isWrapped(marker, in: draft, selection: selection)
     }
 
     private func command(
@@ -144,6 +165,7 @@ struct NoteEditorPane: View {
                     onSave(text)
                 }
             },
+            onFocusChange: { focused = $0 },
             onToggleTask: { index in
                 // Ticked here rather than through the file: the box has to fill the
                 // instant it is clicked, and a round trip through disk and back would

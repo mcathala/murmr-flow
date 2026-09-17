@@ -115,6 +115,33 @@ enum MarkdownEdit {
         return (updated, NSRange(location: end, length: 0))
     }
 
+    /// Whether the selection is already wrapped in a marker, so the button showing it can
+    /// be lit the way the bullet and task buttons are.
+    ///
+    /// Bold wins over italic when both could match: `**word**` is bold, and reading the
+    /// outer asterisk of a bold pair as an italic one would light both buttons for text
+    /// that is only ever one of them.
+    static func isWrapped(_ marker: String, in text: String, selection: NSRange) -> Bool {
+        let string = text as NSString
+        guard selection.location + selection.length <= string.length else { return false }
+        if marker == "*", isWrapped("**", in: text, selection: selection) { return false }
+
+        let selected = string.substring(with: selection)
+        if selected.hasPrefix(marker), selected.hasSuffix(marker),
+           selected.count >= marker.count * 2 {
+            return true
+        }
+        let markerLength = (marker as NSString).length
+        let outer = NSRange(
+            location: selection.location - markerLength,
+            length: selection.length + markerLength * 2
+        )
+        guard outer.location >= 0, outer.location + outer.length <= string.length else {
+            return false
+        }
+        return string.substring(with: outer) == marker + selected + marker
+    }
+
     /// Wraps the selection in a marker, or unwraps it when it is already wrapped. With
     /// nothing selected it leaves the pair behind with the caret between them, which is
     /// how every editor behaves and is what makes the button usable before typing.

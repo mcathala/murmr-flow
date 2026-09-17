@@ -472,7 +472,7 @@ struct NotetakerView: View {
             }
             NoteEditorPane(
                 text: NoteFile.summaryMarkdown(in: body) ?? "",
-                placeholder: "Nothing written yet. Type here, or use ### and - to shape it."
+                placeholder: "Type here, or use ### and - to shape it."
             ) { text in
                 notes.saveSummary(text, in: note)
                 resyncSelection()

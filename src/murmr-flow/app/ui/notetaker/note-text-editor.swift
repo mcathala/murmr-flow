@@ -25,6 +25,9 @@ struct NoteTextEditor: NSViewRepresentable {
     /// Called on every keystroke, debounced by the caller — the file is the only copy, so
     /// nothing waits for a button.
     var onEdited: (String) -> Void
+    /// Whether the caret is in here. The bar above appears with it, because a bar for
+    /// shaping text is noise on a page nobody is typing on.
+    var onFocusChange: ((Bool) -> Void)?
     /// The task's position in the note, when its box was the thing clicked.
     var onToggleTask: ((Int) -> Void)?
 
@@ -32,6 +35,7 @@ struct NoteTextEditor: NSViewRepresentable {
         let view = NoteTextView()
         view.delegate = context.coordinator
         view.onToggleTask = { context.coordinator.parent.onToggleTask?($0) }
+        view.onFocusChange = { context.coordinator.parent.onFocusChange?($0) }
         view.isRichText = false
         view.isEditable = true
         view.isSelectable = true
@@ -54,6 +58,7 @@ struct NoteTextEditor: NSViewRepresentable {
 
     func updateNSView(_ view: NoteTextView, context: Context) {
         view.onToggleTask = { context.coordinator.parent.onToggleTask?($0) }
+        view.onFocusChange = { context.coordinator.parent.onFocusChange?($0) }
         context.coordinator.parent = self
 
         // Only when the text genuinely differs — assigning it back mid-typing would move
@@ -99,6 +104,19 @@ struct NoteTextEditor: NSViewRepresentable {
 final class NoteTextView: NSTextView {
 
     var onToggleTask: ((Int) -> Void)?
+    var onFocusChange: ((Bool) -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became { onFocusChange?(true) }
+        return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { onFocusChange?(false) }
+        return resigned
+    }
 
     /// Where the box sits on a task line: `- [ ] `.
     private static let boxRange = 2..<5
