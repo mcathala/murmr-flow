@@ -37,6 +37,11 @@ struct MeetingTranscript: Sendable {
     /// tell whose summary of the meeting they are looking at.
     var notedBy: String?
 
+    /// What the person typed while the meeting ran, in their own words and untouched.
+    /// The written note is built from these; they are kept anyway, because they are the
+    /// one part of the file that cannot be reconstructed from anything else.
+    var ownNotes: String?
+
     var isEmpty: Bool { utterances.isEmpty }
 
     /// The same conversation with a note written above it.
@@ -44,6 +49,13 @@ struct MeetingTranscript: Sendable {
         var copy = self
         copy.note = note
         copy.notedBy = style
+        return copy
+    }
+
+    /// The same conversation with what the person typed during it.
+    func adding(ownNotes: String) -> MeetingTranscript {
+        var copy = self
+        copy.ownNotes = ownNotes
         return copy
     }
 
@@ -69,7 +81,8 @@ struct MeetingTranscript: Sendable {
             utterances: rewritten,
             cleanedBy: prompt,
             note: note,
-            notedBy: notedBy
+            notedBy: notedBy,
+            ownNotes: ownNotes
         )
     }
 
@@ -160,7 +173,17 @@ struct MeetingTranscript: Sendable {
         if let note, !note.isEmpty {
             lines.append(note)
             lines.append("")
-            lines.append("## Transcript")
+        }
+        // Your own words, kept whole and kept apart. The note above was written *from*
+        // these, so a model that paraphrased one of them has not lost it.
+        if let ownNotes, !ownNotes.isEmpty {
+            lines.append(NoteFile.ownNotesHeading)
+            lines.append("")
+            lines.append(ownNotes)
+            lines.append("")
+        }
+        if note?.isEmpty == false || ownNotes?.isEmpty == false {
+            lines.append(NoteFile.transcriptHeading)
             lines.append("")
         }
 

@@ -133,6 +133,13 @@ final class MeetingCoordinator {
     private(set) var elapsed: TimeInterval = 0
     private(set) var lastResult: Result?
 
+    /// What the person is typing while the meeting runs.
+    ///
+    /// Held here rather than in the view, because a pane that is scrolled away, or a
+    /// window that is closed, must not take the notes with it — and because the note
+    /// written at the end is built from them.
+    var liveNotes: String = ""
+
     /// Live levels, republished on the same tick as the timer.
     private(set) var youLevel: Float = 0
     private(set) var themLevel: Float = 0
@@ -216,6 +223,9 @@ final class MeetingCoordinator {
             recorder.inputDeviceID = devices?.selectedInputDeviceID
             try recorder.start()
             elapsed = 0
+            // Cleared here, where a recording genuinely begins — not at the top, where a
+            // refused start would throw away notes from the meeting still running.
+            liveNotes = ""
             stage = .recording
             startTicking()
             onRecordingChange?(true)
@@ -366,6 +376,11 @@ final class MeetingCoordinator {
     private func noted(
         _ transcript: MeetingTranscript
     ) async -> (MeetingTranscript, String?) {
+        let typed = liveNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Kept verbatim whatever happens next. They are the person's own words, and the
+        // one thing in this file that cannot be reconstructed from anything else.
+        let transcript = typed.isEmpty ? transcript : transcript.adding(ownNotes: typed)
+
         guard settings.notetakerCleanupEnabled else { return (transcript, nil) }
         guard !transcript.isEmpty else { return (transcript, nil) }
         guard let preset = prompts.summaryPrompt else { return (transcript, nil) }
@@ -379,6 +394,7 @@ final class MeetingCoordinator {
             prompt: PromptLibrary(template: preset.template),
             context: PromptLibrary.Context(
                 transcript: "",  // filled in from the turns
+                ownNotes: typed,
                 outputLanguage: settings.notetakerTargetLanguage
             ),
             dictionary: dictionary.entries(usedIn: .notetaker),
