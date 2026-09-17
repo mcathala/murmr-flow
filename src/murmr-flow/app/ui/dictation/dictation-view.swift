@@ -222,6 +222,13 @@ struct DictationView: View {
                         Image(nsImage: icon)
                             .resizable()
                             .frame(width: 15, height: 15)
+                            // The row aligns on the text baseline, and an image has none
+                            // — so it was hung by its bottom edge and sat high against
+                            // the words. This puts its middle where the letters' middle
+                            // is, which is where the eye expects it.
+                            .alignmentGuide(.firstTextBaseline) {
+                                $0[VerticalAlignment.center] + 3
+                            }
                             .help(record.targetAppName ?? "")
                     } else if let app = record.targetAppName {
                         Text("· \(app)").font(.caption).foregroundStyle(.tertiary)
