@@ -147,6 +147,59 @@ struct NoteFile: Identifiable, Sendable, Hashable {
         var isYou: Bool { speaker.caseInsensitiveCompare("You") == .orderedSame }
     }
 
+    /// The heading the transcript starts under, and the boundary between the two halves
+    /// of a note file.
+    static let transcriptHeading = "## Transcript"
+
+    /// One line of the written note, already told apart so a view can lay it out rather
+    /// than print the markup.
+    enum SummaryLine: Identifiable, Sendable, Equatable {
+        case heading(String)
+        case bullet(String)
+        case task(done: Bool, String)
+        case paragraph(String)
+
+        var id: String {
+            switch self {
+            case .heading(let text): "h:\(text)"
+            case .bullet(let text): "b:\(text)"
+            case .task(let done, let text): "t:\(done):\(text)"
+            case .paragraph(let text): "p:\(text)"
+            }
+        }
+    }
+
+    /// The written note above the transcript, as lines to lay out.
+    ///
+    /// **Gated on the transcript heading being there.** Without it every older note — and
+    /// every file somebody wrote by hand — would have its first paragraphs read as a note,
+    /// which is a claim the file never made. No heading, no note.
+    static func summary(in body: String) -> [SummaryLine] {
+        let lines = body.components(separatedBy: "\n")
+        guard lines.contains(where: { $0.trimmingCharacters(in: .whitespaces) == transcriptHeading })
+        else { return [] }
+
+        var out: [SummaryLine] = []
+        for raw in lines {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line == transcriptHeading { break }
+            if line.isEmpty { continue }
+            // The file's own title. The pane draws it in its header already.
+            if line.hasPrefix("# ") { continue }
+            if line.hasPrefix("#") {
+                out.append(.heading(line.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)))
+            } else if line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") {
+                let done = line.hasPrefix("- [x] ")
+                out.append(.task(done: done, String(line.dropFirst(6))))
+            } else if line.hasPrefix("- ") || line.hasPrefix("• ") {
+                out.append(.bullet(String(line.dropFirst(2))))
+            } else {
+                out.append(.paragraph(line))
+            }
+        }
+        return out
+    }
+
     /// Splits a note body into turns.
     ///
     /// The reading pane used to render the body as one block of raw text, so it showed
@@ -200,7 +253,17 @@ struct NoteFile: Identifiable, Sendable, Hashable {
     /// every row — so each row showed its date twice, once formatted by the app and once
     /// copied out of the file.
     private static func snippet(from body: String) -> String {
-        let spoken = turns(in: body).first?.text
+        // The note's first line when there is one: a row saying what the meeting was
+        // about beats one saying "right, can you hear me".
+        let written = summary(in: body).compactMap { line -> String? in
+            switch line {
+            case .bullet(let text), .paragraph(let text): text
+            case .heading, .task: nil
+            }
+        }.first
+
+        let spoken = written
+            ?? turns(in: body).first?.text
             ?? body.components(separatedBy: "\n")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .first { !$0.isEmpty && !$0.hasPrefix("#") && !$0.hasPrefix("_") }
