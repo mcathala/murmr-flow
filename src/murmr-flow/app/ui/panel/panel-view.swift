@@ -362,7 +362,7 @@ struct PanelView: View {
     /// `Formal · Mail`. The reason is capped rather than wrapped: the bubbles float over a
     /// pill of fixed width, so a long app name has to give way instead of running past it.
     private var promptLabel: String {
-        guard model.mode != .note else { return model.notePromptName }
+        guard model.mode != .note else { return model.activePromptName }
         guard let detail = model.promptDetail else { return model.promptName }
         let short = detail.count > 16
             ? detail.prefix(15).trimmingCharacters(in: .whitespaces) + "\u{2026}"

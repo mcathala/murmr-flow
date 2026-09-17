@@ -110,6 +110,11 @@ final class PanelModel {
     /// nothing worth saying.
     var promptDetail: String?
     var notePromptName: String = "Meeting"
+
+    /// The style the pill is actually about, which depends on which job it is showing.
+    /// The menu ticked `promptName` regardless, so in note mode it put the checkmark
+    /// beside the dictation style while the bubble named the Notetaker's.
+    var activePromptName: String { mode == .note ? notePromptName : promptName }
     var promptOptions: [(id: UUID, name: String)] = []
 
     /// The meeting key, for the note-armed row. Nil reads as "no key set".

@@ -201,7 +201,7 @@ final class FloatingPanel {
             let item = NSMenuItem(
                 title: option.name, action: #selector(PromptTarget.pick(_:)), keyEquivalent: ""
             )
-            item.state = option.name == model.promptName ? .on : .off
+            item.state = option.name == model.activePromptName ? .on : .off
             item.representedObject = option.id
             let target = PromptTarget { [weak self] id in
                 self?.onPromptChosen?(id)
