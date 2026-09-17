@@ -53,6 +53,7 @@ final class MeetingCoordinator {
         case you
         case them
         case cleaning
+        case noting
         case writing
 
         var label: String {
@@ -61,6 +62,7 @@ final class MeetingCoordinator {
             case .you: "Transcribing your side"
             case .them: "Transcribing their side"
             case .cleaning: "Cleaning up the notes"
+            case .noting: "Writing the note"
             case .writing: "Writing the note"
             }
         }
@@ -267,7 +269,8 @@ final class MeetingCoordinator {
                 throw RecordingError.systemCaptureFailed
             }
 
-            let (transcript, cleanupNote) = await cleaned(woven)
+            let (cleanedTranscript, cleanupNote) = await cleaned(woven)
+            let (transcript, noteWarning) = await noted(cleanedTranscript)
 
             stage = .transcribing(.writing)
             let saved: NoteFile
@@ -281,7 +284,9 @@ final class MeetingCoordinator {
                 transcript: transcript,
                 note: saved,
                 processingTime: (clock.now - started).seconds,
-                cleanupNote: cleanupNote
+                // One line for whatever went less than perfectly. Two warnings about two
+                // halves of the same request would read as two things being broken.
+                cleanupNote: Self.joined(cleanupNote, noteWarning)
             )
             stage = .saved
             Self.log.notice(
@@ -349,6 +354,51 @@ final class MeetingCoordinator {
             transcript.applying(texts: outcome.texts, cleanedBy: preset.name),
             outcome.note
         )
+    }
+
+    /// Writes the note that goes above the transcript.
+    ///
+    /// Runs after the turns have been tidied, on purpose: the note is written from the
+    /// best wording available, and mis-transcribed turns would otherwise be summarised as
+    /// heard. Returns the transcript unchanged and a sentence when there is no note — the
+    /// meeting is still saved, because a note that could not be written must never cost
+    /// the record of what was said.
+    private func noted(
+        _ transcript: MeetingTranscript
+    ) async -> (MeetingTranscript, String?) {
+        guard settings.notetakerCleanupEnabled else { return (transcript, nil) }
+        guard !transcript.isEmpty else { return (transcript, nil) }
+        guard let preset = prompts.summaryPrompt else { return (transcript, nil) }
+
+        stage = .transcribing(.noting)
+        let outcome = await cleanup.writeNote(
+            from: transcript.utterances.map {
+                CleanupService.Turn(speaker: $0.speaker.rawValue, text: $0.text)
+            },
+            config: providers.activeConfig,
+            prompt: PromptLibrary(template: preset.template),
+            context: PromptLibrary.Context(
+                transcript: "",  // filled in from the turns
+                outputLanguage: settings.notetakerTargetLanguage
+            ),
+            dictionary: dictionary.entries(usedIn: .notetaker),
+            timeout: CleanupService.noteTimeout
+        )
+
+        guard let text = outcome.text else {
+            Self.log.notice(
+                "no note written: \(outcome.note ?? "nothing to write", privacy: .public)"
+            )
+            return (transcript, outcome.note.map { "The note could not be written. \($0)" })
+        }
+        Self.log.notice("note written: \(text.count, privacy: .public) characters")
+        return (transcript.adding(note: text, writtenBy: preset.name), nil)
+    }
+
+    /// Two optional sentences as one, or nil when there is nothing to say.
+    private static func joined(_ parts: String?...) -> String? {
+        let text = parts.compactMap { $0 }.joined(separator: " ")
+        return text.isEmpty ? nil : text
     }
 
     // MARK: - Transcription
