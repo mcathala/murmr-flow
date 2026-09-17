@@ -40,6 +40,11 @@ struct NoteTextEditor: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NoteTextView {
         let view = NoteTextView()
+        // Asking for the layout manager is what puts this view on TextKit 1, and it has
+        // to happen before anything measures it. The height comes from that manager's
+        // used rect; on TextKit 2 it is nil, the view falls back to a default size, and a
+        // page that is barely any points tall is a page you cannot click into.
+        _ = view.layoutManager
         view.delegate = context.coordinator
         view.onToggleTask = { context.coordinator.parent.onToggleTask?($0) }
         view.onFocusChange = { context.coordinator.parent.onFocusChange?($0) }
@@ -136,11 +141,14 @@ final class NoteTextView: NSTextView {
     /// bar covers the note, what you typed and the transcript together.
     override var intrinsicContentSize: NSSize {
         guard let manager = layoutManager, let container = textContainer else {
-            return super.intrinsicContentSize
+            // Never `super`: an unmeasurable page must still be tall enough to click into.
+            return NSSize(width: NSView.noIntrinsicMetric, height: 240)
         }
         manager.ensureLayout(for: container)
         let used = manager.usedRect(for: container).size
-        return NSSize(width: NSView.noIntrinsicMetric, height: max(used.height, 120))
+        // A floor, so an empty note is a page rather than a line — there has to be
+        // somewhere to click before there is anything to click on.
+        return NSSize(width: NSView.noIntrinsicMetric, height: max(used.height, 240))
     }
 
     override func didChangeText() {
