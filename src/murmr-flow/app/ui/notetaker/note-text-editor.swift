@@ -117,6 +117,8 @@ struct NoteTextEditor: NSViewRepresentable {
             view.setBlock(block)
         }
 
+        func toggleTask(_ index: Int) { view?.toggleTask(index) }
+
         /// What the caret's line already is.
         func block(in text: String, at selection: NSRange) -> MarkdownEdit.Block {
             if let level = view?.headingLevel() { return .heading(level) }
@@ -182,8 +184,8 @@ final class NoteTextView: NSTextView {
         return resigned
     }
 
-    /// Where the box sits on a task line: `- [ ] `.
-    private static let boxRange = 2..<5
+    /// Where the box sits on a task line: the first character of it.
+    private static let boxRange = 0..<1
 
     /// Sized to its content rather than scrolling on its own, so the pane's one scroll
     /// bar covers the note, what you typed and the transcript together.
@@ -224,7 +226,8 @@ final class NoteTextView: NSTextView {
         let line = text.substring(with: lineRange)
         let column = index - lineRange.location
 
-        guard line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] "),
+        guard line.hasPrefix(MarkdownEdit.uncheckedBox)
+                || line.hasPrefix(MarkdownEdit.checkedBox),
               Self.boxRange.contains(column)
         else {
             takeFocus()
@@ -235,9 +238,12 @@ final class NoteTextView: NSTextView {
         // Count the tasks above this one; the file ticks by position.
         var position = 0
         var scanned = 0
-        text.enumerateSubstrings(in: NSRange(location: 0, length: lineRange.location), options: [.byLines]) { substring, _, _, _ in
+        text.enumerateSubstrings(
+            in: NSRange(location: 0, length: lineRange.location), options: [.byLines]
+        ) { substring, _, _, _ in
             guard let substring else { return }
-            if substring.hasPrefix("- [ ] ") || substring.hasPrefix("- [x] ") { scanned += 1 }
+            if substring.hasPrefix(MarkdownEdit.uncheckedBox)
+                || substring.hasPrefix(MarkdownEdit.checkedBox) { scanned += 1 }
         }
         position = scanned
         onToggleTask?(position)
@@ -289,18 +295,21 @@ final class NoteTextView: NSTextView {
             guard let line = substring else { return }
 
 
-            if line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") {
-                let done = line.hasPrefix("- [x] ")
+            if line.hasPrefix(MarkdownEdit.uncheckedBox)
+                || line.hasPrefix(MarkdownEdit.checkedBox) {
+                let done = line.hasPrefix(MarkdownEdit.checkedBox)
+                // The box in a face that actually draws one, a size up so it reads as a
+                // control rather than as punctuation.
                 storage.addAttributes(
                     [
-                        .font: mono,
+                        .font: NSFont.systemFont(ofSize: 15),
                         .foregroundColor: NSColor(
                             done ? Theme.Palette.gold : Theme.Palette.faint
                         ),
                     ],
-                    range: NSRange(location: range.location, length: min(6, range.length))
+                    range: NSRange(location: range.location, length: min(1, range.length))
                 )
-                if done, range.length > 6 {
+                if done, range.length > 2 {
                     // Struck through as well as dimmed. Colour alone reads as "less
                     // important"; a line through it reads as "done", which is the claim.
                     storage.addAttributes(
@@ -309,7 +318,7 @@ final class NoteTextView: NSTextView {
                             .strikethroughStyle: NSUnderlineStyle.single.rawValue,
                             .strikethroughColor: NSColor(Theme.Palette.faint),
                         ],
-                        range: NSRange(location: range.location + 6, length: range.length - 6)
+                        range: NSRange(location: range.location + 2, length: range.length - 2)
                     )
                 }
                 return
@@ -449,6 +458,42 @@ final class NoteTextView: NSTextView {
         guard let storage = textStorage, storage.length > 0 else { return nil }
         let index = min(max(selectedRange().location, 0), storage.length - 1)
         return storage.attribute(Self.headingKey, at: index, effectiveRange: nil) as? Int
+    }
+
+    /// Ticks the nth task on the page, counting from the top.
+    ///
+    /// Done here rather than by rewriting the file and reading it back: the box has to
+    /// fill the instant it is clicked, and a round trip through disk would replace the
+    /// text under the caret to do it.
+    func toggleTask(_ index: Int) {
+        guard let storage = textStorage else { return }
+        let text = string as NSString
+        var seen = 0
+        var target: NSRange?
+
+        text.enumerateSubstrings(
+            in: NSRange(location: 0, length: text.length), options: [.byLines]
+        ) { substring, range, _, stop in
+            guard let line = substring,
+                  line.hasPrefix(MarkdownEdit.uncheckedBox)
+                    || line.hasPrefix(MarkdownEdit.checkedBox)
+            else { return }
+            if seen == index {
+                target = NSRange(location: range.location, length: 1)
+                stop.pointee = true
+            }
+            seen += 1
+        }
+
+        guard let target, target.location + target.length <= text.length else { return }
+        let done = text.substring(with: target) == String(MarkdownEdit.checkedBox.first!)
+        let replacement = String(
+            (done ? MarkdownEdit.uncheckedBox : MarkdownEdit.checkedBox).first!
+        )
+        guard shouldChangeText(in: target, replacementString: replacement) else { return }
+        storage.replaceCharacters(in: target, with: replacement)
+        applyStyling()
+        didChangeText()
     }
 
     /// Return ends a heading.

@@ -195,8 +195,8 @@ struct NoteEditorPane<Tabs: View>: View {
                 // replace the text under the caret to do it.
                 saving?.cancel()
                 dirty = true
-                draft = NoteFile.togglingTask(in: draft, at: index)
-                onSave(draft)
+                commands.toggleTask(index)
+                stamp += 1
             }
         )
         .frame(maxWidth: .infinity, alignment: .leading)

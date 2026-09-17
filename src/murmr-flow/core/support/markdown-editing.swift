@@ -50,7 +50,7 @@ enum MarkdownEdit {
             case .body, .heading: ""
             case .bullet: "- "
             case .numbered: "1. "
-            case .task: "- [ ] "
+            case .task: MarkdownEdit.uncheckedBox
             }
         }
 
@@ -64,6 +64,15 @@ enum MarkdownEdit {
             }
         }
     }
+
+    /// What a task looks like on the page: a box, not four characters that spell one.
+    ///
+    /// The file keeps `- [ ] `, which is what every Markdown reader understands. The page
+    /// gets a single glyph, and that is the whole trick — one character can be clicked,
+    /// deleted and typed over like any other, where a drawn box over hidden brackets
+    /// brings back every problem hiding characters ever had.
+    static let uncheckedBox = "\u{2610} "
+    static let checkedBox = "\u{2611} "
 
     /// A line that is a heading, and how big.
     struct HeadingRun: Equatable, Sendable {
@@ -92,6 +101,7 @@ enum MarkdownEdit {
 
     static func block(ofLine line: String) -> Block {
         if line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") { return .task }
+        if line.hasPrefix(uncheckedBox) || line.hasPrefix(checkedBox) { return .task }
         if line.hasPrefix("- ") { return .bullet }
         if numberPrefix(of: line) != nil { return .numbered }
         let hashes = line.prefix { $0 == "#" }.count
@@ -111,6 +121,9 @@ enum MarkdownEdit {
     /// Strips whatever a line opens with, so a new prefix replaces rather than stacks.
     static func stripPrefix(_ line: String) -> String {
         if line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") { return String(line.dropFirst(6)) }
+        if line.hasPrefix(uncheckedBox) || line.hasPrefix(checkedBox) {
+            return String(line.dropFirst(2))
+        }
         if line.hasPrefix("- ") { return String(line.dropFirst(2)) }
         if let digits = numberPrefix(of: line) { return String(line.dropFirst(digits)) }
         let hashes = line.prefix { $0 == "#" }.count
@@ -135,6 +148,14 @@ enum MarkdownEdit {
             let line = substring ?? ""
             if !first { out += "\n" }
             first = false
+
+            // A task's brackets become a box. Same idea as the hashes, one line earlier:
+            // what the file spells out, the page shows.
+            if line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") {
+                out += (line.hasPrefix("- [x] ") ? checkedBox : uncheckedBox)
+                    + line.dropFirst(6)
+                return
+            }
 
             let hashes = line.prefix { $0 == "#" }.count
             guard hashes > 0, line.dropFirst(hashes).hasPrefix(" ") else {
@@ -361,6 +382,12 @@ enum MarkdownEdit {
                 )
             }
             var written = markdown(text: source.substring(with: line), runs: within)
+            // The box goes back to what every Markdown reader understands.
+            if written.hasPrefix(uncheckedBox) {
+                written = "- [ ] " + written.dropFirst(2)
+            } else if written.hasPrefix(checkedBox) {
+                written = "- [x] " + written.dropFirst(2)
+            }
             if let level = headings.first(where: { $0.range.location == line.location })?.level {
                 written = String(repeating: "#", count: level) + " " + written
             }

@@ -106,6 +106,36 @@ struct NoteEditorTests {
         #expect(view.currentMarkdown == "### A heading\na plain sentence")
     }
 
+    @Test("a task is a box on the page and brackets in the file")
+    func taskIsABox() {
+        let source = "- [ ] send the runbook\n- [x] check the ceiling"
+        let view = page(source)
+
+        #expect(view.string == "\u{2610} send the runbook\n\u{2611} check the ceiling")
+        #expect(!view.string.contains("["))
+        #expect(view.currentMarkdown == source)
+    }
+
+    @Test("ticking a box on the page ticks the brackets in the file")
+    func tickingWritesThrough() {
+        let view = page("- [ ] first\n- [ ] second")
+        view.toggleTask(1)
+
+        #expect(view.string.contains("\u{2611} second"))
+        #expect(view.currentMarkdown == "- [ ] first\n- [x] second")
+
+        // And back.
+        view.toggleTask(1)
+        #expect(view.currentMarkdown == "- [ ] first\n- [ ] second")
+    }
+
+    @Test("a box in a note with headings and weight still round-trips")
+    func boxAmongEverythingElse() {
+        let source = "### Next steps\n- [x] send the **runbook**\n- a plain bullet"
+        let view = page(source)
+        #expect(view.currentMarkdown == source)
+    }
+
     private func page(_ markdown: String) -> NoteTextView {
         let view = NoteTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
         _ = view.layoutManager
