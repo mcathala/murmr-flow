@@ -279,10 +279,16 @@ final class NoteTextView: NSTextView {
         storage.beginEditing()
         // Everything but the emphasis, which is ours and is the one attribute that
         // carries meaning rather than appearance.
+        // Body text a shade under the palette's white, headings at full strength.
+        //
+        // Everything was the same brightness, so a page of notes read as one flat block
+        // and the headings had only their size to carry the structure. Pulling the
+        // sentences back a little is what lets the headings come forward without shouting
+        // — and a full-strength white on this ground glares over a page of reading.
         storage.addAttributes(
             [
                 .font: body,
-                .foregroundColor: NSColor(Theme.Palette.text),
+                .foregroundColor: NSColor(Theme.Palette.text).withAlphaComponent(0.86),
                 .paragraphStyle: paragraph,
             ],
             range: whole
@@ -344,7 +350,10 @@ final class NoteTextView: NSTextView {
         // `#`s are not here to be counted — that is the point of them not being here.
         storage.enumerateAttribute(Self.headingKey, in: whole, options: []) { value, range, _ in
             guard let level = value as? Int, range.length > 0 else { return }
-            storage.addAttribute(.font, value: headingFont(level), range: range)
+            storage.addAttributes(
+                [.font: headingFont(level), .foregroundColor: NSColor(Theme.Palette.text)],
+                range: range
+            )
         }
 
         // Emphasis last, over whatever font the line already earned, so bold inside a
