@@ -151,6 +151,35 @@ struct NoteFile: Identifiable, Sendable, Hashable {
     /// of a note file.
     static let transcriptHeading = "## Transcript"
 
+    /// Where what the person typed during the meeting is kept, whole.
+    static let ownNotesHeading = "## My notes"
+
+    /// The headings that end the written note. Either can be absent — a meeting nobody
+    /// typed in has no My notes, and one that was never transcribed has no Transcript.
+    static let sectionHeadings = [ownNotesHeading, transcriptHeading]
+
+    /// Where a section of the file begins, by heading, or nil when it is not there.
+    private static func index(of heading: String, in lines: [String]) -> Int? {
+        lines.firstIndex { $0.trimmingCharacters(in: .whitespaces) == heading }
+    }
+
+    /// The first heading that ends the written note, whichever comes first.
+    private static func summaryEnd(in lines: [String]) -> Int? {
+        sectionHeadings.compactMap { index(of: $0, in: lines) }.min()
+    }
+
+    /// What the person typed while the meeting ran, exactly as they typed it.
+    static func ownNotes(in body: String) -> String? {
+        let lines = body.components(separatedBy: "\n")
+        guard let start = index(of: ownNotesHeading, in: lines) else { return nil }
+        let end = index(of: transcriptHeading, in: lines) ?? lines.count
+        guard start + 1 < end else { return nil }
+        let text = lines[(start + 1)..<end]
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
     /// One line of the written note, already told apart so a view can lay it out rather
     /// than print the markup.
     enum SummaryLine: Identifiable, Sendable, Equatable {
@@ -176,13 +205,11 @@ struct NoteFile: Identifiable, Sendable, Hashable {
     /// which is a claim the file never made. No heading, no note.
     static func summary(in body: String) -> [SummaryLine] {
         let lines = body.components(separatedBy: "\n")
-        guard lines.contains(where: { $0.trimmingCharacters(in: .whitespaces) == transcriptHeading })
-        else { return [] }
+        guard let end = summaryEnd(in: lines) else { return [] }
 
         var out: [SummaryLine] = []
-        for raw in lines {
+        for raw in lines[0..<end] {
             let line = raw.trimmingCharacters(in: .whitespaces)
-            if line == transcriptHeading { break }
             if line.isEmpty { continue }
             // The file's own title. The pane draws it in its header already.
             if line.hasPrefix("# ") { continue }
@@ -207,9 +234,7 @@ struct NoteFile: Identifiable, Sendable, Hashable {
     /// touches nothing.
     static func summaryMarkdown(in body: String) -> String? {
         let lines = body.components(separatedBy: "\n")
-        guard let end = lines.firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespaces) == transcriptHeading
-        }) else { return nil }
+        guard let end = summaryEnd(in: lines) else { return nil }
 
         let start = lines.prefix(end).firstIndex { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -230,9 +255,7 @@ struct NoteFile: Identifiable, Sendable, Hashable {
     /// the first at risk of a parsing bug.
     static func replacingSummary(in text: String, with markdown: String) -> String {
         let lines = text.components(separatedBy: "\n")
-        guard let end = lines.firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespaces) == transcriptHeading
-        }) else { return text }
+        guard let end = summaryEnd(in: lines) else { return text }
 
         // Everything up to and including the title line stays: front matter, blank lines,
         // and the `# Heading` the file repeats for portability.
@@ -259,6 +282,34 @@ struct NoteFile: Identifiable, Sendable, Hashable {
         return body.isEmpty
             ? "\(kept)\n\n\(rest)"
             : "\(kept)\n\n\(body)\n\n\(rest)"
+    }
+
+    /// Ticks or unticks the `n`th task in the note, counting from the top.
+    ///
+    /// By position rather than by text, because two tasks can legitimately read the same
+    /// and matching on words would tick the wrong one. Only lines inside the note are
+    /// counted: a `- [ ]` somebody said out loud and that ended up in the transcript is
+    /// not a task, it is a quotation.
+    static func togglingTask(in text: String, at index: Int) -> String {
+        var lines = text.components(separatedBy: "\n")
+        let end = summaryEnd(in: lines) ?? lines.count
+
+        var seen = 0
+        for position in 0..<end {
+            let line = lines[position]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("- [ ] ") || trimmed.hasPrefix("- [x] ") else { continue }
+            if seen == index {
+                let done = trimmed.hasPrefix("- [x] ")
+                lines[position] = line.replacingOccurrences(
+                    of: done ? "- [x] " : "- [ ] ",
+                    with: done ? "- [ ] " : "- [x] "
+                )
+                return lines.joined(separator: "\n")
+            }
+            seen += 1
+        }
+        return text
     }
 
     /// Splits a note body into turns.

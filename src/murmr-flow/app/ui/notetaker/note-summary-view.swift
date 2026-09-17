@@ -12,9 +12,16 @@ import SwiftUI
 struct NoteSummaryView: View {
 
     let lines: [NoteFile.SummaryLine]
+    /// Called with the task's position in the note when its box is clicked. Nil leaves the
+    /// boxes drawn but inert, which is what a snapshot wants.
+    var onToggleTask: ((Int) -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Tasks are numbered as they appear, because that is how the file counts them
+        // when one is ticked — matching on the words would tick the wrong one of two
+        // tasks that happen to read the same.
+        var taskNumber = -1
+        return VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                 switch line {
                 case .heading(let text):
@@ -30,7 +37,8 @@ struct NoteSummaryView: View {
                     row(marker: bullet, text: text)
 
                 case .task(let done, let text):
-                    row(marker: checkbox(done), text: text)
+                    let number = { taskNumber += 1; return taskNumber }()
+                    row(marker: checkbox(done, at: number), text: text)
 
                 case .paragraph(let text):
                     Text(text)
@@ -69,11 +77,23 @@ struct NoteSummaryView: View {
             .alignmentGuide(.firstTextBaseline) { _ in 4 }
     }
 
-    /// A task from the note. Drawn, not interactive: the file is the source of truth, and
-    /// a box that ticked here and not there would be two answers to one question.
-    private func checkbox(_ done: Bool) -> some View {
-        Image(systemName: done ? "checkmark.square.fill" : "square")
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(done ? Theme.Palette.gold : Theme.Palette.faint)
+    /// A task from the note, ticked by clicking it.
+    ///
+    /// The click writes the `x` into the file, which is why this can be interactive at all
+    /// — a box that ticked on screen and not on disk would be two answers to one question.
+    /// And it works without entering the editor: ticking something off is the most ordinary
+    /// thing anyone does to a note, and making it cost a mode was the wrong trade.
+    private func checkbox(_ done: Bool, at index: Int) -> some View {
+        Button {
+            onToggleTask?(index)
+        } label: {
+            Image(systemName: done ? "checkmark.square.fill" : "square")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(done ? Theme.Palette.gold : Theme.Palette.faint)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(onToggleTask == nil)
+        .help(done ? "Mark as not done" : "Mark as done")
     }
 }

@@ -198,6 +198,19 @@ final class NoteStore {
         }
     }
 
+    /// Ticks or unticks one of the note's tasks, by position.
+    func toggleTask(_ index: Int, in note: NoteFile) {
+        guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { return }
+        let updated = NoteFile.togglingTask(in: text, at: index)
+        guard updated != text else { return }
+        do {
+            try updated.write(to: note.url, atomically: true, encoding: .utf8)
+            reload()
+        } catch {
+            Self.log.error("ticking a task failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Moves the note to the Trash rather than unlinking it, so a mis-click is recoverable
     /// by the means the user already knows.
     func delete(_ note: NoteFile) {
