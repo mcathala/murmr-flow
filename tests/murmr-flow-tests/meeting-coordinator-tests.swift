@@ -326,4 +326,43 @@ struct MeetingCoordinatorTests {
         #expect(after.contains("note: Summary"))
         #expect(after.contains("### What was said"))
     }
+
+    @Test("notes typed during the meeting are kept whole and reach the style")
+    func typedNotesSurvive() async {
+        let rig = Rig()
+        rig.coordinator.start()
+        rig.coordinator.liveNotes = "ask about the token ceiling"
+        await rig.coordinator.stop()
+
+        let body = rig.notes.body(of: rig.notes.notes[0])
+        #expect(body.contains("## My notes"))
+        #expect(body.contains("ask about the token ceiling"))
+        // And the style that writes the note was told about them.
+        #expect(rig.cleaner.noteContexts.last?.ownNotes == "ask about the token ceiling")
+    }
+
+    @Test("notes typed are kept even when no note could be written")
+    func typedNotesSurviveAFailure() async {
+        let rig = Rig()
+        rig.cleaner.noteOutcome = { _ in
+            CleanupService.NoteOutcome(text: nil, note: "The model refused.", latency: 0)
+        }
+        rig.coordinator.start()
+        rig.coordinator.liveNotes = "friday deploy rule?"
+        await rig.coordinator.stop()
+
+        // They are the one part of the file nothing else could reconstruct.
+        #expect(rig.notes.body(of: rig.notes.notes[0]).contains("friday deploy rule?"))
+    }
+
+    @Test("a new recording starts on a blank page")
+    func notesClearBetweenMeetings() async {
+        let rig = Rig()
+        rig.coordinator.start()
+        rig.coordinator.liveNotes = "first meeting"
+        await rig.coordinator.stop()
+
+        rig.coordinator.start()
+        #expect(rig.coordinator.liveNotes.isEmpty)
+    }
 }

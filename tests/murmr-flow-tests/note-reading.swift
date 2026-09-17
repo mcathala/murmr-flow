@@ -352,3 +352,108 @@ struct NoteEditingTests {
         #expect(NoteFile.turns(in: body).count == 1)
     }
 }
+
+/// What the person typed while the meeting ran: kept whole, kept apart, and handed to the
+/// style that writes the note.
+@MainActor
+@Suite("Notes typed during a meeting")
+struct OwnNotesTests {
+
+    private static let file = """
+        ---
+        title: Weekly sync
+        date: 2026-09-16T15:42:00+02:00
+        duration: 842
+        note: Summary
+        ---
+
+        # Weekly sync
+
+        ### Where we are
+        - The model runs on the machine.
+
+        ## My notes
+
+        ask about the token ceiling
+        - friday deploy rule?
+
+        ## Transcript
+
+        **You** · `0:00`
+
+        Right, can you hear me?
+        """
+
+    @Test("what was typed comes back exactly as it was typed")
+    func readsOwnNotes() throws {
+        let (_, body) = NoteFile.split(Self.file)
+        let own = try #require(NoteFile.ownNotes(in: body))
+        #expect(own == "ask about the token ceiling\n- friday deploy rule?")
+    }
+
+    @Test("the written note stops at Your notes rather than swallowing them")
+    func summaryStopsFirst() {
+        let (_, body) = NoteFile.split(Self.file)
+        #expect(NoteFile.summary(in: body) == [
+            .heading("Where we are"),
+            .bullet("The model runs on the machine."),
+        ])
+        #expect(NoteFile.turns(in: body).count == 1)
+    }
+
+    @Test("editing the note leaves what you typed and what was said alone")
+    func editingKeepsTheRest() {
+        let edited = NoteFile.replacingSummary(in: Self.file, with: "### Decided\n- Ship it.")
+        #expect(edited.contains("### Decided"))
+        #expect(edited.contains("ask about the token ceiling"))
+        #expect(edited.contains("Right, can you hear me?"))
+        #expect(!edited.contains("The model runs on the machine."))
+    }
+
+    @Test("a task is ticked by position, and only inside the note")
+    func ticksByPosition() {
+        let file = """
+            # Weekly sync
+
+            ### Next steps
+            - [ ] first
+            - [ ] second
+
+            ## Transcript
+
+            **You** · `0:00`
+
+            - [ ] this was said out loud, not a task
+            """
+        let ticked = NoteFile.togglingTask(in: file, at: 1)
+        #expect(ticked.contains("- [ ] first"))
+        #expect(ticked.contains("- [x] second"))
+        // The transcript is the record of what was said; nothing in it is a checkbox.
+        #expect(ticked.contains("- [ ] this was said out loud"))
+
+        // And back again.
+        #expect(NoteFile.togglingTask(in: ticked, at: 1) == file)
+    }
+
+    @Test("an index past the end changes nothing")
+    func outOfRange() {
+        #expect(NoteFile.togglingTask(in: Self.file, at: 7) == Self.file)
+    }
+
+    @Test("what was typed reaches the prompt, in the person's own words")
+    func reachesThePrompt() {
+        let rendered = PromptLibrary(template: "Write the notes.").render(
+            .init(transcript: "You: hello", ownNotes: "ask about the token ceiling")
+        )
+        #expect(rendered.contains("ask about the token ceiling"))
+        #expect(rendered.contains("typed these notes while it was running"))
+    }
+
+    @Test("nothing typed adds nothing to the prompt")
+    func emptyAddsNothing() {
+        let rendered = PromptLibrary(template: "Write the notes.").render(
+            .init(transcript: "You: hello", ownNotes: "   \n ")
+        )
+        #expect(!rendered.contains("typed these notes"))
+    }
+}

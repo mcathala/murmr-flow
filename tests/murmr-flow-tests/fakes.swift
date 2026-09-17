@@ -95,6 +95,7 @@ final class FakeCleaner: Cleaning, @unchecked Sendable {
     }
     private(set) var noteTurns: [[CleanupService.Turn]] = []
     private(set) var noteTemplates: [String] = []
+    private(set) var noteContexts: [PromptLibrary.Context] = []
 
     func writeNote(
         from turns: [CleanupService.Turn], config: ProviderConfig?, prompt: PromptLibrary,
@@ -103,6 +104,7 @@ final class FakeCleaner: Cleaning, @unchecked Sendable {
         providerIDs.append(config?.providerID ?? "none")
         noteTurns.append(turns)
         noteTemplates.append(prompt.template)
+        noteContexts.append(context)
         guard config != nil else {
             return CleanupService.NoteOutcome(
                 text: nil, note: "No cleanup provider configured.", latency: 0
