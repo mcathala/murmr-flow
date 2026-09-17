@@ -87,100 +87,143 @@ enum MarkdownEdit {
         return line
     }
 
-    // MARK: - Finding emphasis in the file
-
-    /// A run of emphasis as the *file* writes it: where the markers are, and what they
-    /// wrap. Only ever used on the way in, to take them out again.
-    struct Emphasis: Equatable {
-        /// `**` or `*`.
-        let marker: String
-        let opening: NSRange
-        let closing: NSRange
-        /// The words between them.
-        let inner: NSRange
-
-        var isBold: Bool { marker == "**" }
-    }
-
-    /// Every `**bold**` and `*italic*` in the text.
-    ///
-    /// Bold is matched first and its ranges are then off limits, so the outer asterisk of
-    /// a bold pair is never read as the start of an italic one.
-    ///
-    /// A marker has to sit against a word: `4 * 3 * 2` is arithmetic, and an editor that
-    /// silently italicised it would be worse than one that did nothing.
-    static func emphasis(in text: NSString) -> [Emphasis] {
-        var found: [Emphasis] = []
-        var taken: [NSRange] = []
-
-        func scan(_ pattern: String, marker: String) {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
-            let whole = NSRange(location: 0, length: text.length)
-            for match in regex.matches(in: text as String, range: whole) {
-                let inner = match.range(at: 1)
-                guard inner.location != NSNotFound else { continue }
-                let overlaps = taken.contains { NSIntersectionRange($0, match.range).length > 0 }
-                guard !overlaps else { continue }
-                let markerLength = (marker as NSString).length
-                found.append(
-                    Emphasis(
-                        marker: marker,
-                        opening: NSRange(location: match.range.location, length: markerLength),
-                        closing: NSRange(
-                            location: match.range.location + match.range.length - markerLength,
-                            length: markerLength
-                        ),
-                        inner: inner
-                    )
-                )
-                taken.append(match.range)
-            }
-        }
-
-        // No newline inside a run: emphasis belongs to one line, and a stray marker two
-        // paragraphs down must not reach back and swallow everything between.
-        scan(#"\*\*(?![\s*])((?:[^*\n]|\*(?!\*))+?)(?<![\s*])\*\*"#, marker: "**")
-        scan(#"(?<!\*)\*(?![\s*])([^*\n]+?)(?<![\s*])\*(?!\*)"#, marker: "*")
-        return found.sorted { $0.opening.location < $1.opening.location }
-    }
-
     // MARK: - Between the file and the page
 
-    /// Emphasis as the page holds it: a stretch of words that is bold or italic, with no
-    /// markers anywhere in the text.
-    struct EmphasisRun: Equatable, Sendable {
-        let range: NSRange
-        let isBold: Bool
+    /// Weight, slant and a line under it — any of them, in any combination.
+    ///
+    /// A set rather than a choice, because a word can be all three and the first version
+    /// made them exclusive: turning on italic quietly took the bold off.
+    struct EmphasisStyle: OptionSet, Hashable, Sendable {
+        let rawValue: Int
+        static let bold = EmphasisStyle(rawValue: 1 << 0)
+        static let italic = EmphasisStyle(rawValue: 1 << 1)
+        static let underline = EmphasisStyle(rawValue: 1 << 2)
     }
 
-    /// Takes the markers out, and says where the emphasis now is.
-    ///
-    /// **This is the whole design in one function.** The page never contains `**`, so
-    /// there is nothing to hide, nothing to step the caret over, and nothing to half
-    /// delete — the three faults that come with drawing markers and pretending they are
-    /// not there. The file keeps them; the page keeps weight.
-    static func stripEmphasis(_ markdown: String) -> (text: String, runs: [EmphasisRun]) {
-        let source = markdown as NSString
-        let spans = emphasis(in: source)
-        guard !spans.isEmpty else { return (markdown, []) }
+    /// A stretch of words carrying one combination of styles, with no markers in it.
+    struct EmphasisRun: Equatable, Sendable {
+        let range: NSRange
+        let style: EmphasisStyle
+    }
 
-        var out = ""
-        var runs: [EmphasisRun] = []
-        var cursor = 0
-        for span in spans {
-            out += source.substring(with: NSRange(location: cursor, length: span.opening.location - cursor))
-            let start = (out as NSString).length
-            out += source.substring(with: span.inner)
-            runs.append(
-                EmphasisRun(
-                    range: NSRange(location: start, length: (out as NSString).length - start),
-                    isBold: span.isBold
-                )
-            )
-            cursor = span.closing.location + span.closing.length
+    /// How a style is written into the file.
+    ///
+    /// Asterisks for weight and slant, as Markdown has always had them. Underline has no
+    /// Markdown at all, so it is `<u>`, which is what Obsidian and every other editor that
+    /// offers one settles on — HTML is the escape hatch Markdown was designed with, and a
+    /// tag another reader will render is better than an invention it would show as text.
+    private static func wrapping(_ style: EmphasisStyle, around words: String) -> String {
+        var out = words
+        let stars = switch (style.contains(.bold), style.contains(.italic)) {
+        case (true, true): "***"
+        case (true, false): "**"
+        case (false, true): "*"
+        case (false, false): ""
         }
-        out += source.substring(from: cursor)
-        return (out, runs)
+        if !stars.isEmpty { out = stars + out + stars }
+        if style.contains(.underline) { out = "<u>" + out + "</u>" }
+        return out
+    }
+
+    /// Takes the markers out, and says which words carry what.
+    ///
+    /// **This is the whole design in one function.** The page never contains a marker, so
+    /// there is nothing to hide, nothing to step the caret over and nothing to half delete
+    /// — the three faults that come with drawing markers and pretending they are not
+    /// there. The file keeps them; the page keeps the look.
+    ///
+    /// Done as a style *per character* and then gathered back into runs, which is what
+    /// makes overlap a non-question: a word that is bold and underlined is not two runs
+    /// fighting, it is one character set with two bits in it.
+    static func stripEmphasis(_ markdown: String) -> (text: String, runs: [EmphasisRun]) {
+        var text = markdown as NSString
+        var styles = [EmphasisStyle](repeating: [], count: text.length)
+
+        /// Removes the marker ranges, carrying the per-character styles across with them.
+        func remove(_ cuts: [NSRange], applying style: EmphasisStyle, to inner: [NSRange]) {
+            for range in inner {
+                for index in range.location..<(range.location + range.length)
+                where index < styles.count {
+                    styles[index].insert(style)
+                }
+            }
+            var out = ""
+            var kept: [EmphasisStyle] = []
+            var index = 0
+            let sorted = cuts.sorted { $0.location < $1.location }
+            var next = 0
+            while index < text.length {
+                if next < sorted.count, index == sorted[next].location {
+                    index += sorted[next].length
+                    next += 1
+                    continue
+                }
+                out += text.substring(with: NSRange(location: index, length: 1))
+                kept.append(styles[index])
+                index += 1
+            }
+            text = out as NSString
+            styles = kept
+        }
+
+        // Underline first, so the asterisks inside a `<u>` are found on the second pass
+        // the same way as any others.
+        if let regex = try? NSRegularExpression(pattern: #"<u>((?:[^<\n]|<(?!/u>))+?)</u>"#) {
+            let matches = regex.matches(
+                in: text as String, range: NSRange(location: 0, length: text.length)
+            )
+            remove(
+                matches.flatMap { [
+                    NSRange(location: $0.range.location, length: 3),
+                    NSRange(location: $0.range.location + $0.range.length - 4, length: 4),
+                ] },
+                applying: .underline,
+                to: matches.map { $0.range(at: 1) }
+            )
+        }
+
+        for (pattern, style, markerLength) in [
+            (#"\*\*\*(?![\s*])([^*\n]+?)(?<![\s*])\*\*\*"#, EmphasisStyle([.bold, .italic]), 3),
+            (#"\*\*(?![\s*])([^*\n]+?)(?<![\s*])\*\*"#, EmphasisStyle.bold, 2),
+            (#"(?<!\*)\*(?![\s*])([^*\n]+?)(?<![\s*])\*(?!\*)"#, EmphasisStyle.italic, 1),
+        ] {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let matches = regex.matches(
+                in: text as String, range: NSRange(location: 0, length: text.length)
+            )
+            guard !matches.isEmpty else { continue }
+            remove(
+                matches.flatMap { [
+                    NSRange(location: $0.range.location, length: markerLength),
+                    NSRange(
+                        location: $0.range.location + $0.range.length - markerLength,
+                        length: markerLength
+                    ),
+                ] },
+                applying: style,
+                to: matches.map { $0.range(at: 1) }
+            )
+        }
+
+        return (text as String, runs(from: styles))
+    }
+
+    /// Gathers a style per character back into the longest runs that share one.
+    static func runs(from styles: [EmphasisStyle]) -> [EmphasisRun] {
+        var out: [EmphasisRun] = []
+        var index = 0
+        while index < styles.count {
+            let style = styles[index]
+            var end = index
+            while end < styles.count, styles[end] == style { end += 1 }
+            if !style.isEmpty {
+                out.append(
+                    EmphasisRun(range: NSRange(location: index, length: end - index), style: style)
+                )
+            }
+            index = end
+        }
+        return out
     }
 
     /// Puts the markers back, for the file.
@@ -192,11 +235,12 @@ enum MarkdownEdit {
         for run in runs.sorted(by: { $0.range.location > $1.range.location }) {
             guard run.range.location >= 0,
                   run.range.location + run.range.length <= out.length,
-                  run.range.length > 0
+                  run.range.length > 0, !run.style.isEmpty
             else { continue }
-            let marker = run.isBold ? "**" : "*"
             let words = out.substring(with: run.range)
-            out = out.replacingCharacters(in: run.range, with: marker + words + marker) as NSString
+            out = out.replacingCharacters(
+                in: run.range, with: wrapping(run.style, around: words)
+            ) as NSString
         }
         return out as String
     }

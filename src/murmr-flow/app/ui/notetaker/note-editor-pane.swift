@@ -109,8 +109,12 @@ struct NoteEditorPane<Tabs: View>: View {
 
             Divider().frame(height: 14)
 
-            command("bold", help: "Bold", on: isOn(bold: true)) { emphasise(bold: true) }
-            command("italic", help: "Italic", on: isOn(bold: false)) { emphasise(bold: false) }
+            // Three independent switches, not a choice of one: a word can be all three.
+            command("bold", help: "Bold", on: isOn(.bold)) { emphasise(.bold) }
+            command("italic", help: "Italic", on: isOn(.italic)) { emphasise(.italic) }
+            command("underline", help: "Underline", on: isOn(.underline)) {
+                emphasise(.underline)
+            }
 
             Divider().frame(height: 14)
 
@@ -129,13 +133,13 @@ struct NoteEditorPane<Tabs: View>: View {
 
     /// Read through the stamp, so pressing Bold relights the button — the text is
     /// unchanged by it, and nothing else would tell the bar to look again.
-    private func isOn(bold: Bool) -> Bool {
+    private func isOn(_ style: MarkdownEdit.EmphasisStyle) -> Bool {
         _ = stamp
-        return commands.isOn(bold: bold)
+        return commands.isOn(style)
     }
 
-    private func emphasise(bold: Bool) {
-        commands.toggleEmphasis(bold: bold)
+    private func emphasise(_ style: MarkdownEdit.EmphasisStyle) {
+        commands.toggleEmphasis(style)
         stamp += 1
     }
 

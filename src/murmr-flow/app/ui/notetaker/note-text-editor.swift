@@ -100,9 +100,13 @@ struct NoteTextEditor: NSViewRepresentable {
     final class NoteEditorCommands {
         weak var view: NoteTextView?
 
-        func toggleEmphasis(bold: Bool) { view?.toggleEmphasis(bold: bold) }
+        func toggleEmphasis(_ style: MarkdownEdit.EmphasisStyle) {
+            view?.toggleEmphasis(style)
+        }
         func setBlock(_ block: MarkdownEdit.Block) { view?.setBlock(block) }
-        func isOn(bold: Bool) -> Bool { view?.hasEmphasis(bold: bold) ?? false }
+        func isOn(_ style: MarkdownEdit.EmphasisStyle) -> Bool {
+            view?.hasEmphasis(style) ?? false
+        }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -261,6 +265,7 @@ final class NoteTextView: NSTextView {
         )
         storage.removeAttribute(.strikethroughStyle, range: whole)
         storage.removeAttribute(.obliqueness, range: whole)
+        storage.removeAttribute(.underlineStyle, range: whole)
 
         text.enumerateSubstrings(in: whole, options: [.byLines]) { substring, range, _, _ in
             guard let line = substring else { return }
@@ -314,21 +319,29 @@ final class NoteTextView: NSTextView {
         // Emphasis last, over whatever font the line already earned, so bold inside a
         // heading is a bold heading rather than body text that happens to be bold.
         storage.enumerateAttribute(Self.emphasisKey, in: whole, options: []) { value, range, _ in
-            guard let kind = value as? String, range.length > 0 else { return }
-            let base = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+            let style = MarkdownEdit.EmphasisStyle(rawValue: (value as? Int) ?? 0)
+            guard !style.isEmpty, range.length > 0 else { return }
+            var font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
                 ?? body
-            let trait: NSFontTraitMask = kind == "bold" ? .boldFontMask : .italicFontMask
-            let styled = NSFontManager.shared.convert(base, toHaveTrait: trait)
-            storage.addAttribute(.font, value: styled, range: range)
 
-            // Mona Sans ships upright only — see `resources/fonts` — so asking the font
-            // manager for an italic hands the same face back and the word stays plain.
-            // Slanting it is how AppKit has always faked an italic that isn't drawn, and
-            // it is better than a control that lights up and does nothing.
-            if kind == "italic" {
-                let hasItalic = NSFontManager.shared.traits(of: styled).contains(.italicFontMask)
+            if style.contains(.bold) {
+                font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+            }
+            if style.contains(.italic) {
+                font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+                // Mona Sans ships upright only — see `resources/fonts` — so asking the
+                // font manager for an italic hands the same face back and the word stays
+                // plain. Slanting it is how AppKit has always faked an italic that is not
+                // drawn, and it beats a control that lights up and changes nothing.
+                if !NSFontManager.shared.traits(of: font).contains(.italicFontMask) {
+                    storage.addAttribute(.obliqueness, value: 0.2, range: range)
+                }
+            }
+            storage.addAttribute(.font, value: font, range: range)
+
+            if style.contains(.underline) {
                 storage.addAttribute(
-                    .obliqueness, value: hasItalic ? 0 : 0.2, range: range
+                    .underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range
                 )
             }
         }
@@ -339,10 +352,10 @@ final class NoteTextView: NSTextView {
 
     // MARK: - Emphasis, as weight rather than characters
 
-    /// Bold and italic ride on the text as an attribute of our own.
+    /// Weight, slant and underline ride on the text as an attribute of our own.
     ///
     /// Not the font, which `applyStyling` rewrites from scratch on every keystroke and
-    /// would wipe. This survives that, and the font is computed from it.
+    /// would wipe. This survives that, and the look is computed from it.
     static let emphasisKey = NSAttributedString.Key("app.murmr.emphasis")
 
     /// Replaces everything with the file's text, markers taken out and turned into weight.
@@ -353,7 +366,7 @@ final class NoteTextView: NSTextView {
         storage.beginEditing()
         for run in runs where run.range.location + run.range.length <= (text as NSString).length {
             storage.addAttribute(
-                Self.emphasisKey, value: run.isBold ? "bold" : "italic", range: run.range
+                Self.emphasisKey, value: run.style.rawValue, range: run.range
             )
         }
         storage.endEditing()
@@ -373,26 +386,37 @@ final class NoteTextView: NSTextView {
             in: NSRange(location: 0, length: storage.length),
             options: []
         ) { value, range, _ in
-            guard let kind = value as? String else { return }
-            runs.append(MarkdownEdit.EmphasisRun(range: range, isBold: kind == "bold"))
+            guard let raw = value as? Int, raw != 0 else { return }
+            runs.append(
+                MarkdownEdit.EmphasisRun(
+                    range: range, style: MarkdownEdit.EmphasisStyle(rawValue: raw)
+                )
+            )
         }
         return runs
     }
 
-    /// Whether the whole selection already carries this weight, which is what lights the
-    /// button and what makes pressing it take the weight off.
-    func hasEmphasis(bold: Bool) -> Bool {
-        guard let storage = textStorage else { return false }
+    private func style(at index: Int) -> MarkdownEdit.EmphasisStyle {
+        guard let storage = textStorage, index >= 0, index < storage.length else { return [] }
+        let raw = storage.attribute(Self.emphasisKey, at: index, effectiveRange: nil) as? Int
+        return MarkdownEdit.EmphasisStyle(rawValue: raw ?? 0)
+    }
+
+    /// Whether every character of the selection already carries this style, which is what
+    /// lights the button and what makes pressing it take the style off.
+    func hasEmphasis(_ style: MarkdownEdit.EmphasisStyle) -> Bool {
+        guard let storage = textStorage, storage.length > 0 else { return false }
         let range = selectedRange()
-        let wanted = bold ? "bold" : "italic"
         guard range.length > 0 else {
-            let index = min(max(range.location - 1, 0), max(storage.length - 1, 0))
-            guard storage.length > 0 else { return false }
-            return storage.attribute(Self.emphasisKey, at: index, effectiveRange: nil) as? String == wanted
+            // Nothing picked: the answer is about the character behind the caret, which is
+            // what the next thing typed would inherit.
+            return self.style(at: min(max(range.location - 1, 0), storage.length - 1))
+                .contains(style)
         }
         var all = true
         storage.enumerateAttribute(Self.emphasisKey, in: range, options: []) { value, _, stop in
-            if value as? String != wanted {
+            let raw = MarkdownEdit.EmphasisStyle(rawValue: (value as? Int) ?? 0)
+            if !raw.contains(style) {
                 all = false
                 stop.pointee = true
             }
@@ -400,17 +424,26 @@ final class NoteTextView: NSTextView {
         return all
     }
 
-    /// Puts the weight on the selection, or takes it off when it is already there.
-    func toggleEmphasis(bold: Bool) {
+    /// Adds a style to the selection, or takes that one off when every character has it.
+    ///
+    /// One style at a time, and the others are left exactly as they were: a word can be
+    /// bold and italic and underlined at once, and the first version replaced the lot on
+    /// every press, so turning on italic quietly took the bold off.
+    func toggleEmphasis(_ style: MarkdownEdit.EmphasisStyle) {
         guard let storage = textStorage else { return }
         let range = selectedRange()
         guard range.length > 0 else { return }
-        let on = !hasEmphasis(bold: bold)
+        let removing = hasEmphasis(style)
 
         storage.beginEditing()
-        storage.removeAttribute(Self.emphasisKey, range: range)
-        if on {
-            storage.addAttribute(Self.emphasisKey, value: bold ? "bold" : "italic", range: range)
+        storage.enumerateAttribute(Self.emphasisKey, in: range, options: []) { value, sub, _ in
+            var current = MarkdownEdit.EmphasisStyle(rawValue: (value as? Int) ?? 0)
+            if removing { current.remove(style) } else { current.insert(style) }
+            if current.isEmpty {
+                storage.removeAttribute(Self.emphasisKey, range: sub)
+            } else {
+                storage.addAttribute(Self.emphasisKey, value: current.rawValue, range: sub)
+            }
         }
         storage.endEditing()
         applyStyling()

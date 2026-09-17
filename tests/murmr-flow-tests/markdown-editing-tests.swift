@@ -37,98 +37,47 @@ struct MarkdownEditingTests {
     
     }
 
-/// Finding the emphasis in a line, which is what decides where the markers are hidden and
-/// where the weight goes.
-@Suite("Markdown emphasis")
-struct MarkdownEmphasisTests {
-
-    private func spans(_ text: String) -> [MarkdownEdit.Emphasis] {
-        MarkdownEdit.emphasis(in: text as NSString)
-    }
-
-    @Test("a bold run gives its markers and its words apart")
-    func findsBold() throws {
-        let text = "a **word** here"
-        let found = try #require(spans(text).first)
-        #expect(found.isBold)
-        #expect((text as NSString).substring(with: found.inner) == "word")
-        #expect((text as NSString).substring(with: found.opening) == "**")
-        #expect((text as NSString).substring(with: found.closing) == "**")
-    }
-
-    @Test("the outer asterisk of a bold pair is never read as an italic one")
-    func boldIsNotTwoItalics() {
-        let found = spans("a **word** here")
-        #expect(found.count == 1)
-        #expect(found[0].isBold)
-    }
-
-    @Test("italics are found on their own")
-    func findsItalic() throws {
-        let text = "a *word* here"
-        let found = try #require(spans(text).first)
-        #expect(!found.isBold)
-        #expect((text as NSString).substring(with: found.inner) == "word")
-    }
-
-    @Test("both kinds in one line, in the order they appear")
-    func findsBoth() {
-        let found = spans("**one** and *two*")
-        #expect(found.count == 2)
-        #expect(found[0].isBold)
-        #expect(!found[1].isBold)
-    }
-
-    @Test("a marker has to sit against a word, so arithmetic is left alone")
-    func ignoresLooseAsterisks() {
-        // An editor that silently italicised this would be worse than one doing nothing.
-        #expect(spans("4 * 3 * 2").isEmpty)
-        #expect(spans("a ** b").isEmpty)
-    }
-
-    @Test("an unclosed marker is not emphasis")
-    func ignoresUnclosed() {
-        #expect(spans("**half a thought").isEmpty)
-        #expect(spans("a * b").isEmpty)
-    }
-
-    @Test("emphasis does not run across a line break")
-    func staysOnItsLine() {
-        #expect(spans("*one\ntwo*").isEmpty)
-    }
-}
-
 /// What the file holds and what the page holds, and getting between them.
 ///
 /// The page never contains a marker, which is the whole point: there is then nothing to
-/// hide, nothing to step the caret over, and nothing to half delete.
+/// hide, nothing to step the caret over, and nothing to half delete. So the one thing
+/// these have to prove is that a file survives being opened and written back.
 @Suite("Markdown round trip")
 struct MarkdownRoundTripTests {
 
-    @Test("the markers come out and the emphasis is recorded where the words are")
+    private func style(_ text: String, _ word: String) -> MarkdownEdit.EmphasisStyle {
+        let (stripped, runs) = MarkdownEdit.stripEmphasis(text)
+        let range = (stripped as NSString).range(of: word)
+        return runs.first { NSIntersectionRange($0.range, range).length > 0 }?.style ?? []
+    }
+
+    @Test("the markers come out and the style is recorded where the words are")
     func strips() {
         let (text, runs) = MarkdownEdit.stripEmphasis("a **word** here")
         #expect(text == "a word here")
-        #expect(runs == [MarkdownEdit.EmphasisRun(range: NSRange(location: 2, length: 4), isBold: true)])
+        #expect(runs.count == 1)
+        #expect(runs[0].style == .bold)
         #expect((text as NSString).substring(with: runs[0].range) == "word")
     }
 
-    @Test("several runs on one line keep their places as the text shortens")
-    func stripsSeveral() {
-        let (text, runs) = MarkdownEdit.stripEmphasis("**one** and *two* end")
-        #expect(text == "one and two end")
-        #expect(runs.count == 2)
-        #expect((text as NSString).substring(with: runs[0].range) == "one")
-        #expect((text as NSString).substring(with: runs[1].range) == "two")
-        #expect(runs[0].isBold)
-        #expect(!runs[1].isBold)
+    @Test("all three styles are read, together and apart")
+    func readsEveryStyle() {
+        #expect(style("a **b** c", "b") == .bold)
+        #expect(style("a *b* c", "b") == .italic)
+        #expect(style("a <u>b</u> c", "b") == .underline)
+        #expect(style("a ***b*** c", "b") == [.bold, .italic])
+        #expect(style("a <u>**b**</u> c", "b") == [.bold, .underline])
+        #expect(style("a <u>***b***</u> c", "b") == [.bold, .italic, .underline])
     }
 
-    @Test("and go back in, so the file is unchanged by a round trip")
+    @Test("the file is unchanged by a round trip")
     func roundTrips() {
         for source in [
             "a **word** here",
             "**one** and *two* end",
+            "a ***both*** here",
+            "a <u>line</u> under",
+            "a <u>***everything***</u> at once",
             "### A heading with **weight**\n- a bullet\n- [ ] a task",
             "nothing special at all",
             "",
@@ -138,7 +87,29 @@ struct MarkdownRoundTripTests {
         }
     }
 
-    @Test("emphasis inside a heading survives, markers and all")
+    @Test("a marker has to sit against a word, so arithmetic is left alone")
+    func ignoresLooseMarkers() {
+        // An editor that silently italicised this would be worse than one doing nothing.
+        #expect(MarkdownEdit.stripEmphasis("4 * 3 * 2").runs.isEmpty)
+        #expect(MarkdownEdit.stripEmphasis("**half a thought").runs.isEmpty)
+        #expect(MarkdownEdit.stripEmphasis("a * b").runs.isEmpty)
+    }
+
+    @Test("emphasis does not run across a line break")
+    func staysOnItsLine() {
+        #expect(MarkdownEdit.stripEmphasis("*one\ntwo*").runs.isEmpty)
+    }
+
+    @Test("styles that touch but differ stay two runs")
+    func coalescesOnlyWhatMatches() {
+        let (text, runs) = MarkdownEdit.stripEmphasis("**a***b*")
+        #expect(text == "ab")
+        #expect(runs.count == 2)
+        #expect(runs[0].style == .bold)
+        #expect(runs[1].style == .italic)
+    }
+
+    @Test("emphasis inside a heading survives, block marker and all")
     func insideAHeading() {
         let (text, runs) = MarkdownEdit.stripEmphasis("### Where **we** are")
         // The block marker stays on the page; only the inline one comes out.
@@ -149,7 +120,9 @@ struct MarkdownRoundTripTests {
 
     @Test("a run that no longer fits the text is dropped rather than crashing")
     func toleratesStaleRuns() {
-        let stale = [MarkdownEdit.EmphasisRun(range: NSRange(location: 40, length: 4), isBold: true)]
+        let stale = [
+            MarkdownEdit.EmphasisRun(range: NSRange(location: 40, length: 4), style: .bold)
+        ]
         #expect(MarkdownEdit.markdown(text: "short", runs: stale) == "short")
     }
 
