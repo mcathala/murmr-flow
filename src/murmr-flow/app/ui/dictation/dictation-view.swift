@@ -212,7 +212,7 @@ struct DictationView: View {
     private func transcript(_ record: DictationRecord) -> some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(Self.stamp(record.date))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -226,6 +226,23 @@ struct DictationView: View {
                     } else if let app = record.targetAppName {
                         Text("· \(app)").font(.caption).foregroundStyle(.tertiary)
                     }
+
+                    // On the line that already says when and where, because that is what
+                    // this is: a fact about the dictation, not a remark about the text
+                    // below it. Under the words it read as a comment on them.
+                    if let why = record.notCleaned?.failure {
+                        Text(why)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if record.usedRawFallback, record.notCleaned == nil {
+                        // Written before the app kept the reason. Neither a fault nor a
+                        // choice, so it is stated without alarm.
+                        Text("Not cleaned up.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     Spacer(minLength: 0)
                 }
 
@@ -240,27 +257,13 @@ struct DictationView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
 
-                // Nothing at all when this is what you asked for. A dictation you set an
-                // app to Off for does not need a warning about being off, and the row's
-                // own style column already says so — one orange line for all four reasons
-                // taught you to ignore the colour.
-                if let why = record.notCleaned?.failure {
-                    Text(why)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else if record.usedRawFallback, record.notCleaned == nil {
-                    // Written before the app kept the reason. Neither a fault nor a
-                    // choice, so it is stated without alarm.
-                    Text("Not cleaned up.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
                 // What the pill said in passing, kept here where there is room to read
-                // it: the latest run's note, only while this is the latest record.
+                // it: the latest run's note, only while this is the latest record — and
+                // not when it is the same sentence the header just gave, which is what
+                // happened every time a provider failed.
                 if record.id == history.dictations.first?.id,
-                   let note = dictation.lastRun?.note {
+                   let note = dictation.lastRun?.note,
+                   note != record.notCleaned?.failure {
                     Text(note)
                         .font(.caption)
                         .foregroundStyle(.orange)
