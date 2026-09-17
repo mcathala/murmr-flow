@@ -494,9 +494,14 @@ struct NotetakerView: View {
             WarningRow(message: enhanceFailure)
         }
 
-        // A file somebody wrote by hand: no note, no notes of their own, no turns. It
-        // still has to display — files are the source of truth.
-        if summary.isEmpty, own == nil, turns.isEmpty {
+        // A file somebody wrote by hand, and only that.
+        //
+        // The test is whether the file has any of our headings, not whether it has any
+        // content: a meeting that transcribed nothing has no note, no turns and nothing
+        // typed, and printing its raw body put `## Transcript` and the front matter on
+        // screen under an empty page — markup in the one place the app is meant to be
+        // reading to you, and twice over.
+        if NoteFile.summaryMarkdown(in: body) == nil, own == nil, turns.isEmpty {
             Text(body)
                 .font(Theme.Text.body)
                 .foregroundStyle(Theme.Palette.muted)

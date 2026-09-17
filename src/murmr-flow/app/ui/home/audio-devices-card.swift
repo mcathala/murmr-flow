@@ -107,12 +107,10 @@ struct AudioDevicesCard: View {
             // Picking one here moves the Mac's own default output, not a setting of this
             // app's — so the row says whose setting it is rather than leaving that to be
             // discovered when the music moves.
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Mac output").font(Theme.Text.bodyStrong)
-                Text("Changes your Mac\u{2019}s sound output.")
-                    .font(Theme.Text.small)
-                    .foregroundStyle(Theme.Palette.faint)
-            }
+            // "Speaker", because that is the thing, and the caption underneath said what
+            // the row plainly does. A label that needs a sentence explaining it is the
+            // wrong label.
+            Text("Speaker").font(Theme.Text.bodyStrong)
 
             Spacer(minLength: 8)
 

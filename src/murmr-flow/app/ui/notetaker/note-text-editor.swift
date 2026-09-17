@@ -134,6 +134,32 @@ final class NoteTextView: NSTextView {
     var onToggleTask: ((Int) -> Void)?
     var onFocusChange: ((Bool) -> Void)?
 
+    /// Whether the caret is in here. The bar above appears with it, because a bar for
+    /// shaping text is noise on a page nobody is typing on.
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became { onFocusChange?(true) }
+        return became
+    }
+
+    /// Asks the window for the caret, out loud.
+    ///
+    /// A click on a text view normally does this by itself. Inside a SwiftUI window it
+    /// does not always arrive: the click lands here, `super` handles the selection, and
+    /// the window never makes this view first responder — so the caret blinks nowhere and
+    /// the keyboard goes to whatever had it before. Asking plainly costs nothing when it
+    /// was going to happen anyway.
+    private func takeFocus() {
+        guard let window, window.firstResponder !== self else { return }
+        window.makeFirstResponder(self)
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { onFocusChange?(false) }
+        return resigned
+    }
+
     /// Where the box sits on a task line: `- [ ] `.
     private static let boxRange = 2..<5
 
@@ -179,6 +205,7 @@ final class NoteTextView: NSTextView {
         guard line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] "),
               Self.boxRange.contains(column)
         else {
+            takeFocus()
             super.mouseDown(with: event)
             return
         }
@@ -233,6 +260,7 @@ final class NoteTextView: NSTextView {
             range: whole
         )
         storage.removeAttribute(.strikethroughStyle, range: whole)
+        storage.removeAttribute(.obliqueness, range: whole)
 
         text.enumerateSubstrings(in: whole, options: [.byLines]) { substring, range, _, _ in
             guard let line = substring else { return }
@@ -289,13 +317,20 @@ final class NoteTextView: NSTextView {
             guard let kind = value as? String, range.length > 0 else { return }
             let base = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
                 ?? body
-            storage.addAttribute(
-                .font,
-                value: NSFontManager.shared.convert(
-                    base, toHaveTrait: kind == "bold" ? .boldFontMask : .italicFontMask
-                ),
-                range: range
-            )
+            let trait: NSFontTraitMask = kind == "bold" ? .boldFontMask : .italicFontMask
+            let styled = NSFontManager.shared.convert(base, toHaveTrait: trait)
+            storage.addAttribute(.font, value: styled, range: range)
+
+            // Mona Sans ships upright only — see `resources/fonts` — so asking the font
+            // manager for an italic hands the same face back and the word stays plain.
+            // Slanting it is how AppKit has always faked an italic that isn't drawn, and
+            // it is better than a control that lights up and does nothing.
+            if kind == "italic" {
+                let hasItalic = NSFontManager.shared.traits(of: styled).contains(.italicFontMask)
+                storage.addAttribute(
+                    .obliqueness, value: hasItalic ? 0 : 0.2, range: range
+                )
+            }
         }
 
         storage.endEditing()
