@@ -42,6 +42,15 @@ protocol Cleaning: Sendable {
         dictionary: [DictionaryEntry],
         timeout: TimeInterval
     ) async -> CleanupService.TurnsOutcome
+
+    func writeNote(
+        from turns: [CleanupService.Turn],
+        config: ProviderConfig?,
+        prompt: PromptLibrary,
+        context: PromptLibrary.Context,
+        dictionary: [DictionaryEntry],
+        timeout: TimeInterval
+    ) async -> CleanupService.NoteOutcome
 }
 
 extension CleanupService: Cleaning {}

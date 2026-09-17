@@ -233,6 +233,79 @@ actor CleanupService {
         )
     }
 
+    // MARK: - The note above the transcript
+
+    /// What one note-writing request produced.
+    struct NoteOutcome: Sendable {
+        /// The note, or nil when none could be written. Nil is not a failure to hide: the
+        /// transcript is saved either way, and a half-written note would be worse than
+        /// none.
+        let text: String?
+        /// Why there is no note, or what was odd about the one there is.
+        let note: String?
+        let latency: TimeInterval
+    }
+
+    /// Writes the note that goes above a meeting's transcript.
+    ///
+    /// Deliberately **not** `clean`. That path guards against a reply wildly different in
+    /// length from what went in, because for a dictation such a reply means the model
+    /// answered the transcript instead of tidying it. Here a tenth of the length is the
+    /// whole point, so the same guard would reject every good answer.
+    ///
+    /// The whole conversation goes in one request. Grouping by topic needs the whole
+    /// meeting in view, and a note stitched from batches that never saw each other would
+    /// repeat itself and contradict itself. The cost is that a long meeting can exceed
+    /// what a provider will take in one go — which comes back as that provider's own
+    /// error, and costs the note rather than the transcript.
+    func writeNote(
+        from turns: [Turn],
+        config: ProviderConfig?,
+        prompt: PromptLibrary,
+        context: PromptLibrary.Context,
+        dictionary: [DictionaryEntry] = [],
+        timeout: TimeInterval = CleanupService.noteTimeout
+    ) async -> NoteOutcome {
+        guard !turns.isEmpty else { return NoteOutcome(text: nil, note: nil, latency: 0) }
+        guard let config else {
+            return NoteOutcome(text: nil, note: "No cleanup provider configured.", latency: 0)
+        }
+        guard config.apiKey != nil else {
+            return NoteOutcome(
+                text: nil, note: "No API key saved — add one in Settings.", latency: 0
+            )
+        }
+
+        var rendered = context
+        rendered.transcript = turns
+            .map { "\($0.speaker): \($0.text)" }
+            .joined(separator: "\n")
+        // The dictionary's spelling hints are what let the note write Kwartz where the
+        // speech model heard "quartz". No expansion pass: a marker spliced into prose
+        // nobody can position is not something to restore, and the turns below carry the
+        // replacements already.
+        rendered.hints = DictionaryExpander.hints(from: dictionary)
+
+        do {
+            let completion = try await client.complete(
+                prompt: prompt.render(rendered), config: config, timeout: timeout
+            )
+            let text = completion.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            // A model that answers with one line has not written notes; saving that above
+            // the transcript would make the file look finished when it is not.
+            guard text.count > 40 else {
+                return NoteOutcome(
+                    text: nil,
+                    note: "The note came back too short to keep.",
+                    latency: completion.latency
+                )
+            }
+            return NoteOutcome(text: text, note: nil, latency: completion.latency)
+        } catch {
+            return NoteOutcome(text: nil, note: error.localizedDescription, latency: 0)
+        }
+    }
+
     /// Ranges of turns small enough to send in one request. Always at least one turn, so
     /// a single very long turn is attempted rather than silently skipped.
     static func batches(of turns: [Turn]) -> [Range<Int>] {
