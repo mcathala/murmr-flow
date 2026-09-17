@@ -187,11 +187,15 @@ struct HomeView: View {
                 VStack(spacing: 0) {
                     ForEach(items) { item in
                         Button {
-                            // A note opens as the note, the way the menu bar's rows
-                            // already did; a row that only opened the section it lives in
-                            // made you find it twice.
+                            // Opened *in the app*, on the row you clicked. A note used to
+                            // open in whatever editor the Mac keeps for Markdown, which is
+                            // a strange answer from an app that shows notes — and a
+                            // dictation only opened its section, so you had to find it
+                            // again in a list you had just pointed at.
                             if let note = item.note {
-                                services.notes.open(note)
+                                services.open(note: note)
+                            } else if let id = item.dictationID {
+                                services.open(dictation: id)
                             } else {
                                 onOpen(.dictation)
                             }
@@ -244,6 +248,8 @@ struct RecentItem: Identifiable {
     var bundleID: String?
     /// The file itself, for notes, so the row can open it rather than the section.
     var note: NoteFile?
+    /// The record's id, for dictations, for the same reason.
+    var dictationID: UUID?
 
     static func merge(
         dictations: [DictationRecord], notes: [NoteFile], limit: Int
@@ -260,7 +266,8 @@ struct RecentItem: Identifiable {
                 ].compactMap { $0 }.joined(separator: " · "),
                 symbol: "mic.fill",
                 isNote: false,
-                bundleID: $0.targetBundleID
+                bundleID: $0.targetBundleID,
+                dictationID: $0.id
             )
         }
 

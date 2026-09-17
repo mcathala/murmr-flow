@@ -11,6 +11,8 @@ struct DictationView: View {
     let dictation: DictationCoordinator
     let history: HistoryStore
     let prompts: PromptStore
+    /// Only for the "show me this one" request; the pane owns everything else it needs.
+    let services: AppServices
 
     private var settings: SettingsStore { dictation.settings }
 
@@ -60,6 +62,9 @@ struct DictationView: View {
                 .frame(minHeight: 220)
             }
         }
+        .onAppear { showRequested() }
+        // A row on Home asking for one dictation by name.
+        .onChange(of: services.dictationToOpen) { showRequested() }
         .confirmationDialog(
             "Delete \(selection.count) dictation\(selection.count == 1 ? "" : "s")?",
             isPresented: $confirmingDelete,
@@ -73,6 +78,15 @@ struct DictationView: View {
         } message: {
             Text("This cannot be undone.")
         }
+    }
+
+    /// Opens whichever dictation something else asked for. Taken and put back to nil,
+    /// because the request is answered the moment this pane is looking at it.
+    private func showRequested() {
+        guard let id = services.dictationToOpen else { return }
+        services.dictationToOpen = nil
+        guard history.dictations.contains(where: { $0.id == id }) else { return }
+        selection = [id]
     }
 
     private var current: DictationRecord? {

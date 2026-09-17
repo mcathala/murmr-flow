@@ -264,7 +264,8 @@ struct MainWindow: View {
             DictationView(
                 dictation: services.dictation,
                 history: services.history,
-                prompts: services.prompts
+                prompts: services.prompts,
+                services: services
             )
         case .notetaker:
             NotetakerView(
@@ -272,7 +273,8 @@ struct MainWindow: View {
                 meetings: services.meetings,
                 settings: services.settings,
                 prompts: services.prompts,
-                permissions: services.permissions
+                permissions: services.permissions,
+                services: services
             )
         case .insights:
             InsightsView(history: services.history, settings: services.settings)

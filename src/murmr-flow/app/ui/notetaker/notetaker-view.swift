@@ -8,9 +8,11 @@ struct NotetakerView: View {
 
     let notes: NoteStore
     let meetings: MeetingCoordinator
+    /// Only for the "show me this one" request; the pane owns everything else it needs.
     let settings: SettingsStore
     let prompts: PromptStore
     let permissions: PermissionManager
+    let services: AppServices
 
     /// A set, so several notes can be cleared out in one go. Deleting one at a time is
     /// fine for a mistake and useless for a clear-out.
@@ -58,7 +60,12 @@ struct NotetakerView: View {
                 selection = [first]
                 anchor = first
             }
+            showRequestedNote()
         }
+        // A row on Home, or in the menu bar, asking for one note by name. Taken and put
+        // back to nil here, because the request is answered the moment this pane is
+        // looking at it and a stale one would hijack the next visit.
+        .onChange(of: services.noteToOpen) { showRequestedNote() }
         // A rename typed for one note must not open on the next: without this, starting
         // to rename A and clicking B showed B in edit mode holding A's title, and Save
         // gave B that title.
@@ -618,6 +625,18 @@ struct NotetakerView: View {
     }
 
     // MARK: - Actions
+
+    /// Opens whichever note something else asked for.
+    private func showRequestedNote() {
+        guard let url = services.noteToOpen else { return }
+        services.noteToOpen = nil
+        notes.reload()
+        guard let note = notes.notes.first(where: { $0.url == url }) else { return }
+        selection = [note]
+        anchor = note
+        chosenPane = nil
+        showingTranscript = false
+    }
 
     /// Points the selection back at the reloaded files.
     ///
