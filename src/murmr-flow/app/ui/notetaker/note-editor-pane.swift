@@ -58,9 +58,26 @@ struct NoteEditorPane<Tabs: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 14) {
-                tabs
-                toolbar
+            // Side by side while there is room, and stacked when there is not. Neither
+            // control can be made narrower than its words without turning them into a
+            // column of letters, so the answer to a narrow pane is a second row rather
+            // than a smaller one.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 12) {
+                    tabs
+                    toolbar
+                    Spacer(minLength: 0)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 0) {
+                        tabs
+                        Spacer(minLength: 0)
+                    }
+                    HStack(spacing: 0) {
+                        toolbar
+                        Spacer(minLength: 0)
+                    }
+                }
             }
             editor
         }
@@ -94,7 +111,7 @@ struct NoteEditorPane<Tabs: View>: View {
     /// bold and italic never did, on the same bar. And the menu was gold while saying
     /// "Normal text", which is the accent claiming something is set when nothing is.
     private var toolbar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Menu {
                 Picker("Style", selection: Binding(
                     get: { block },
@@ -107,8 +124,10 @@ struct NoteEditorPane<Tabs: View>: View {
                 Text(block.title).lineLimit(1)
             }
             .menuStyle(.borderlessButton)
-            .fixedSize()
-            .frame(minWidth: 96, alignment: .leading)
+            // Room for "Normal text" and no promise beyond it. Fixed at its full width it
+            // could not give anything back when the window was narrow, and the row it is
+            // in ran off the side of the pane.
+            .frame(minWidth: 40, idealWidth: 96, maxWidth: 110, alignment: .leading)
             .foregroundStyle(block == .body ? Theme.Palette.muted : Theme.Palette.gold)
 
             Divider().frame(height: 14)
