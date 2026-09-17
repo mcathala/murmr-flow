@@ -325,9 +325,23 @@ struct DictationView: View {
                                 Text(record.summary(limit: 90))
                                     .font(.callout)
                                     .lineLimit(1)
-                                Text(subtitle(record))
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
+                                // The app's mark sits in the line, beside its name rather
+                                // than instead of it: down a list of twenty this is the
+                                // column the eye runs along, and a name is read where a
+                                // mark is recognised.
+                                HStack(spacing: 4) {
+                                    Text(subtitle(record, upToApp: true))
+                                    if let icon = AppIconCache.icon(
+                                        forBundleID: record.targetBundleID
+                                    ) {
+                                        Image(nsImage: icon)
+                                            .resizable()
+                                            .frame(width: 11, height: 11)
+                                    }
+                                    Text(subtitle(record, upToApp: false))
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                             }
                             Spacer(minLength: 0)
                         }
@@ -363,15 +377,20 @@ struct DictationView: View {
         }
     }
 
-    private func subtitle(_ record: DictationRecord) -> String {
-        [
-            Self.stamp(record.date),
-            String(format: "%.0fs", record.audioDuration),
-            record.targetAppName,
-            record.promptName,
-        ]
-        .compactMap { $0 }
-        .joined(separator: " · ")
+    /// The row's second line, in two halves so the app's mark can sit between them.
+    ///
+    /// `upToApp` is everything before the mark — when, and how long — and the rest is the
+    /// app's name and the style it was cleaned with.
+    private func subtitle(_ record: DictationRecord, upToApp: Bool) -> String {
+        let parts = upToApp
+            ? [Self.stamp(record.date), String(format: "%.0fs", record.audioDuration)]
+            : [record.targetAppName, record.promptName]
+        let text = parts.compactMap { $0 }.joined(separator: " · ")
+        // The separator belongs to whichever half is not last, so a row with no app and
+        // no style does not trail one.
+        guard upToApp, !text.isEmpty else { return text }
+        let rest = [record.targetAppName, record.promptName].compactMap { $0 }
+        return rest.isEmpty ? text : text + " ·"
     }
 
     private static func stamp(_ date: Date) -> String {
