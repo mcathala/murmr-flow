@@ -200,6 +200,67 @@ struct NoteFile: Identifiable, Sendable, Hashable {
         return out
     }
 
+    /// The note's own Markdown, exactly as it sits in the file, for editing.
+    ///
+    /// `summary(in:)` returns lines already taken apart for a view to lay out; this is the
+    /// text itself, which is what an editor has to hand back unchanged if the person
+    /// touches nothing.
+    static func summaryMarkdown(in body: String) -> String? {
+        let lines = body.components(separatedBy: "\n")
+        guard let end = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces) == transcriptHeading
+        }) else { return nil }
+
+        let start = lines.prefix(end).firstIndex { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return !trimmed.isEmpty && !trimmed.hasPrefix("# ")
+        }
+        guard let start else { return "" }
+        return lines[start..<end]
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Puts an edited note back into the file, leaving the front matter, the title and
+    /// every word of the transcript exactly where they were.
+    ///
+    /// **The transcript is not editable and this is where that is enforced.** It is the
+    /// record of what was said; the note above it is what someone made of it, and only the
+    /// second is anyone's to revise. Rewriting the whole file from parsed pieces would put
+    /// the first at risk of a parsing bug.
+    static func replacingSummary(in text: String, with markdown: String) -> String {
+        let lines = text.components(separatedBy: "\n")
+        guard let end = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces) == transcriptHeading
+        }) else { return text }
+
+        // Everything up to and including the title line stays: front matter, blank lines,
+        // and the `# Heading` the file repeats for portability.
+        var head = 0
+        var afterTitle = 0
+        var fences = 0
+        while head < end {
+            let trimmed = lines[head].trimmingCharacters(in: .whitespaces)
+            if trimmed == fence, fences < 2 {
+                fences += 1
+                afterTitle = head + 1
+            } else if trimmed.hasPrefix("# ") {
+                afterTitle = head + 1
+                break
+            } else if !trimmed.isEmpty, fences == 2 {
+                break
+            }
+            head += 1
+        }
+
+        let body = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kept = lines[0..<afterTitle].joined(separator: "\n")
+        let rest = lines[end...].joined(separator: "\n")
+        return body.isEmpty
+            ? "\(kept)\n\n\(rest)"
+            : "\(kept)\n\n\(body)\n\n\(rest)"
+    }
+
     /// Splits a note body into turns.
     ///
     /// The reading pane used to render the body as one block of raw text, so it showed

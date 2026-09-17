@@ -181,6 +181,23 @@ final class NoteStore {
         }
     }
 
+    /// Saves an edited note back into its file.
+    ///
+    /// The note only — the front matter, the title and the transcript are written back
+    /// byte for byte. A note you cannot correct is a note you stop trusting, and the app
+    /// was asking people to open the file in another editor to fix one wrong figure.
+    func saveSummary(_ markdown: String, in note: NoteFile) {
+        guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { return }
+        let updated = NoteFile.replacingSummary(in: text, with: markdown)
+        guard updated != text else { return }
+        do {
+            try updated.write(to: note.url, atomically: true, encoding: .utf8)
+            reload()
+        } catch {
+            Self.log.error("saving the note failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Moves the note to the Trash rather than unlinking it, so a mis-click is recoverable
     /// by the means the user already knows.
     func delete(_ note: NoteFile) {

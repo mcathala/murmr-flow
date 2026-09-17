@@ -19,6 +19,11 @@ struct NotetakerView: View {
     @State private var anchor: NoteFile?
     @State private var query = ""
     @State private var renaming: String?
+    /// The note being edited, and which file it belongs to. Two pieces of state rather
+    /// than one, so switching notes mid-edit saves to the file the words came from
+    /// instead of to whichever one is now on screen.
+    @State private var editing: String?
+    @State private var editingURL: URL?
     @State private var confirmingDelete = false
     @State private var confirmingDiscard = false
 
@@ -52,7 +57,12 @@ struct NotetakerView: View {
         // A rename typed for one note must not open on the next: without this, starting
         // to rename A and clicking B showed B in edit mode holding A's title, and Save
         // gave B that title.
-        .onChange(of: selection) { renaming = nil }
+        .onChange(of: selection) {
+            // Save before the pane changes under the edit. `commitEdit` writes to the file
+            // the text came from, so this is safe even though the selection has moved on.
+            commitEdit()
+            renaming = nil
+        }
         .onChange(of: meetings.stage) { _, stage in
             // A meeting that just finished should appear without being asked for.
             if stage == .saved {
@@ -372,8 +382,26 @@ struct NotetakerView: View {
         // The note first, then what was said. It is why the file was opened, and until it
         // was drawn here the reading pane showed only the turns — the one thing the
         // Notetaker now writes was visible in every editor except this app.
-        if !summary.isEmpty {
+        if editing != nil, editingURL == note.url {
+            // Markdown, in the app's mono face. The file is the source of truth and it is
+            // Markdown, so an editor that hid that would be inventing a second format —
+            // and the headings and bullets someone types here have to survive a trip
+            // through any other editor unchanged.
+            TextEditor(text: Binding(
+                get: { editing ?? "" },
+                set: { editing = $0 }
+            ))
+            .font(Theme.Text.monoLarge)
+            .lineSpacing(3)
+            .scrollContentBackground(.hidden)
+            .padding(8)
+            .frame(minHeight: 360)
+            .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: Theme.Radius.row))
+        } else if !summary.isEmpty {
             NoteSummaryView(lines: summary)
+        }
+
+        if !summary.isEmpty || editing != nil {
             if !turns.isEmpty {
                 SectionLabel(title: "Transcript")
                     .padding(.top, 20)
@@ -381,7 +409,7 @@ struct NotetakerView: View {
             }
         }
 
-        if turns.isEmpty, summary.isEmpty {
+        if turns.isEmpty, summary.isEmpty, editing == nil {
             // A note somebody wrote by hand, or one with nothing in it. Files are the
             // source of truth, so it still has to display.
             Text(body)
@@ -431,6 +459,21 @@ struct NotetakerView: View {
 
                     Spacer(minLength: 0)
 
+                    if let markdown = NoteFile.summaryMarkdown(in: notes.body(of: note)) {
+                        Button(editing == nil ? "Edit note" : "Done") {
+                            if editing == nil {
+                                editing = markdown
+                                editingURL = note.url
+                            } else {
+                                commitEdit()
+                            }
+                        }
+                        .controlSize(.small)
+                        .help(editing == nil
+                              ? "Correct the note. The transcript below is left alone."
+                              : "Save the note back to its file")
+                    }
+
                     Button("Copy") {
                         TextInjector.copyToClipboard(notes.body(of: note))
                     }
@@ -458,6 +501,21 @@ struct NotetakerView: View {
     }
 
     // MARK: - Actions
+
+    /// Writes the edited note back, if anything is being edited.
+    ///
+    /// Called by Done and by anything that navigates away, because an edit lost to a click
+    /// in the sidebar is an edit the person will not make twice.
+    private func commitEdit() {
+        defer {
+            editing = nil
+            editingURL = nil
+        }
+        guard let text = editing, let url = editingURL,
+              let note = notes.notes.first(where: { $0.url == url })
+        else { return }
+        notes.saveSummary(text, in: note)
+    }
 
     /// Renaming edits the note's front matter, not its filename — the filename stays
     /// date-first so the folder sorts chronologically whatever a note is called.

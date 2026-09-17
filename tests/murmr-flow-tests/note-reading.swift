@@ -274,3 +274,81 @@ struct TranscriptSnapshotTests {
         #expect(note.snippet == "The model runs on the machine, about 600 MB.")
     }
 }
+
+/// Editing the note, which is the half of the file anyone is allowed to revise.
+@MainActor
+@Suite("Editing a note")
+struct NoteEditingTests {
+
+    private static let file = """
+        ---
+        title: Weekly sync
+        date: 2026-09-16T15:42:00+02:00
+        duration: 842
+        note: Summary
+        ---
+
+        # Weekly sync
+
+        ### Where we are
+        - The model runs on the machine.
+
+        ## Transcript
+
+        **You** · `0:00`
+
+        Right, can you hear me?
+        """
+
+    @Test("the note comes out as the Markdown that is in the file")
+    func readsTheMarkdown() throws {
+        let (_, body) = NoteFile.split(Self.file)
+        let markdown = try #require(NoteFile.summaryMarkdown(in: body))
+        #expect(markdown == "### Where we are\n- The model runs on the machine.")
+    }
+
+    @Test("an edit replaces the note and leaves everything else byte for byte")
+    func replacesOnlyTheNote() {
+        let edited = NoteFile.replacingSummary(
+            in: Self.file, with: "### Where we are\n- The model runs on the machine, 600 MB."
+        )
+        #expect(edited.contains("600 MB"))
+        #expect(edited.contains("title: Weekly sync"))
+        #expect(edited.contains("# Weekly sync"))
+        // The record of what was said is not anyone's to revise.
+        #expect(edited.contains("**You** · `0:00`"))
+        #expect(edited.contains("Right, can you hear me?"))
+        #expect(!edited.contains("runs on the machine."))
+    }
+
+    @Test("an emptied note leaves the transcript standing on its own")
+    func emptyEdit() {
+        let edited = NoteFile.replacingSummary(in: Self.file, with: "   \n  ")
+        #expect(NoteFile.summary(in: NoteFile.split(edited).body).isEmpty)
+        #expect(edited.contains("Right, can you hear me?"))
+        #expect(edited.contains("title: Weekly sync"))
+    }
+
+    @Test("a file with no transcript heading is left exactly as it was")
+    func refusesWhatItCannotPlace() {
+        let handWritten = "# Some thoughts\n\n- a bullet somebody typed"
+        #expect(NoteFile.replacingSummary(in: handWritten, with: "### New") == handWritten)
+        #expect(NoteFile.summaryMarkdown(in: handWritten) == nil)
+    }
+
+    @Test("an edit survives being written and read back")
+    func roundTrips() throws {
+        let folder = Scratch.folder("note-editing")
+        let url = folder.appendingPathComponent("2026-09-16 15-42 Meeting.md")
+        try Self.file.write(to: url, atomically: true, encoding: .utf8)
+
+        let store = NoteStore(folder: folder)
+        let note = try #require(store.notes.first)
+        store.saveSummary("### Decided\n- Ship on Friday.", in: note)
+
+        let reloaded = try #require(store.notes.first)
+        let body = store.body(of: reloaded)
+        #expect(NoteFile.summary(in: body) == [.heading("Decided"), .bullet("Ship on Friday.")])
+        #expect(NoteFile.turns(in: body).count == 1)
+    }
+}
