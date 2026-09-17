@@ -24,6 +24,28 @@ final class AppServices {
         }
     }
 
+    /// A note or a dictation the app has been asked to show, and which tab has not
+    /// opened yet.
+    ///
+    /// Held here rather than passed down because the thing that asks — a row on Home, a
+    /// row in the menu bar — is nowhere near the pane that has to answer, and the pane
+    /// owns its own selection. Whichever tab it belongs to takes it and puts it back to
+    /// nil, so it is a request rather than a state that could go stale.
+    var noteToOpen: URL?
+    var dictationToOpen: UUID?
+
+    /// Shows one note in Notetaker, whoever asked.
+    func open(note: NoteFile) {
+        noteToOpen = note.url
+        route = .notetaker
+    }
+
+    /// Shows one dictation in Dictation.
+    func open(dictation id: UUID) {
+        dictationToOpen = id
+        route = .dictation
+    }
+
     /// Where leaving Settings returns you.
     ///
     /// The sidebar swaps its list rather than growing one, so Settings is a level you

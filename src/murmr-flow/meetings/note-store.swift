@@ -21,6 +21,15 @@ final class NoteStore {
     /// Newest first.
     private(set) var notes: [NoteFile] = []
 
+    /// Bumped whenever the folder is re-read.
+    ///
+    /// `notes` alone is not enough to notice a file changing. A `NoteFile` holds what the
+    /// list row needs — title, date, duration, snippet — so ticking a task inside a note
+    /// produces an array equal to the one before it, and a pane that reads the file's
+    /// *contents* has nothing to tell it to look again. Reading this is how such a pane
+    /// says "I depend on what is on disk, not only on which files are there".
+    private(set) var revision = 0
+
     /// Where this store reads and writes. The app's is `defaultFolder`; a test's is a
     /// scratch directory, which is what lets saving, renaming and deleting be exercised
     /// without touching anyone's real notes.
@@ -114,6 +123,7 @@ final class NoteStore {
     // MARK: - Reading
 
     func reload() {
+        revision += 1
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else {
             notes = []
             return
@@ -178,6 +188,49 @@ final class NoteStore {
             reload()
         } catch {
             Self.log.error("rename failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Saves an edited note back into its file.
+    ///
+    /// The note only — the front matter, the title and the transcript are written back
+    /// byte for byte. A note you cannot correct is a note you stop trusting, and the app
+    /// was asking people to open the file in another editor to fix one wrong figure.
+    func saveSummary(_ markdown: String, in note: NoteFile) {
+        guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { return }
+        let updated = NoteFile.replacingSummary(in: text, with: markdown)
+        guard updated != text else { return }
+        do {
+            try updated.write(to: note.url, atomically: true, encoding: .utf8)
+            reload()
+        } catch {
+            Self.log.error("saving the note failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Saves edited own-notes back into the file, leaving the rest alone.
+    func saveOwnNotes(_ markdown: String, in note: NoteFile) {
+        guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { return }
+        let updated = NoteFile.replacingOwnNotes(in: text, with: markdown)
+        guard updated != text else { return }
+        do {
+            try updated.write(to: note.url, atomically: true, encoding: .utf8)
+            reload()
+        } catch {
+            Self.log.error("saving your notes failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Ticks or unticks one of the note's tasks, by position.
+    func toggleTask(_ index: Int, in note: NoteFile) {
+        guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { return }
+        let updated = NoteFile.togglingTask(in: text, at: index)
+        guard updated != text else { return }
+        do {
+            try updated.write(to: note.url, atomically: true, encoding: .utf8)
+            reload()
+        } catch {
+            Self.log.error("ticking a task failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

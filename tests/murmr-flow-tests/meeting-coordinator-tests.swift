@@ -23,6 +23,7 @@ struct MeetingCoordinatorTests {
         let notes: NoteStore
         let settings: SettingsStore
         let prompts: PromptStore
+        let providers: ProviderStore
         let coordinator: MeetingCoordinator
         /// Shared with the reader closure, which cannot capture `self` during init.
         private let box: SampleBox
@@ -39,6 +40,13 @@ struct MeetingCoordinatorTests {
             let notes = NoteStore(folder: folder)
             let settings = SettingsStore(defaults: defaults)
             let prompts = PromptStore(defaults: defaults)
+            // The keyless Custom provider, so "is there a provider" does not depend on
+            // what is in this machine's Keychain.
+            let providers = ProviderStore(defaults: defaults)
+            providers.update(
+                baseURL: "http://localhost:11434/v1", model: "test-model", for: "custom"
+            )
+            providers.activeID = "custom"
 
             self.recorder = recorder
             self.transcriber = transcriber
@@ -49,13 +57,14 @@ struct MeetingCoordinatorTests {
             self.notes = notes
             self.settings = settings
             self.prompts = prompts
+            self.providers = providers
             coordinator = MeetingCoordinator(
                 loader: SpeechModelLoader(),
                 transcriber: transcriber,
                 notes: notes,
                 settings: settings,
                 prompts: prompts,
-                providers: ProviderStore(defaults: defaults),
+                providers: providers,
                 dictionary: DictionaryStore(defaults: defaults),
                 devices: nil,
                 recorder: recorder,
@@ -232,5 +241,128 @@ struct MeetingCoordinatorTests {
         #expect(rig.coordinator.stage == .idle)
         #expect(rig.recorder.discards == 1)
         #expect(rig.notes.notes.isEmpty)
+    }
+
+    // MARK: - The note above the transcript
+
+    @Test("the note is written above the transcript, under its own heading")
+    func writesTheNote() async throws {
+        let rig = Rig()
+        await rig.run()
+
+        let body = rig.notes.body(of: rig.notes.notes[0])
+        // The note first, then the transcript under a heading of its own — a reader has
+        // to be able to tell what was kept from what was said.
+        let note = try #require(body.range(of: "### What was said"))
+        let transcript = try #require(body.range(of: "## Transcript"))
+        #expect(note.lowerBound < transcript.lowerBound)
+        #expect(body.contains("SO ARE WE GOOD TO MOVE IT"))
+        #expect(rig.stages.stages.contains(.transcribing(.noting)))
+    }
+
+    @Test("the note is written from the cleaned turns, not the raw ones")
+    func notesTheCleanedWording() async {
+        let rig = Rig()
+        await rig.run()
+
+        // The fake clean-up upper-cases, so the turns the note saw prove the order.
+        #expect(rig.cleaner.noteTurns.last?.first?.text == "SO ARE WE GOOD TO MOVE IT")
+    }
+
+    @Test("the style that wrote the note is recorded in the front matter")
+    func recordsTheStyle() async {
+        let rig = Rig()
+        await rig.run()
+
+        let full = (try? String(contentsOf: rig.notes.notes[0].url, encoding: .utf8)) ?? ""
+        #expect(full.contains("note: Summary"))
+    }
+
+    @Test("with no style set for Summary, the transcript is saved on its own")
+    func noSummaryStyle() async {
+        let rig = Rig()
+        rig.prompts.summaryPromptID = nil
+        await rig.run()
+
+        let body = rig.notes.body(of: rig.notes.notes[0])
+        #expect(!body.contains("## Transcript"))
+        #expect(body.contains("SO ARE WE GOOD TO MOVE IT"))
+        #expect(!rig.stages.stages.contains(.transcribing(.noting)))
+    }
+
+    @Test("a note that cannot be written costs the note, never the transcript")
+    func noteFailureKeepsTheMeeting() async {
+        let rig = Rig()
+        rig.cleaner.noteOutcome = { _ in
+            CleanupService.NoteOutcome(text: nil, note: "The model refused.", latency: 0)
+        }
+        await rig.run()
+
+        #expect(rig.coordinator.stage == .saved)
+        let body = rig.notes.body(of: rig.notes.notes[0])
+        #expect(body.contains("SO ARE WE GOOD TO MOVE IT"))
+        #expect(!body.contains("## Transcript"))
+        #expect(rig.coordinator.lastResult?.cleanupNote?.contains("The model refused.") == true)
+    }
+
+    @Test("clean-up switched off writes no note either")
+    func offWritesNothing() async {
+        let rig = Rig()
+        rig.settings.notetakerCleanupEnabled = false
+        await rig.run()
+
+        #expect(rig.cleaner.noteTurns.isEmpty)
+        #expect(!rig.notes.body(of: rig.notes.notes[0]).contains("## Transcript"))
+    }
+
+    @Test("renaming a note keeps the note it was written with")
+    func renameKeepsTheStyle() async throws {
+        let rig = Rig()
+        await rig.run()
+
+        let file = rig.notes.notes[0]
+        let before = try String(contentsOf: file.url, encoding: .utf8)
+        let after = NoteFile.rewritingTitle(in: before, to: "Weekly sync", fallbackDate: Date())
+        #expect(after.contains("note: Summary"))
+        #expect(after.contains("### What was said"))
+    }
+
+    @Test("notes typed during the meeting are kept whole and reach the style")
+    func typedNotesSurvive() async {
+        let rig = Rig()
+        rig.coordinator.start()
+        rig.coordinator.liveNotes = "ask about the token ceiling"
+        await rig.coordinator.stop()
+
+        let body = rig.notes.body(of: rig.notes.notes[0])
+        #expect(body.contains("## My notes"))
+        #expect(body.contains("ask about the token ceiling"))
+        // And the style that writes the note was told about them.
+        #expect(rig.cleaner.noteContexts.last?.ownNotes == "ask about the token ceiling")
+    }
+
+    @Test("notes typed are kept even when no note could be written")
+    func typedNotesSurviveAFailure() async {
+        let rig = Rig()
+        rig.cleaner.noteOutcome = { _ in
+            CleanupService.NoteOutcome(text: nil, note: "The model refused.", latency: 0)
+        }
+        rig.coordinator.start()
+        rig.coordinator.liveNotes = "friday deploy rule?"
+        await rig.coordinator.stop()
+
+        // They are the one part of the file nothing else could reconstruct.
+        #expect(rig.notes.body(of: rig.notes.notes[0]).contains("friday deploy rule?"))
+    }
+
+    @Test("a new recording starts on a blank page")
+    func notesClearBetweenMeetings() async {
+        let rig = Rig()
+        rig.coordinator.start()
+        rig.coordinator.liveNotes = "first meeting"
+        await rig.coordinator.stop()
+
+        rig.coordinator.start()
+        #expect(rig.coordinator.liveNotes.isEmpty)
     }
 }

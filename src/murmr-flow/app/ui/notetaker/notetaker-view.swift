@@ -8,9 +8,11 @@ struct NotetakerView: View {
 
     let notes: NoteStore
     let meetings: MeetingCoordinator
+    /// Only for the "show me this one" request; the pane owns everything else it needs.
     let settings: SettingsStore
     let prompts: PromptStore
     let permissions: PermissionManager
+    let services: AppServices
 
     /// A set, so several notes can be cleared out in one go. Deleting one at a time is
     /// fine for a mistake and useless for a clear-out.
@@ -19,6 +21,16 @@ struct NotetakerView: View {
     @State private var anchor: NoteFile?
     @State private var query = ""
     @State private var renaming: String?
+    /// The note being edited, and which file it belongs to. Two pieces of state rather
+    /// than one, so switching notes mid-edit saves to the file the words came from
+    /// instead of to whichever one is now on screen.
+    /// Which pane the person chose, or nil to let the note decide.
+    @State private var chosenPane: NotePane?
+    @State private var showingTranscript = false
+    @State private var enhanceFailure: String?
+    /// Bumped when a note is written for a meeting that had none, so the page is rebuilt
+    /// around words it has never seen.
+    @State private var enhanceStamp = 0
     @State private var confirmingDelete = false
     @State private var confirmingDiscard = false
 
@@ -48,11 +60,25 @@ struct NotetakerView: View {
                 selection = [first]
                 anchor = first
             }
+            showRequestedNote()
         }
+        // A row on Home, or in the menu bar, asking for one note by name. Taken and put
+        // back to nil here, because the request is answered the moment this pane is
+        // looking at it and a stale one would hijack the next visit.
+        .onChange(of: services.noteToOpen) { showRequestedNote() }
         // A rename typed for one note must not open on the next: without this, starting
         // to rename A and clicking B showed B in edit mode holding A's title, and Save
         // gave B that title.
-        .onChange(of: selection) { renaming = nil }
+        .onChange(of: selection) {
+            // Each page saves itself as it goes and once more on its way out, so nothing
+            // has to be committed here.
+            renaming = nil
+            // A pane chosen for one note says nothing about the next one, which may not
+            // even have that half.
+            chosenPane = nil
+            showingTranscript = false
+            enhanceFailure = nil
+        }
         .onChange(of: meetings.stage) { _, stage in
             // A meeting that just finished should appear without being asked for.
             if stage == .saved {
@@ -322,7 +348,12 @@ struct NotetakerView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if selection.count > 1 {
+        // A meeting that is running takes the pane, whatever was selected. Writing while
+        // you listen is the thing the pane is for at that moment, and the note you were
+        // reading a minute ago is not.
+        if meetings.stage.isRecording {
+            liveNotes
+        } else if selection.count > 1 {
             EmptyPane(
                 symbol: "checklist",
                 title: "\(selection.count) notes selected",
@@ -341,7 +372,7 @@ struct NotetakerView: View {
                         WarningRow(message: message)
                     }
                     Divider()
-                    transcript(of: note)
+                    reading(note)
                 }
                 .padding(20)
             }
@@ -359,18 +390,125 @@ struct NotetakerView: View {
         }
     }
 
-    /// You and Them as turns, which is what the file actually holds.
-    ///
-    /// This pane used to print the body verbatim, so it showed `**Them** · ` and backticks
-    /// on screen — markup in the one place the app is meant to be reading to you.
-    @ViewBuilder
-    private func transcript(of note: NoteFile) -> some View {
-        let body = notes.body(of: note)
-        let turns = NoteFile.turns(in: body)
+    // MARK: - Writing while it records
 
-        if turns.isEmpty {
-            // A note somebody wrote by hand, or one with nothing in it. Files are the
-            // source of truth, so it still has to display.
+    /// The page you write on while the meeting runs.
+    ///
+    /// Whatever you type here is kept whole in the finished file, **and** handed to the
+    /// style that writes the note — six words typed during a call say more about what you
+    /// want out of it than the whole transcript does. Blank is a perfectly good answer; the
+    /// note is written from the conversation either way.
+    private var liveNotes: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text("Your notes")
+                    .font(Theme.Text.title)
+                    .foregroundStyle(Theme.Palette.text)
+                Spacer(minLength: 0)
+                Circle()
+                    .fill(Theme.Palette.danger)
+                    .frame(width: 7, height: 7)
+                Text(MeetingTranscript.clock(meetings.elapsed))
+                    .font(Theme.Text.monoLarge)
+                    .foregroundStyle(Theme.Palette.muted)
+            }
+
+            Divider()
+
+            // `.plain` so the editor has no chrome and no insets of its own — which is
+            // what lets the hint below sit exactly where the first character will, rather
+            // than a few points off it.
+            TextEditor(text: Binding(
+                get: { meetings.liveNotes },
+                set: { meetings.liveNotes = $0 }
+            ))
+            .textEditorStyle(.plain)
+            .font(Theme.Text.body)
+            .lineSpacing(4)
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .topLeading) {
+                if meetings.liveNotes.isEmpty {
+                    Text("Write anything worth keeping. Headings and - bullets work.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Palette.faint)
+                        // Clear of the caret, which sits at the text origin. Level with
+                        // it the caret is drawn through the first letter.
+                        .padding(.leading, 3)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// The note, as two ways of looking at the same meeting.
+    ///
+    /// **The transcript is folded away.** It is the evidence, not the note: it is there so
+    /// a claim can be checked and so the file is the whole record, and a reader who wanted
+    /// forty turns would not have asked for a note. Granola hides it for the same reason.
+    @ViewBuilder
+    private func reading(_ note: NoteFile) -> some View {
+        // This pane's content comes from the file rather than from anything SwiftUI can
+        // see change, so it says out loud that it depends on the folder having been
+        // re-read. Without it, ticking a task rewrote the file and the box stayed
+        // unticked until you left the note and came back.
+        let _ = notes.revision
+        let body = notes.body(of: note)
+        let summary = NoteFile.summary(in: body)
+        let own = NoteFile.ownNotes(in: body)
+        let turns = NoteFile.turns(in: body)
+        let pane = shownPane(summary: summary, own: own)
+
+        switch pane {
+        case .enhanced:
+            NoteEditorPane(
+                text: NoteFile.summaryMarkdown(in: body) ?? "",
+                placeholder: "Type here, or use ### and - to shape it.",
+                // The page is its own empty state: a note that can be written for you and
+                // a note you can write are the same blank sheet.
+                emptyAction: turns.isEmpty ? nil : (
+                    title: meetings.isWritingNote ? "Writing\u{2026}" : "Enhance note now",
+                    run: { enhance(note) }
+                ),
+                onSave: { text in
+                    notes.saveSummary(text, in: note)
+                    resyncSelection()
+                },
+                tabs: { paneTabs(pane) }
+            )
+            // Deliberately not keyed on the revision: our own saves bump that, and
+            // rebuilding the page on each one would pull the text out from under the
+            // caret. It is keyed on the things that genuinely mean "different words":
+            // another note, another tab, or a note written for this one just now.
+            .id("enhanced:\(note.url.path):\(enhanceStamp)")
+
+        case .mine:
+            NoteEditorPane(
+                text: own ?? "",
+                placeholder: "Nothing you wrote during this meeting. Type here to add some.",
+                onSave: { text in
+                    notes.saveOwnNotes(text, in: note)
+                    resyncSelection()
+                },
+                tabs: { paneTabs(pane) }
+            )
+            .id("mine:\(note.url.path)")
+        }
+
+        if let enhanceFailure {
+            WarningRow(message: enhanceFailure)
+        }
+
+        // A file somebody wrote by hand, and only that.
+        //
+        // The test is whether the file has any of our headings, not whether it has any
+        // content: a meeting that transcribed nothing has no note, no turns and nothing
+        // typed, and printing its raw body put `## Transcript` and the front matter on
+        // screen under an empty page — markup in the one place the app is meant to be
+        // reading to you, and twice over.
+        if NoteFile.summaryMarkdown(in: body) == nil, own == nil, turns.isEmpty {
             Text(body)
                 .font(Theme.Text.body)
                 .foregroundStyle(Theme.Palette.muted)
@@ -378,9 +516,51 @@ struct NotetakerView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-        } else {
-            TranscriptView(turns: turns)
         }
+
+        if !turns.isEmpty {
+            DisclosureGroup(isExpanded: $showingTranscript) {
+                TranscriptView(turns: turns)
+                    .padding(.top, 10)
+            } label: {
+                Text("Transcript · \(turns.count) turns")
+                    .font(Theme.Text.label)
+                    .tracking(Theme.labelTracking)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Theme.Palette.faint)
+            }
+            .padding(.top, 20)
+        }
+    }
+
+    /// Writes a note for a meeting that has none, then rebuilds the page around words it
+    /// has never seen.
+    private func enhance(_ note: NoteFile) {
+        Task {
+            enhanceFailure = await meetings.writeNote(for: note)
+            resyncSelection()
+            if enhanceFailure == nil { enhanceStamp += 1 }
+        }
+    }
+
+    /// The two halves, as a control that shares its line with the edit bar.
+    private func paneTabs(_ pane: NotePane) -> some View {
+        PaneTabs(
+            tabs: NotePane.allCases,
+            title: \.title,
+            selection: Binding(get: { pane }, set: { chosenPane = $0 }),
+            alignment: .leading
+        )
+        .fixedSize()
+    }
+
+    /// Which of the two panes is showing. The stored choice when there is one, and
+    /// otherwise the one with something in it — landing on an empty pane when the other
+    /// holds the whole meeting is the app being right and useless at once.
+    private func shownPane(summary: [NoteFile.SummaryLine], own: String?) -> NotePane {
+        if let chosenPane { return chosenPane }
+        if summary.isEmpty, own != nil { return .mine }
+        return .enhanced
     }
 
     /// What clean-up couldn't do to the meeting that just finished, if anything.
@@ -445,6 +625,35 @@ struct NotetakerView: View {
     }
 
     // MARK: - Actions
+
+    /// Opens whichever note something else asked for.
+    private func showRequestedNote() {
+        guard let url = services.noteToOpen else { return }
+        services.noteToOpen = nil
+        notes.reload()
+        guard let note = notes.notes.first(where: { $0.url == url }) else { return }
+        selection = [note]
+        anchor = note
+        chosenPane = nil
+        showingTranscript = false
+    }
+
+    /// Points the selection back at the reloaded files.
+    ///
+    /// A `NoteFile` carries the row's snippet, and the snippet is the note's first line —
+    /// so editing the note changes the value the selection holds, and the pane that was
+    /// showing it decided nothing was selected any more. Selection is by file, not by the
+    /// contents of one.
+    private func resyncSelection() {
+        let urls = Set(selection.map(\.url))
+        guard !urls.isEmpty else { return }
+        let reloaded = notes.notes.filter { urls.contains($0.url) }
+        guard !reloaded.isEmpty else { return }
+        selection = Set(reloaded)
+        if let anchor, let moved = reloaded.first(where: { $0.url == anchor.url }) {
+            self.anchor = moved
+        }
+    }
 
     /// Renaming edits the note's front matter, not its filename — the filename stays
     /// date-first so the folder sorts chronologically whatever a note is called.

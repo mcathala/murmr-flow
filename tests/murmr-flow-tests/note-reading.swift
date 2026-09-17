@@ -194,4 +194,405 @@ struct TranscriptSnapshotTests {
             to: URL(fileURLWithPath: directory).appendingPathComponent("transcript.png")
         )
     }
+
+    // MARK: - The written note
+
+    private static let withSummary = """
+        ---
+        title: Weekly sync
+        date: 2026-09-16T15:42:00+02:00
+        duration: 842
+        note: Summary
+        ---
+
+        # Weekly sync
+
+        ### Where we are
+        - The model runs on the machine, about 600 MB.
+        - Only text reaches a provider.
+
+        ### Next steps
+        - [ ] Record a real meeting (You)
+        - [x] Check the token ceiling (Them)
+
+        ## Transcript
+
+        **You** · `0:00`
+
+        Right, can you hear me?
+
+        **Them** · `0:11`
+
+        Yeah, go for it.
+        """
+
+    @Test("the note reads as headings, bullets and tasks")
+    func parsesTheSummary() {
+        let (_, body) = NoteFile.split(Self.withSummary)
+        let lines = NoteFile.summary(in: body)
+
+        #expect(lines == [
+            .heading("Where we are"),
+            .bullet("The model runs on the machine, about 600 MB."),
+            .bullet("Only text reaches a provider."),
+            .heading("Next steps"),
+            .task(done: false, index: 0, "Record a real meeting (You)"),
+            .task(done: true, index: 1, "Check the token ceiling (Them)"),
+        ])
+    }
+
+    @Test("the note stops at the transcript, and the turns still parse under it")
+    func summaryAndTurnsAreSeparate() {
+        let (_, body) = NoteFile.split(Self.withSummary)
+        let turns = NoteFile.turns(in: body)
+
+        #expect(turns.count == 2)
+        #expect(turns.first?.text == "Right, can you hear me?")
+        // Nothing from the note leaked into the conversation.
+        #expect(!turns.contains { $0.text.contains("600 MB") })
+    }
+
+    @Test("a file with no transcript heading has no note, whatever it starts with")
+    func noHeadingNoSummary() {
+        let handWritten = """
+            # Some thoughts
+
+            - a bullet somebody typed
+            - and another
+            """
+        // Reading these as a note would claim the file said something it never said.
+        #expect(NoteFile.summary(in: handWritten).isEmpty)
+    }
+
+    @Test("the row's snippet is what the note says, not the first hello")
+    func snippetPrefersTheNote() throws {
+        let folder = Scratch.folder("summary-snippet")
+        let url = folder.appendingPathComponent("2026-09-16 15-42 Meeting.md")
+        try Self.withSummary.write(to: url, atomically: true, encoding: .utf8)
+
+        let note = try #require(NoteFile.read(url))
+        #expect(note.snippet == "The model runs on the machine, about 600 MB.")
+    }
+}
+
+/// Editing the note, which is the half of the file anyone is allowed to revise.
+@MainActor
+@Suite("Editing a note")
+struct NoteEditingTests {
+
+    private static let file = """
+        ---
+        title: Weekly sync
+        date: 2026-09-16T15:42:00+02:00
+        duration: 842
+        note: Summary
+        ---
+
+        # Weekly sync
+
+        ### Where we are
+        - The model runs on the machine.
+
+        ## Transcript
+
+        **You** · `0:00`
+
+        Right, can you hear me?
+        """
+
+    @Test("the note comes out as the Markdown that is in the file")
+    func readsTheMarkdown() throws {
+        let (_, body) = NoteFile.split(Self.file)
+        let markdown = try #require(NoteFile.summaryMarkdown(in: body))
+        #expect(markdown == "### Where we are\n- The model runs on the machine.")
+    }
+
+    @Test("an edit replaces the note and leaves everything else byte for byte")
+    func replacesOnlyTheNote() {
+        let edited = NoteFile.replacingSummary(
+            in: Self.file, with: "### Where we are\n- The model runs on the machine, 600 MB."
+        )
+        #expect(edited.contains("600 MB"))
+        #expect(edited.contains("title: Weekly sync"))
+        #expect(edited.contains("# Weekly sync"))
+        // The record of what was said is not anyone's to revise.
+        #expect(edited.contains("**You** · `0:00`"))
+        #expect(edited.contains("Right, can you hear me?"))
+        #expect(!edited.contains("runs on the machine."))
+    }
+
+    @Test("an emptied note leaves the transcript standing on its own")
+    func emptyEdit() {
+        let edited = NoteFile.replacingSummary(in: Self.file, with: "   \n  ")
+        #expect(NoteFile.summary(in: NoteFile.split(edited).body).isEmpty)
+        #expect(edited.contains("Right, can you hear me?"))
+        #expect(edited.contains("title: Weekly sync"))
+    }
+
+    @Test("a file with no transcript heading is left exactly as it was")
+    func refusesWhatItCannotPlace() {
+        let handWritten = "# Some thoughts\n\n- a bullet somebody typed"
+        #expect(NoteFile.replacingSummary(in: handWritten, with: "### New") == handWritten)
+        #expect(NoteFile.summaryMarkdown(in: handWritten) == nil)
+    }
+
+    @Test("an edit survives being written and read back")
+    func roundTrips() throws {
+        let folder = Scratch.folder("note-editing")
+        let url = folder.appendingPathComponent("2026-09-16 15-42 Meeting.md")
+        try Self.file.write(to: url, atomically: true, encoding: .utf8)
+
+        let store = NoteStore(folder: folder)
+        let note = try #require(store.notes.first)
+        store.saveSummary("### Decided\n- Ship on Friday.", in: note)
+
+        let reloaded = try #require(store.notes.first)
+        let body = store.body(of: reloaded)
+        #expect(NoteFile.summary(in: body) == [.heading("Decided"), .bullet("Ship on Friday.")])
+        #expect(NoteFile.turns(in: body).count == 1)
+    }
+}
+
+/// What the person typed while the meeting ran: kept whole, kept apart, and handed to the
+/// style that writes the note.
+@MainActor
+@Suite("Notes typed during a meeting")
+struct OwnNotesTests {
+
+    private static let file = """
+        ---
+        title: Weekly sync
+        date: 2026-09-16T15:42:00+02:00
+        duration: 842
+        note: Summary
+        ---
+
+        # Weekly sync
+
+        ### Where we are
+        - The model runs on the machine.
+
+        ## My notes
+
+        ask about the token ceiling
+        - friday deploy rule?
+
+        ## Transcript
+
+        **You** · `0:00`
+
+        Right, can you hear me?
+        """
+
+    @Test("what was typed comes back exactly as it was typed")
+    func readsOwnNotes() throws {
+        let (_, body) = NoteFile.split(Self.file)
+        let own = try #require(NoteFile.ownNotes(in: body))
+        #expect(own == "ask about the token ceiling\n- friday deploy rule?")
+    }
+
+    @Test("the written note stops at Your notes rather than swallowing them")
+    func summaryStopsFirst() {
+        let (_, body) = NoteFile.split(Self.file)
+        #expect(NoteFile.summary(in: body) == [
+            .heading("Where we are"),
+            .bullet("The model runs on the machine."),
+        ])
+        #expect(NoteFile.turns(in: body).count == 1)
+    }
+
+    @Test("editing the note leaves what you typed and what was said alone")
+    func editingKeepsTheRest() {
+        let edited = NoteFile.replacingSummary(in: Self.file, with: "### Decided\n- Ship it.")
+        #expect(edited.contains("### Decided"))
+        #expect(edited.contains("ask about the token ceiling"))
+        #expect(edited.contains("Right, can you hear me?"))
+        #expect(!edited.contains("The model runs on the machine."))
+    }
+
+    @Test("a task is ticked by position, and only inside the note")
+    func ticksByPosition() {
+        let file = """
+            # Weekly sync
+
+            ### Next steps
+            - [ ] first
+            - [ ] second
+
+            ## Transcript
+
+            **You** · `0:00`
+
+            - [ ] this was said out loud, not a task
+            """
+        let ticked = NoteFile.togglingTask(in: file, at: 1)
+        #expect(ticked.contains("- [ ] first"))
+        #expect(ticked.contains("- [x] second"))
+        // The transcript is the record of what was said; nothing in it is a checkbox.
+        #expect(ticked.contains("- [ ] this was said out loud"))
+
+        // And back again.
+        #expect(NoteFile.togglingTask(in: ticked, at: 1) == file)
+    }
+
+    @Test("an index past the end changes nothing")
+    func outOfRange() {
+        #expect(NoteFile.togglingTask(in: Self.file, at: 7) == Self.file)
+    }
+
+    @Test("what was typed reaches the prompt, in the person's own words")
+    func reachesThePrompt() {
+        let rendered = PromptLibrary(template: "Write the notes.").render(
+            .init(transcript: "You: hello", ownNotes: "ask about the token ceiling")
+        )
+        #expect(rendered.contains("ask about the token ceiling"))
+        #expect(rendered.contains("typed these notes while it was running"))
+    }
+
+    @Test("nothing typed adds nothing to the prompt")
+    func emptyAddsNothing() {
+        let rendered = PromptLibrary(template: "Write the notes.").render(
+            .init(transcript: "You: hello", ownNotes: "   \n ")
+        )
+        #expect(!rendered.contains("typed these notes"))
+    }
+}
+
+/// Editing your own half of a note, and writing one for a meeting that has none.
+@MainActor
+@Suite("Your notes, edited")
+struct OwnNotesEditingTests {
+
+    @Test("your notes can be corrected without touching the note or the transcript")
+    func replacesOwnNotes() {
+        let file = """
+            # Weekly sync
+
+            ### Where we are
+            - The model runs on the machine.
+
+            ## My notes
+
+            ask abuot the celiing
+
+            ## Transcript
+
+            **You** · `0:00`
+
+            Right, can you hear me?
+            """
+        let edited = NoteFile.replacingOwnNotes(in: file, with: "ask about the ceiling")
+        #expect(edited.contains("ask about the ceiling"))
+        #expect(!edited.contains("abuot"))
+        #expect(edited.contains("The model runs on the machine."))
+        #expect(edited.contains("Right, can you hear me?"))
+    }
+
+    @Test("a meeting you typed nothing in gains the section when you write one")
+    func createsTheSection() {
+        let file = """
+            # Weekly sync
+
+            ### Where we are
+            - The model runs on the machine.
+
+            ## Transcript
+
+            **You** · `0:00`
+
+            Right, can you hear me?
+            """
+        let edited = NoteFile.replacingOwnNotes(in: file, with: "a thought I had after")
+        let (_, body) = NoteFile.split(edited)
+        #expect(NoteFile.ownNotes(in: body) == "a thought I had after")
+        // And it lands above the transcript, where one typed during the meeting would be.
+        let own = try! #require(edited.range(of: "## My notes"))
+        let transcript = try! #require(edited.range(of: "## Transcript"))
+        #expect(own.lowerBound < transcript.lowerBound)
+        #expect(NoteFile.summary(in: body).count == 2)
+    }
+
+    @Test("clearing your notes removes the section rather than leaving a heading")
+    func clearsTheSection() {
+        let file = """
+            # Weekly sync
+
+            ## My notes
+
+            something
+
+            ## Transcript
+
+            **You** · `0:00`
+
+            Right.
+            """
+        let edited = NoteFile.replacingOwnNotes(in: file, with: "")
+        #expect(!edited.contains("## My notes"))
+        #expect(edited.contains("Right."))
+    }
+
+    @Test("a note written for an older file marks where its transcript starts")
+    func olderFileGainsAHeading() {
+        // Written before the app knew how to write a note: no headings, body is the turns.
+        let file = """
+            ---
+            title: Old meeting
+            ---
+
+            # Old meeting
+
+            **You** · `0:00`
+
+            We should ship on Friday.
+            """
+        let edited = NoteFile.replacingSummary(in: file, with: "### Decided\n- Ship Friday.")
+        let (_, body) = NoteFile.split(edited)
+        #expect(NoteFile.summary(in: body) == [.heading("Decided"), .bullet("Ship Friday.")])
+        // Not a word of what was there has changed.
+        #expect(NoteFile.turns(in: body).first?.text == "We should ship on Friday.")
+        #expect(edited.contains("title: Old meeting"))
+    }
+}
+
+/// The signal a pane watches to know a file it is showing has changed underneath it.
+@MainActor
+@Suite("Noticing a file changed")
+struct NoteRevisionTests {
+
+    @Test("ticking a task changes the file without changing the list")
+    func revisionMovesWhenNotesDoNot() throws {
+        let folder = Scratch.folder("revision")
+        let url = folder.appendingPathComponent("2026-09-16 15-21 Meeting.md")
+        try """
+            ---
+            title: Weekly sync
+            date: 2026-09-16T15:21:00+02:00
+            duration: 76
+            ---
+
+            # Weekly sync
+
+            ### Next steps
+            - [ ] send the runbook
+
+            ## Transcript
+
+            **You** · `0:00`
+
+            Right.
+            """.write(to: url, atomically: true, encoding: .utf8)
+
+        let store = NoteStore(folder: folder)
+        let note = try #require(store.notes.first)
+        let before = store.revision
+
+        store.toggleTask(0, in: note)
+
+        // The row is identical — same title, date, duration and snippet — which is exactly
+        // why the pane needs something else to watch.
+        #expect(store.notes == [note])
+        #expect(store.revision > before)
+        #expect(store.body(of: note).contains("- [x] send the runbook"))
+    }
 }

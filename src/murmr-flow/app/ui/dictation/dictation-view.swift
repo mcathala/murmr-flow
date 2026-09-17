@@ -2,18 +2,20 @@ import SwiftUI
 
 /// Dictation, and what it produced.
 ///
-/// The Cleaned/Raw toggle is the point of this screen. Until the raw transcript was kept,
-/// there was no way to tell whether the model had improved your words or mangled them —
-/// and no way to try a different prompt without saying it all again.
+/// The card shows the finished text, which is the text you dictated for. The raw
+/// transcript is still kept and is what Re-run clean-up works from — it was once shown
+/// beside the cleaned one, behind a switch, and the switch turned out to be answering a
+/// question nobody asks twice.
 struct DictationView: View {
 
     let dictation: DictationCoordinator
     let history: HistoryStore
     let prompts: PromptStore
+    /// Only for the "show me this one" request; the pane owns everything else it needs.
+    let services: AppServices
 
     private var settings: SettingsStore { dictation.settings }
 
-    @State private var showingRaw = false
     /// A set, so a batch can go at once. Same reasoning as Notes: one-at-a-time is fine
     /// for a mistake and useless for a clear-out.
     @State private var selection: Set<UUID> = []
@@ -37,14 +39,15 @@ struct DictationView: View {
                 HStack(spacing: 8) {
                     SectionLabel(title: "History")
                     Spacer(minLength: 0)
-                    if selection.count < history.dictations.count {
-                        Button("Select all") { selection = Set(history.dictations.map(\.id)) }
-                            .controlSize(.small)
+                    // One control, two states. It was Select all beside Clear, and Clear
+                    // emptied the *selection* — sitting in a list header next to Select
+                    // all, it read as "clear the history", which is the one reading that
+                    // would have cost somebody their dictations.
+                    let all = selection.count == history.dictations.count
+                    Button(all ? "Deselect all" : "Select all") {
+                        selection = all ? [] : Set(history.dictations.map(\.id))
                     }
-                    if !selection.isEmpty {
-                        Button("Clear") { selection = [] }
-                            .controlSize(.small)
-                    }
+                    .controlSize(.small)
                 }
                 list
             }
@@ -59,6 +62,9 @@ struct DictationView: View {
                 .frame(minHeight: 220)
             }
         }
+        .onAppear { showRequested() }
+        // A row on Home asking for one dictation by name.
+        .onChange(of: services.dictationToOpen) { showRequested() }
         .confirmationDialog(
             "Delete \(selection.count) dictation\(selection.count == 1 ? "" : "s")?",
             isPresented: $confirmingDelete,
@@ -72,6 +78,15 @@ struct DictationView: View {
         } message: {
             Text("This cannot be undone.")
         }
+    }
+
+    /// Opens whichever dictation something else asked for. Taken and put back to nil,
+    /// because the request is answered the moment this pane is looking at it.
+    private func showRequested() {
+        guard let id = services.dictationToOpen else { return }
+        services.dictationToOpen = nil
+        guard history.dictations.contains(where: { $0.id == id }) else { return }
+        selection = [id]
     }
 
     private var current: DictationRecord? {
@@ -197,39 +212,65 @@ struct DictationView: View {
     private func transcript(_ record: DictationRecord) -> some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(Self.stamp(record.date))
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if let app = record.targetAppName {
+                    if let icon = AppIconCache.icon(forBundleID: record.targetBundleID) {
+                        // The icon, not the name: it is recognised rather than read, and
+                        // the app is the one thing on this row you know at a glance.
+                        Image(nsImage: icon)
+                            .resizable()
+                            .frame(width: 15, height: 15)
+                            // The row aligns on the text baseline, and an image has none
+                            // — so it was hung by its bottom edge and sat high against
+                            // the words. This puts its middle where the letters' middle
+                            // is, which is where the eye expects it.
+                            .alignmentGuide(.firstTextBaseline) {
+                                $0[VerticalAlignment.center] + 3
+                            }
+                            .help(record.targetAppName ?? "")
+                    } else if let app = record.targetAppName {
                         Text("· \(app)").font(.caption).foregroundStyle(.tertiary)
                     }
-                    Spacer(minLength: 0)
-                    Picker("", selection: $showingRaw) {
-                        Text("Cleaned").tag(false)
-                        Text("Raw").tag(true)
+
+                    // On the line that already says when and where, because that is what
+                    // this is: a fact about the dictation, not a remark about the text
+                    // below it. Under the words it read as a comment on them.
+                    if let why = record.notCleaned?.failure {
+                        Text(why)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if record.usedRawFallback, record.notCleaned == nil {
+                        // Written before the app kept the reason. Neither a fault nor a
+                        // choice, so it is stated without alarm.
+                        Text("Not cleaned up.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
+
+                    Spacer(minLength: 0)
                 }
 
-                Text(showingRaw ? record.rawText : record.finalText)
+                // Always the finished text. There was a Cleaned / Raw switch here, and it
+                // was answering a question nobody asks twice: the cleaned text is the one
+                // you dictated *for*, and when clean-up did not run the finished text and
+                // the raw one are the same words anyway. The raw transcript is still kept
+                // — it is what Re-run clean-up works from.
+                Text(record.finalText)
                     .font(.body)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if record.usedRawFallback {
-                    Text("Clean-up didn't run for this one, so both views are the same.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-
                 // What the pill said in passing, kept here where there is room to read
-                // it: the latest run's note, only while this is the latest record.
+                // it: the latest run's note, only while this is the latest record — and
+                // not when it is the same sentence the header just gave, which is what
+                // happened every time a provider failed.
                 if record.id == history.dictations.first?.id,
-                   let note = dictation.lastRun?.note {
+                   let note = dictation.lastRun?.note,
+                   note != record.notCleaned?.failure {
                     Text(note)
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -246,13 +287,12 @@ struct DictationView: View {
 
                 HStack(spacing: 8) {
                     Button("Copy") {
-                        TextInjector.copyToClipboard(
-                            showingRaw ? record.rawText : record.finalText
-                        )
+                        TextInjector.copyToClipboard(record.finalText)
                     }
-                    Button("Insert again") {
-                        try? TextInjector.inject(showingRaw ? record.rawText : record.finalText)
-                    }
+                    // "Insert again" was here. The text already went where it was meant
+                    // to; pressing this later put it wherever the cursor happened to be
+                    // by then, which is rarely what anyone wanted and occasionally
+                    // landed a paragraph in the wrong document.
                     Button(isRerunning ? "Re-running…" : "Re-run clean-up") {
                         isRerunning = true
                         rerunNote = nil
@@ -265,11 +305,16 @@ struct DictationView: View {
                     .help(dictation.rerunBlocker
                           ?? "Clean this transcript up again with the current style")
                     Spacer(minLength: 0)
-                    Button {
-                        selection = [record.id]
-                        confirmingDelete = true
-                    } label: {
-                        Image(systemName: "trash")
+                    // One word for deleting, everywhere. A trash icon here and the word
+                    // Delete on the card for several was two shapes for one action — and
+                    // an icon floating at the right edge stacked into a column with
+                    // Select all below it, which reads as one group and is three scopes.
+                    //
+                    // And no dialog. One dictation is a line of text that is still in the
+                    // log a keystroke ago; asking costs more than losing it does.
+                    Button("Delete", role: .destructive) {
+                        history.delete(ids: [record.id])
+                        selection = []
                     }
                     .help("Delete this dictation")
                 }
@@ -301,9 +346,23 @@ struct DictationView: View {
                                 Text(record.summary(limit: 90))
                                     .font(.callout)
                                     .lineLimit(1)
-                                Text(subtitle(record))
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
+                                // The app's mark sits in the line, beside its name rather
+                                // than instead of it: down a list of twenty this is the
+                                // column the eye runs along, and a name is read where a
+                                // mark is recognised.
+                                HStack(spacing: 4) {
+                                    Text(subtitle(record, upToApp: true))
+                                    if let icon = AppIconCache.icon(
+                                        forBundleID: record.targetBundleID
+                                    ) {
+                                        Image(nsImage: icon)
+                                            .resizable()
+                                            .frame(width: 11, height: 11)
+                                    }
+                                    Text(subtitle(record, upToApp: false))
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                             }
                             Spacer(minLength: 0)
                         }
@@ -339,15 +398,20 @@ struct DictationView: View {
         }
     }
 
-    private func subtitle(_ record: DictationRecord) -> String {
-        [
-            Self.stamp(record.date),
-            String(format: "%.0fs", record.audioDuration),
-            record.targetAppName,
-            record.promptName,
-        ]
-        .compactMap { $0 }
-        .joined(separator: " · ")
+    /// The row's second line, in two halves so the app's mark can sit between them.
+    ///
+    /// `upToApp` is everything before the mark — when, and how long — and the rest is the
+    /// app's name and the style it was cleaned with.
+    private func subtitle(_ record: DictationRecord, upToApp: Bool) -> String {
+        let parts = upToApp
+            ? [Self.stamp(record.date), String(format: "%.0fs", record.audioDuration)]
+            : [record.targetAppName, record.promptName]
+        let text = parts.compactMap { $0 }.joined(separator: " · ")
+        // The separator belongs to whichever half is not last, so a row with no app and
+        // no style does not trail one.
+        guard upToApp, !text.isEmpty else { return text }
+        let rest = [record.targetAppName, record.promptName].compactMap { $0 }
+        return rest.isEmpty ? text : text + " ·"
     }
 
     private static func stamp(_ date: Date) -> String {

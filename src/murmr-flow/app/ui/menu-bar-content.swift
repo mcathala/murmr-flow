@@ -26,7 +26,12 @@ struct MenuBarContent: View {
             status: status,
             actions: actions,
             notes: Array(services.notes.notes.prefix(3)),
-            openNote: { services.notes.open($0) },
+            // In the app, on the note itself. It opened in whatever editor the Mac keeps
+            // for Markdown, which is a strange answer from an app that shows notes.
+            openNote: { note in
+                services.open(note: note)
+                openWindow(id: MurmrFlowApp.mainWindowID)
+            },
             openWindow: { openWindow(id: MurmrFlowApp.mainWindowID) },
             openSettings: {
                 services.openSettings()

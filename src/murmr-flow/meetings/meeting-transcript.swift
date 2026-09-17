@@ -30,7 +30,34 @@ struct MeetingTranscript: Sendable {
     /// in the note's front matter so the file says which it is.
     var cleanedBy: String?
 
+    /// The written note that goes above the transcript, in Markdown, or nil when none was
+    /// written. The transcript is the record; this is what anyone actually reads.
+    var note: String?
+    /// The style that wrote it, for the front matter — so a reader six months later can
+    /// tell whose summary of the meeting they are looking at.
+    var notedBy: String?
+
+    /// What the person typed while the meeting ran, in their own words and untouched.
+    /// The written note is built from these; they are kept anyway, because they are the
+    /// one part of the file that cannot be reconstructed from anything else.
+    var ownNotes: String?
+
     var isEmpty: Bool { utterances.isEmpty }
+
+    /// The same conversation with a note written above it.
+    func adding(note: String, writtenBy style: String) -> MeetingTranscript {
+        var copy = self
+        copy.note = note
+        copy.notedBy = style
+        return copy
+    }
+
+    /// The same conversation with what the person typed during it.
+    func adding(ownNotes: String) -> MeetingTranscript {
+        var copy = self
+        copy.ownNotes = ownNotes
+        return copy
+    }
 
     /// The same conversation with tidied wording, one text per utterance in order.
     ///
@@ -52,7 +79,10 @@ struct MeetingTranscript: Sendable {
             startedAt: startedAt,
             duration: duration,
             utterances: rewritten,
-            cleanedBy: prompt
+            cleanedBy: prompt,
+            note: note,
+            notedBy: notedBy,
+            ownNotes: ownNotes
         )
     }
 
@@ -128,12 +158,34 @@ struct MeetingTranscript: Sendable {
         // rather than keeping a second copy of the truth in a database.
         lines.append(
             NoteFile.frontMatter(
-                title: title, date: startedAt, duration: duration, cleanup: cleanedBy
+                title: title, date: startedAt, duration: duration, cleanup: cleanedBy,
+                note: notedBy
             )
         )
         lines.append("")
         lines.append("# \(title)")
         lines.append("")
+
+        // The note first, because it is what the file is opened for. The transcript keeps
+        // its own heading below rather than running on from the note: they are two
+        // different claims — what was worth keeping, and what was actually said — and a
+        // reader has to be able to tell which one they are reading.
+        if let note, !note.isEmpty {
+            lines.append(note)
+            lines.append("")
+        }
+        // Your own words, kept whole and kept apart. The note above was written *from*
+        // these, so a model that paraphrased one of them has not lost it.
+        if let ownNotes, !ownNotes.isEmpty {
+            lines.append(NoteFile.ownNotesHeading)
+            lines.append("")
+            lines.append(ownNotes)
+            lines.append("")
+        }
+        if note?.isEmpty == false || ownNotes?.isEmpty == false {
+            lines.append(NoteFile.transcriptHeading)
+            lines.append("")
+        }
 
         if utterances.isEmpty {
             lines.append("_Nothing was transcribed. Check that the meeting audio was "

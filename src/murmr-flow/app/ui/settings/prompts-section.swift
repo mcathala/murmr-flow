@@ -60,6 +60,14 @@ struct PromptsSection: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            if prompts.summaryPrompt == nil {
+                Text("No style is set for Summary, so a meeting is saved as the "
+                     + "transcript alone, with nothing written above it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -89,6 +97,21 @@ struct PromptsSection: View {
                         title: "Notetaker", symbol: "text.document",
                         isOn: prompts.notetakerPromptID == preset.id
                     ) { prompts.notetakerPromptID = preset.id }
+                    // The one pill that switches *off* as well as on. Dictation and
+                    // Notetaker always run through some style; a meeting with no note
+                    // written above it is an ordinary thing to want.
+                    AssignmentToggle(
+                        title: "Summary", symbol: "list.bullet.rectangle",
+                        isOn: prompts.summaryPromptID == preset.id,
+                        togglesOff: true,
+                        help: (
+                            on: "Stop writing a note above the transcript",
+                            off: "Write the note above the transcript with this style"
+                        )
+                    ) {
+                        prompts.summaryPromptID =
+                            prompts.summaryPromptID == preset.id ? nil : preset.id
+                    }
 
                     keySlot(preset)
 
@@ -233,14 +256,16 @@ struct PromptsSection: View {
         }
     }
 
-    /// Which mode, if any, is using this prompt right now.
+    /// Which jobs are using this prompt right now, named the way the sentence that says
+    /// "pick another one first" needs them.
     private func usedBy(_ preset: PromptPreset) -> String? {
-        switch (prompts.dictationPromptID == preset.id, prompts.notetakerPromptID == preset.id) {
-        case (true, true): "Dictation and Notetaker"
-        case (true, false): "Dictation"
-        case (false, true): "Notetaker"
-        case (false, false): nil
-        }
+        var jobs: [String] = []
+        if prompts.dictationPromptID == preset.id { jobs.append("Dictation") }
+        if prompts.notetakerPromptID == preset.id { jobs.append("Notetaker") }
+        if prompts.summaryPromptID == preset.id { jobs.append("Summary") }
+        guard !jobs.isEmpty else { return nil }
+        if jobs.count == 1 { return jobs[0] }
+        return jobs.dropLast().joined(separator: ", ") + " and " + jobs[jobs.count - 1]
     }
 
     private func deleteHelp(_ preset: PromptPreset) -> String {

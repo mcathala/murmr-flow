@@ -385,3 +385,63 @@ struct DictationCoordinatorTests {
         #expect(rig.cleaner.templates.last == rig.prompts.dictationPrompt.template)
     }
 }
+
+/// Why a dictation was not cleaned, which is the difference between a setting working and
+/// something being broken.
+@MainActor
+@Suite("Why clean-up didn't run")
+struct NotCleanedTests {
+
+    typealias Rig = DictationCoordinatorTests.Rig
+
+    @Test("an app set to Off is a choice, not a fault")
+    func offIsAChoice() async {
+        let rig = Rig()
+        rig.frontmost.set("Terminal", "com.apple.Terminal")
+        rig.prompts.setRule(
+            AppStyleRule(bundleID: "com.apple.Terminal", appName: "Terminal", outcome: .off)
+        )
+        await rig.dictate("ls minus l")
+
+        #expect(rig.history.dictations.first?.notCleaned == .byChoice)
+        #expect(rig.history.dictations.first?.notCleaned?.failure == nil)
+    }
+
+    @Test("clean-up switched off is a choice too")
+    func switchedOffIsAChoice() async {
+        let rig = Rig()
+        rig.settings.cleanupEnabled = false
+        await rig.dictate("as spoken")
+
+        #expect(rig.history.dictations.first?.notCleaned == .byChoice)
+    }
+
+    @Test("a provider that failed says what went wrong")
+    func failureCarriesTheReason() async {
+        let rig = Rig()
+        rig.cleaner.outcome = { CleanupService.Outcome.raw($0, note: "The key was rejected.") }
+        await rig.dictate("hello there")
+
+        #expect(rig.history.dictations.first?.notCleaned?.failure == "The key was rejected.")
+    }
+
+    @Test("a dictation that was cleaned says nothing either way")
+    func cleanedSaysNothing() async {
+        let rig = Rig()
+        await rig.dictate("hello there")
+
+        #expect(rig.history.dictations.first?.notCleaned == nil)
+        #expect(rig.history.dictations.first?.usedRawFallback == false)
+    }
+
+    @Test("a record written before the reason existed still reads")
+    func decodesOlderRecords() throws {
+        let older = """
+            {"id":"\(UUID().uuidString)","date":770000000,"audioDuration":1.5,
+             "rawText":"as heard","finalText":"as heard","usedRawFallback":true}
+            """
+        let record = try JSONDecoder().decode(DictationRecord.self, from: Data(older.utf8))
+        #expect(record.usedRawFallback)
+        #expect(record.notCleaned == nil)
+    }
+}

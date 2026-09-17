@@ -83,6 +83,35 @@ final class FakeCleaner: Cleaning, @unchecked Sendable {
         providerIDs.append(config?.providerID ?? "none")
         return turnsOutcome(turns)
     }
+
+    /// The note above the transcript. Answers with one line per topic by default, so a
+    /// test can see it landed in the file without asserting on wording.
+    var noteOutcome: @Sendable ([CleanupService.Turn]) -> CleanupService.NoteOutcome = { turns in
+        CleanupService.NoteOutcome(
+            text: "### What was said\n- \(turns.count) turns, summarised.",
+            note: nil,
+            latency: 0.4
+        )
+    }
+    private(set) var noteTurns: [[CleanupService.Turn]] = []
+    private(set) var noteTemplates: [String] = []
+    private(set) var noteContexts: [PromptLibrary.Context] = []
+
+    func writeNote(
+        from turns: [CleanupService.Turn], config: ProviderConfig?, prompt: PromptLibrary,
+        context: PromptLibrary.Context, dictionary: [DictionaryEntry], timeout: TimeInterval
+    ) async -> CleanupService.NoteOutcome {
+        providerIDs.append(config?.providerID ?? "none")
+        noteTurns.append(turns)
+        noteTemplates.append(prompt.template)
+        noteContexts.append(context)
+        guard config != nil else {
+            return CleanupService.NoteOutcome(
+                text: nil, note: "No cleanup provider configured.", latency: 0
+            )
+        }
+        return noteOutcome(turns)
+    }
 }
 
 /// Remembers whether it was asked to pause, and what it was told when asked to resume.

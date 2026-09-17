@@ -58,6 +58,9 @@ struct PromptLibrary {
         /// has to leave alone for the values to be spliced back in.
         var hasMarkers = false
         var frontmostApp: String?
+        /// What the person typed while the meeting was running, in their own words.
+        /// Whatever they bothered to write down is the shape of the note they want.
+        var ownNotes: String?
         var language: String?
         /// Language to write the result in, or nil to keep the one that was spoken.
         var outputLanguage: String?
@@ -86,6 +89,19 @@ struct PromptLibrary {
         // setting, and every style has to obey it. It must out-rank the template — the
         // default prompt itself says "do not translate", which is right until the user
         // asks for exactly that — so it says so.
+        // Appended rather than left to the template, the same as the vocabulary: someone
+        // who typed six words during a call has told us more about what matters to them
+        // than the whole transcript has, and a prompt they wrote themselves cannot be
+        // expected to have made room for that.
+        if let ownNotes = context.ownNotes?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !ownNotes.isEmpty {
+            output += "\n\nThe person in the meeting typed these notes while it was "
+                + "running. They are what matters to them, so cover every one of them and "
+                + "follow the order and the headings they used where they used any. Fill "
+                + "them out from the transcript; keep their wording where it says something "
+                + "the transcript does not. Never contradict them, and never drop one.\n\n"
+                + "Their notes:\n\(ownNotes)"
+        }
         if let outputLanguage = context.outputLanguage {
             output += "\n\nWrite the result in \(outputLanguage). Whatever language was "
                 + "spoken, translate the words into \(outputLanguage), keeping the meaning, "
