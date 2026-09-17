@@ -194,4 +194,83 @@ struct TranscriptSnapshotTests {
             to: URL(fileURLWithPath: directory).appendingPathComponent("transcript.png")
         )
     }
+
+    // MARK: - The written note
+
+    private static let withSummary = """
+        ---
+        title: Weekly sync
+        date: 2026-09-16T15:42:00+02:00
+        duration: 842
+        note: Summary
+        ---
+
+        # Weekly sync
+
+        ### Where we are
+        - The model runs on the machine, about 600 MB.
+        - Only text reaches a provider.
+
+        ### Next steps
+        - [ ] Record a real meeting (You)
+        - [x] Check the token ceiling (Them)
+
+        ## Transcript
+
+        **You** · `0:00`
+
+        Right, can you hear me?
+
+        **Them** · `0:11`
+
+        Yeah, go for it.
+        """
+
+    @Test("the note reads as headings, bullets and tasks")
+    func parsesTheSummary() {
+        let (_, body) = NoteFile.split(Self.withSummary)
+        let lines = NoteFile.summary(in: body)
+
+        #expect(lines == [
+            .heading("Where we are"),
+            .bullet("The model runs on the machine, about 600 MB."),
+            .bullet("Only text reaches a provider."),
+            .heading("Next steps"),
+            .task(done: false, "Record a real meeting (You)"),
+            .task(done: true, "Check the token ceiling (Them)"),
+        ])
+    }
+
+    @Test("the note stops at the transcript, and the turns still parse under it")
+    func summaryAndTurnsAreSeparate() {
+        let (_, body) = NoteFile.split(Self.withSummary)
+        let turns = NoteFile.turns(in: body)
+
+        #expect(turns.count == 2)
+        #expect(turns.first?.text == "Right, can you hear me?")
+        // Nothing from the note leaked into the conversation.
+        #expect(!turns.contains { $0.text.contains("600 MB") })
+    }
+
+    @Test("a file with no transcript heading has no note, whatever it starts with")
+    func noHeadingNoSummary() {
+        let handWritten = """
+            # Some thoughts
+
+            - a bullet somebody typed
+            - and another
+            """
+        // Reading these as a note would claim the file said something it never said.
+        #expect(NoteFile.summary(in: handWritten).isEmpty)
+    }
+
+    @Test("the row's snippet is what the note says, not the first hello")
+    func snippetPrefersTheNote() throws {
+        let folder = Scratch.folder("summary-snippet")
+        let url = folder.appendingPathComponent("2026-09-16 15-42 Meeting.md")
+        try Self.withSummary.write(to: url, atomically: true, encoding: .utf8)
+
+        let note = try #require(NoteFile.read(url))
+        #expect(note.snippet == "The model runs on the machine, about 600 MB.")
+    }
 }
