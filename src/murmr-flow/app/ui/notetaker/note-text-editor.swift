@@ -103,7 +103,25 @@ struct NoteTextEditor: NSViewRepresentable {
         func toggleEmphasis(_ style: MarkdownEdit.EmphasisStyle) {
             view?.toggleEmphasis(style)
         }
-        func setBlock(_ block: MarkdownEdit.Block) { view?.setBlock(block) }
+
+        /// One door for every kind of line, so the caller never has to know that a heading
+        /// is an attribute and a bullet is two characters.
+        func setBlock(_ block: MarkdownEdit.Block) {
+            guard let view else { return }
+            if case .heading(let level) = block {
+                // Pressing the level a line already is takes it off, the same as the rest.
+                view.setHeading(view.headingLevel() == level ? nil : level)
+                return
+            }
+            view.setHeading(nil)
+            view.setBlock(block)
+        }
+
+        /// What the caret's line already is.
+        func block(in text: String, at selection: NSRange) -> MarkdownEdit.Block {
+            if let level = view?.headingLevel() { return .heading(level) }
+            return MarkdownEdit.block(of: text as NSString, at: selection)
+        }
         func isOn(_ style: MarkdownEdit.EmphasisStyle) -> Bool {
             view?.hasEmphasis(style) ?? false
         }
@@ -270,17 +288,6 @@ final class NoteTextView: NSTextView {
         text.enumerateSubstrings(in: whole, options: [.byLines]) { substring, range, _, _ in
             guard let line = substring else { return }
 
-            if line.hasPrefix("#") {
-                let hashes = line.prefix { $0 == "#" }.count
-                storage.addAttribute(.font, value: headingFont(hashes), range: range)
-                // The hashes stay — the file is Markdown — but they recede, so the line
-                // reads as a heading rather than as a heading with punctuation on it.
-                storage.addAttributes(
-                    [.foregroundColor: NSColor(Theme.Palette.faint), .font: mono],
-                    range: NSRange(location: range.location, length: min(hashes + 1, range.length))
-                )
-                return
-            }
 
             if line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") {
                 let done = line.hasPrefix("- [x] ")
@@ -313,7 +320,22 @@ final class NoteTextView: NSTextView {
                     [.foregroundColor: NSColor(Theme.Palette.faint), .font: mono],
                     range: NSRange(location: range.location, length: min(2, range.length))
                 )
+                return
             }
+
+            if let digits = MarkdownEdit.numberPrefix(of: line) {
+                storage.addAttributes(
+                    [.foregroundColor: NSColor(Theme.Palette.faint), .font: mono],
+                    range: NSRange(location: range.location, length: min(digits, range.length))
+                )
+            }
+        }
+
+        // Headings, from the line's own level rather than from any character in it. The
+        // `#`s are not here to be counted — that is the point of them not being here.
+        storage.enumerateAttribute(Self.headingKey, in: whole, options: []) { value, range, _ in
+            guard let level = value as? Int, range.length > 0 else { return }
+            storage.addAttribute(.font, value: headingFont(level), range: range)
         }
 
         // Emphasis last, over whatever font the line already earned, so bold inside a
@@ -358,16 +380,36 @@ final class NoteTextView: NSTextView {
     /// would wipe. This survives that, and the look is computed from it.
     static let emphasisKey = NSAttributedString.Key("app.murmr.emphasis")
 
+    /// A heading's level, on every character of the line.
+    ///
+    /// The `#`s are not on the page — you asked for them gone — so the line has to carry
+    /// its level some other way, and that way is the same one the weight uses. Per
+    /// character rather than per paragraph because `NSTextStorage` has no paragraphs: a
+    /// line is the characters between two newlines and nothing more.
+    static let headingKey = NSAttributedString.Key("app.murmr.heading")
+
     /// Replaces everything with the file's text, markers taken out and turned into weight.
     func setMarkdown(_ markdown: String) {
-        let (text, runs) = MarkdownEdit.stripEmphasis(markdown)
+        // Headings first: their markers are whole-line, and taking them out moves every
+        // offset the emphasis pass is about to work in.
+        let (withoutHeadings, headings) = MarkdownEdit.stripHeadings(markdown)
+        let (text, runs) = MarkdownEdit.stripEmphasis(withoutHeadings)
         string = text
         guard let storage = textStorage else { return }
+        let length = (text as NSString).length
+
         storage.beginEditing()
-        for run in runs where run.range.location + run.range.length <= (text as NSString).length {
+        for run in runs where run.range.location + run.range.length <= length {
             storage.addAttribute(
                 Self.emphasisKey, value: run.style.rawValue, range: run.range
             )
+        }
+        for heading in headings where heading.range.location <= length {
+            // The whole line, so the level survives typing at either end of it.
+            let line = (text as NSString).lineRange(
+                for: NSRange(location: min(heading.range.location, max(length - 1, 0)), length: 0)
+            )
+            storage.addAttribute(Self.headingKey, value: heading.level, range: line)
         }
         storage.endEditing()
         applyStyling()
@@ -375,7 +417,56 @@ final class NoteTextView: NSTextView {
 
     /// What the file should hold: the words, with the markers put back.
     var currentMarkdown: String {
-        MarkdownEdit.markdown(text: string, runs: emphasisRuns())
+        MarkdownEdit.markdown(
+            text: string, emphasis: emphasisRuns(), headings: headingRuns()
+        )
+    }
+
+    /// Which lines are headings, as the file needs them: one entry per line, anchored to
+    /// where that line starts.
+    private func headingRuns() -> [MarkdownEdit.HeadingRun] {
+        guard let storage = textStorage, storage.length > 0 else { return [] }
+        let text = string as NSString
+        var runs: [MarkdownEdit.HeadingRun] = []
+        storage.enumerateAttribute(
+            Self.headingKey, in: NSRange(location: 0, length: storage.length), options: []
+        ) { value, range, _ in
+            guard let level = value as? Int, range.length > 0 else { return }
+            // An attribute can span several lines once someone has pressed Return inside
+            // one; each line is its own heading in the file.
+            var index = range.location
+            while index < range.location + range.length {
+                let line = text.lineRange(for: NSRange(location: index, length: 0))
+                runs.append(MarkdownEdit.HeadingRun(range: line, level: level))
+                index = line.location + max(line.length, 1)
+            }
+        }
+        return runs
+    }
+
+    /// The heading level of the line the caret is on, or nil when it is not one.
+    func headingLevel() -> Int? {
+        guard let storage = textStorage, storage.length > 0 else { return nil }
+        let index = min(max(selectedRange().location, 0), storage.length - 1)
+        return storage.attribute(Self.headingKey, at: index, effectiveRange: nil) as? Int
+    }
+
+    /// Makes the caret's lines a heading, or plain text when they already are that level.
+    func setHeading(_ level: Int?) {
+        guard let storage = textStorage, storage.length > 0 else { return }
+        let text = string as NSString
+        let lines = MarkdownEdit.lineRange(in: text, covering: selectedRange())
+        guard lines.length > 0 else { return }
+
+        guard shouldChangeText(in: lines, replacementString: nil) else { return }
+        storage.beginEditing()
+        storage.removeAttribute(Self.headingKey, range: lines)
+        if let level {
+            storage.addAttribute(Self.headingKey, value: level, range: lines)
+        }
+        storage.endEditing()
+        applyStyling()
+        didChangeText()
     }
 
     private func emphasisRuns() -> [MarkdownEdit.EmphasisRun] {

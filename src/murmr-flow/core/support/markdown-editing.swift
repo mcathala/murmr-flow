@@ -15,25 +15,41 @@ enum MarkdownEdit {
         case body
         case heading(Int)
         case bullet
+        case numbered
         case task
 
-        static var allCases: [Block] { [.body, .heading(1), .heading(2), .heading(3), .bullet, .task] }
+        static var allCases: [Block] {
+            [.body, .heading(1), .heading(2), .heading(3), .bullet, .numbered, .task]
+        }
 
         var id: String {
             switch self {
             case .body: "body"
             case .heading(let level): "h\(level)"
             case .bullet: "bullet"
+            case .numbered: "numbered"
             case .task: "task"
             }
         }
 
-        /// The Markdown a line of this kind opens with.
+        /// A heading is the one kind the page does not spell out.
+        ///
+        /// Its `#`s are a property of the line, like the weight on a word, and they are
+        /// taken out on the way in and put back on the way out. A `-` and a `1.` stay:
+        /// they sit in the margin where they read as the shape of the list rather than as
+        /// punctuation, and a list you cannot un-make by deleting its marker is a list
+        /// that needs the toolbar for everything.
+        var isHeading: Bool {
+            if case .heading = self { return true }
+            return false
+        }
+
+        /// What a line of this kind opens with *on the page*. Empty for a heading.
         var prefix: String {
             switch self {
-            case .body: ""
-            case .heading(let level): String(repeating: "#", count: level) + " "
+            case .body, .heading: ""
             case .bullet: "- "
+            case .numbered: "1. "
             case .task: "- [ ] "
             }
         }
@@ -43,9 +59,17 @@ enum MarkdownEdit {
             case .body: "Normal text"
             case .heading(let level): "Heading \(level)"
             case .bullet: "Bullet"
+            case .numbered: "Numbered"
             case .task: "Task"
             }
         }
+    }
+
+    /// A line that is a heading, and how big.
+    struct HeadingRun: Equatable, Sendable {
+        /// The line's range in the page's text, markers already gone.
+        let range: NSRange
+        let level: Int
     }
 
     /// The whole of every line the selection touches, so a change applies to lines rather
@@ -69,6 +93,7 @@ enum MarkdownEdit {
     static func block(ofLine line: String) -> Block {
         if line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") { return .task }
         if line.hasPrefix("- ") { return .bullet }
+        if numberPrefix(of: line) != nil { return .numbered }
         let hashes = line.prefix { $0 == "#" }.count
         if hashes > 0, line.dropFirst(hashes).hasPrefix(" ") {
             return .heading(min(hashes, 3))
@@ -76,15 +101,72 @@ enum MarkdownEdit {
         return .body
     }
 
+    /// The length of a `12. ` at the start of a line, or nil when there isn't one.
+    static func numberPrefix(of line: String) -> Int? {
+        let digits = line.prefix { $0.isNumber }.count
+        guard digits > 0, line.dropFirst(digits).hasPrefix(". ") else { return nil }
+        return digits + 2
+    }
+
     /// Strips whatever a line opens with, so a new prefix replaces rather than stacks.
     static func stripPrefix(_ line: String) -> String {
         if line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") { return String(line.dropFirst(6)) }
         if line.hasPrefix("- ") { return String(line.dropFirst(2)) }
+        if let digits = numberPrefix(of: line) { return String(line.dropFirst(digits)) }
         let hashes = line.prefix { $0 == "#" }.count
         if hashes > 0, line.dropFirst(hashes).hasPrefix(" ") {
             return String(line.dropFirst(hashes + 1))
         }
         return line
+    }
+
+    // MARK: - Headings, which the page keeps as a property of the line
+
+    /// Takes the `#`s off every line and says which lines they were on.
+    static func stripHeadings(_ markdown: String) -> (text: String, headings: [HeadingRun]) {
+        let source = markdown as NSString
+        var out = ""
+        var headings: [HeadingRun] = []
+        var first = true
+
+        source.enumerateSubstrings(
+            in: NSRange(location: 0, length: source.length), options: [.byLines]
+        ) { substring, _, _, _ in
+            let line = substring ?? ""
+            if !first { out += "\n" }
+            first = false
+
+            let hashes = line.prefix { $0 == "#" }.count
+            guard hashes > 0, line.dropFirst(hashes).hasPrefix(" ") else {
+                out += line
+                return
+            }
+            let words = String(line.dropFirst(hashes + 1))
+            let start = (out as NSString).length
+            out += words
+            headings.append(
+                HeadingRun(
+                    range: NSRange(location: start, length: (words as NSString).length),
+                    level: min(hashes, 3)
+                )
+            )
+        }
+        // `enumerateSubstrings` drops a trailing newline; the file's own shape is kept.
+        if markdown.hasSuffix("\n") { out += "\n" }
+        return (out, headings)
+    }
+
+    /// Puts them back, from the end so an insertion never moves the line after it.
+    static func restoringHeadings(in text: String, _ headings: [HeadingRun]) -> String {
+        var out = text as NSString
+        for heading in headings.sorted(by: { $0.range.location > $1.range.location }) {
+            guard heading.range.location >= 0, heading.range.location <= out.length else { continue }
+            out = out.replacingCharacters(
+                in: NSRange(location: heading.range.location, length: 0),
+                with: String(repeating: "#", count: heading.level) + " "
+            ) as NSString
+        }
+        return out as String
     }
 
     // MARK: - Between the file and the page
@@ -251,6 +333,44 @@ enum MarkdownEdit {
         return out as String
     }
 
+    /// The file, from everything the page is holding: the words, the weight on them and
+    /// which lines are headings.
+    ///
+    /// Line by line rather than whole-text, because a heading's `#` is an insertion that
+    /// moves every offset after it — and doing the two passes in either order over the
+    /// whole string means one of them working from coordinates the other has just
+    /// invalidated. A line is small enough that neither pass can reach outside it.
+    static func markdown(
+        text: String, emphasis: [EmphasisRun], headings: [HeadingRun]
+    ) -> String {
+        let source = text as NSString
+        var lines: [NSRange] = []
+        source.enumerateSubstrings(
+            in: NSRange(location: 0, length: source.length), options: [.byLines]
+        ) { _, range, _, _ in lines.append(range) }
+        if lines.isEmpty { lines = [NSRange(location: 0, length: 0)] }
+
+        var out: [String] = []
+        for line in lines {
+            let within = emphasis.compactMap { run -> EmphasisRun? in
+                let overlap = NSIntersectionRange(run.range, line)
+                guard overlap.length > 0 else { return nil }
+                return EmphasisRun(
+                    range: NSRange(location: overlap.location - line.location, length: overlap.length),
+                    style: run.style
+                )
+            }
+            var written = markdown(text: source.substring(with: line), runs: within)
+            if let level = headings.first(where: { $0.range.location == line.location })?.level {
+                written = String(repeating: "#", count: level) + " " + written
+            }
+            out.append(written)
+        }
+        var joined = out.joined(separator: "\n")
+        if text.hasSuffix("\n") { joined += "\n" }
+        return joined
+    }
+
     /// Cuts a run down to something the file can actually say.
     ///
     /// A page lets you select anything and press Bold; Markdown does not let you write
@@ -324,9 +444,20 @@ enum MarkdownEdit {
 
         var edits: [(range: NSRange, replacement: String)] = []
         var delta = 0
+        var number = 0
         for (start, kind) in zip(starts, kinds) {
-            let existing = (kind.prefix as NSString).length
-            let replacement = target.prefix
+            let line = string.substring(with: string.lineRange(for: NSRange(location: start, length: 0)))
+            let existing = kind == .numbered
+                ? (numberPrefix(of: line) ?? 0)
+                : (kind.prefix as NSString).length
+            // A numbered list counts. Three lines made numbered are 1, 2 and 3 — writing
+            // "1." three times is what a plain prefix would do, and it is the one kind of
+            // list where the marker is not the same on every line.
+            var replacement = target.prefix
+            if target == .numbered {
+                number += 1
+                replacement = "\(number). "
+            }
             guard existing > 0 || !replacement.isEmpty else { continue }
             edits.append((NSRange(location: start, length: existing), replacement))
             delta += (replacement as NSString).length - existing

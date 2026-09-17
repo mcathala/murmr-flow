@@ -67,8 +67,12 @@ struct NoteEditorPane<Tabs: View>: View {
     }
 
     /// What the line the caret is on already is, which is what the menu shows as chosen.
+    ///
+    /// Asked of the page rather than worked out from the text, because a heading leaves no
+    /// mark in the text any more — it is a property of the line, like the weight on a word.
     private var block: MarkdownEdit.Block {
-        MarkdownEdit.block(of: display as NSString, at: selection)
+        _ = stamp
+        return commands.block(in: display, at: selection)
     }
 
     /// The controls for shaping a line, because the Markdown is visible but knowing to
@@ -119,6 +123,7 @@ struct NoteEditorPane<Tabs: View>: View {
             Divider().frame(height: 14)
 
             command("list.bullet", help: "Bullet", on: block == .bullet) { set(.bullet) }
+            command("list.number", help: "Numbered", on: block == .numbered) { set(.numbered) }
             command("checklist", help: "Task", on: block == .task) { set(.task) }
 
         }

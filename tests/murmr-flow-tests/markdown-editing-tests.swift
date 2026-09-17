@@ -129,12 +129,69 @@ struct MarkdownRoundTripTests {
     @Test("a block change is a prefix edit, so everything else keeps its place")
     func editsOnlyThePrefix() {
         let (edits, selection) = MarkdownEdit.blockEdits(
-            .heading(2), in: "one\ntwo", selection: NSRange(location: 5, length: 0)
+            .bullet, in: "one\ntwo", selection: NSRange(location: 5, length: 0)
         )
         #expect(edits.count == 1)
         #expect(edits[0].range == NSRange(location: 4, length: 0))
-        #expect(edits[0].replacement == "## ")
-        #expect(selection.location == 8)
+        #expect(edits[0].replacement == "- ")
+        #expect(selection.location == 7)
+    }
+
+    @Test("a heading changes no text at all — it is a property of the line")
+    func headingIsNotAPrefix() {
+        let (edits, _) = MarkdownEdit.blockEdits(
+            .heading(2), in: "one\ntwo", selection: NSRange(location: 5, length: 0)
+        )
+        #expect(edits.isEmpty)
+    }
+
+    @Test("a numbered list counts rather than repeating itself")
+    func numbersTheLines() {
+        let (edits, _) = MarkdownEdit.blockEdits(
+            .numbered, in: "one\ntwo\nthree", selection: NSRange(location: 0, length: 12)
+        )
+        // Applied last line first, so the numbers read 1, 2, 3 down the page.
+        #expect(edits.map(\.replacement) == ["3. ", "2. ", "1. "])
+    }
+
+    @Test("a numbered line is recognised however long the number is")
+    func readsAnyNumber() {
+        #expect(MarkdownEdit.block(ofLine: "1. first") == .numbered)
+        #expect(MarkdownEdit.block(ofLine: "12. twelfth") == .numbered)
+        #expect(MarkdownEdit.stripPrefix("12. twelfth") == "twelfth")
+        // A year is not a list.
+        #expect(MarkdownEdit.block(ofLine: "2026 was busy") == .body)
+    }
+
+    @Test("headings come off the page and go back on the file")
+    func headingsRoundTrip() {
+        for source in [
+            "# Title\n\nsome words",
+            "### Where we are\n- a bullet",
+            "no headings here",
+            "## One\n## Two",
+        ] {
+            let (text, headings) = MarkdownEdit.stripHeadings(source)
+            #expect(!text.contains("#"), "\(source)")
+            let (stripped, emphasis) = MarkdownEdit.stripEmphasis(text)
+            #expect(
+                MarkdownEdit.markdown(text: stripped, emphasis: emphasis, headings: headings)
+                    == source,
+                "\(source)"
+            )
+        }
+    }
+
+    @Test("a heading with weight in it survives both passes")
+    func headingWithEmphasis() {
+        let source = "### Where **we** are"
+        let (text, headings) = MarkdownEdit.stripHeadings(source)
+        #expect(text == "Where **we** are")
+        let (stripped, emphasis) = MarkdownEdit.stripEmphasis(text)
+        #expect(stripped == "Where we are")
+        #expect(
+            MarkdownEdit.markdown(text: stripped, emphasis: emphasis, headings: headings) == source
+        )
     }
 
     @Test("every line the selection touches is edited, last first")
