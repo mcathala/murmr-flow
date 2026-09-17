@@ -27,117 +27,15 @@ struct MarkdownEditingTests {
         #expect(MarkdownEdit.block(ofLine: "#hashtag") == .body)
     }
 
-    @Test("a heading replaces whatever the line was, rather than stacking on it")
-    func replacesThePrefix() {
-        let (text, _) = MarkdownEdit.setBlock(.heading(2), in: "- a point", selection: at(3))
-        #expect(text == "## a point")
-
-        let (again, _) = MarkdownEdit.setBlock(.heading(1), in: text, selection: at(3))
-        #expect(again == "# a point")
+    
+    
+    
+    
+    
+    
+    
+    
     }
-
-    @Test("pressing the kind a line already is takes it off")
-    func togglesOff() {
-        let (text, _) = MarkdownEdit.setBlock(.heading(2), in: "## a heading", selection: at(4))
-        #expect(text == "a heading")
-    }
-
-    @Test("every line the selection touches changes, whole lines at a time")
-    func appliesToEveryLine() {
-        let source = "first\nsecond\nthird"
-        // From inside "first" to inside "second".
-        let (text, _) = MarkdownEdit.setBlock(.bullet, in: source, selection: at(2, 8))
-        #expect(text == "- first\n- second\nthird")
-    }
-
-    @Test("the caret lands at the end of what changed")
-    func caretFollows() {
-        let (text, selection) = MarkdownEdit.setBlock(.task, in: "a task", selection: at(0))
-        #expect(text == "- [ ] a task")
-        #expect(selection == at((text as NSString).length))
-    }
-
-    @Test("bold wraps a selection, and unwraps it when pressed again")
-    func wrapsAndUnwraps() {
-        let (bold, selection) = MarkdownEdit.wrap("**", in: "one two", selection: at(4, 3))
-        #expect(bold == "one **two**")
-        #expect((bold as NSString).substring(with: selection) == "two")
-
-        // Pressing it again with the same word selected takes it off.
-        let (plain, _) = MarkdownEdit.wrap("**", in: bold, selection: selection)
-        #expect(plain == "one two")
-    }
-
-    @Test("bold with nothing selected leaves the pair with the caret between them")
-    func wrapsNothing() {
-        let (text, selection) = MarkdownEdit.wrap("**", in: "one ", selection: at(4))
-        #expect(text == "one ****")
-        #expect(selection == at(6))
-    }
-
-    @Test("wrapping a whole marked word is read as unwrapping it")
-    func unwrapsFromOutside() {
-        let source = "a **word** here"
-        // "word" selected, without the asterisks.
-        let (text, _) = MarkdownEdit.wrap("**", in: source, selection: at(4, 4))
-        #expect(text == "a word here")
-    }
-
-    @Test("an empty note takes a heading without falling over")
-    func emptyText() {
-        let (text, _) = MarkdownEdit.setBlock(.heading(1), in: "", selection: at(0))
-        #expect(text == "# ")
-    }
-
-    @Test("a task keeps its tick when it is made a bullet and back")
-    func stripsTheWholeTaskMarker() {
-        let (bullet, _) = MarkdownEdit.setBlock(.bullet, in: "- [x] done thing", selection: at(8))
-        #expect(bullet == "- done thing")
-    }
-}
-
-/// Whether a button on the bar should be lit, which is the same question as whether
-/// pressing it would take the formatting off.
-@Suite("Markdown state")
-struct MarkdownStateTests {
-
-    private func at(_ location: Int, _ length: Int = 0) -> NSRange {
-        NSRange(location: location, length: length)
-    }
-
-    @Test("a wrapped selection is wrapped, with or without the markers picked")
-    func readsWrapping() {
-        let text = "a **word** here"
-        #expect(MarkdownEdit.isWrapped("**", in: text, selection: at(4, 4)))
-        #expect(MarkdownEdit.isWrapped("**", in: text, selection: at(2, 8)))
-        #expect(!MarkdownEdit.isWrapped("**", in: text, selection: at(11, 4)))
-    }
-
-    @Test("bold wins over italic, so one word never lights both")
-    func boldBeatsItalic() {
-        let text = "a **word** here"
-        #expect(MarkdownEdit.isWrapped("**", in: text, selection: at(4, 4)))
-        #expect(!MarkdownEdit.isWrapped("*", in: text, selection: at(4, 4)))
-
-        let italic = "a *word* here"
-        #expect(MarkdownEdit.isWrapped("*", in: italic, selection: at(3, 4)))
-    }
-
-    @Test("a selection at the very start is not read as wrapped from outside it")
-    func noUnderflow() {
-        #expect(!MarkdownEdit.isWrapped("**", in: "word", selection: at(0, 4)))
-    }
-
-    @Test("the menu offers every kind a line can be")
-    func menuCoversWhatALineCanBe() {
-        // It named lines it did not then list, so opening it showed nothing chosen.
-        let named = MarkdownEdit.Block.allCases
-        #expect(named.contains(.bullet))
-        #expect(named.contains(.task))
-        #expect(named.contains(.body))
-        #expect(named.contains(.heading(1)))
-    }
-}
 
 /// Finding the emphasis in a line, which is what decides where the markers are hidden and
 /// where the weight goes.
@@ -197,5 +95,82 @@ struct MarkdownEmphasisTests {
     @Test("emphasis does not run across a line break")
     func staysOnItsLine() {
         #expect(spans("*one\ntwo*").isEmpty)
+    }
+}
+
+/// What the file holds and what the page holds, and getting between them.
+///
+/// The page never contains a marker, which is the whole point: there is then nothing to
+/// hide, nothing to step the caret over, and nothing to half delete.
+@Suite("Markdown round trip")
+struct MarkdownRoundTripTests {
+
+    @Test("the markers come out and the emphasis is recorded where the words are")
+    func strips() {
+        let (text, runs) = MarkdownEdit.stripEmphasis("a **word** here")
+        #expect(text == "a word here")
+        #expect(runs == [MarkdownEdit.EmphasisRun(range: NSRange(location: 2, length: 4), isBold: true)])
+        #expect((text as NSString).substring(with: runs[0].range) == "word")
+    }
+
+    @Test("several runs on one line keep their places as the text shortens")
+    func stripsSeveral() {
+        let (text, runs) = MarkdownEdit.stripEmphasis("**one** and *two* end")
+        #expect(text == "one and two end")
+        #expect(runs.count == 2)
+        #expect((text as NSString).substring(with: runs[0].range) == "one")
+        #expect((text as NSString).substring(with: runs[1].range) == "two")
+        #expect(runs[0].isBold)
+        #expect(!runs[1].isBold)
+    }
+
+    @Test("and go back in, so the file is unchanged by a round trip")
+    func roundTrips() {
+        for source in [
+            "a **word** here",
+            "**one** and *two* end",
+            "### A heading with **weight**\n- a bullet\n- [ ] a task",
+            "nothing special at all",
+            "",
+        ] {
+            let (text, runs) = MarkdownEdit.stripEmphasis(source)
+            #expect(MarkdownEdit.markdown(text: text, runs: runs) == source, "\(source)")
+        }
+    }
+
+    @Test("emphasis inside a heading survives, markers and all")
+    func insideAHeading() {
+        let (text, runs) = MarkdownEdit.stripEmphasis("### Where **we** are")
+        // The block marker stays on the page; only the inline one comes out.
+        #expect(text == "### Where we are")
+        #expect(runs.count == 1)
+        #expect(MarkdownEdit.markdown(text: text, runs: runs) == "### Where **we** are")
+    }
+
+    @Test("a run that no longer fits the text is dropped rather than crashing")
+    func toleratesStaleRuns() {
+        let stale = [MarkdownEdit.EmphasisRun(range: NSRange(location: 40, length: 4), isBold: true)]
+        #expect(MarkdownEdit.markdown(text: "short", runs: stale) == "short")
+    }
+
+    @Test("a block change is a prefix edit, so everything else keeps its place")
+    func editsOnlyThePrefix() {
+        let (edits, selection) = MarkdownEdit.blockEdits(
+            .heading(2), in: "one\ntwo", selection: NSRange(location: 5, length: 0)
+        )
+        #expect(edits.count == 1)
+        #expect(edits[0].range == NSRange(location: 4, length: 0))
+        #expect(edits[0].replacement == "## ")
+        #expect(selection.location == 8)
+    }
+
+    @Test("every line the selection touches is edited, last first")
+    func editsEveryLineBackwards() {
+        let (edits, _) = MarkdownEdit.blockEdits(
+            .bullet, in: "one\ntwo\nthree", selection: NSRange(location: 1, length: 5)
+        )
+        #expect(edits.count == 2)
+        // Applying them in order must never invalidate the next one.
+        #expect(edits[0].range.location > edits[1].range.location)
     }
 }

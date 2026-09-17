@@ -18,13 +18,20 @@ import SwiftUI
 /// gets ticked without leaving the page.
 struct NoteTextEditor: NSViewRepresentable {
 
-    @Binding var text: String
+    /// The file's own text, markers and all. The page never holds this — it holds the
+    /// words with weight on them — but this is what goes in and what comes back.
+    @Binding var markdown: String
+    /// The text as it is on the page, with no markers in it, for the things that reason
+    /// about lines: which kind the caret's line is, and whether the page is empty.
+    @Binding var displayText: String
     /// What is selected, so the toolbar above knows which lines it is about to change and
     /// can put the caret back where it belongs afterwards.
     @Binding var selection: NSRange
-    /// Called on every keystroke, debounced by the caller — the file is the only copy, so
-    /// nothing waits for a button.
+    /// Called on every keystroke with the file's text, debounced by the caller — the file
+    /// is the only copy, so nothing waits for a button.
     var onEdited: (String) -> Void
+    /// Handed the view, so the bar above can act on the selection.
+    var commands: NoteEditorCommands
     /// Whether the caret is in here. The bar above appears with it, because a bar for
     /// shaping text is noise on a page nobody is typing on.
     var onFocusChange: ((Bool) -> Void)?
@@ -51,9 +58,8 @@ struct NoteTextEditor: NSViewRepresentable {
         view.isAutomaticQuoteSubstitutionEnabled = false
         view.isAutomaticDashSubstitutionEnabled = false
         view.isAutomaticTextReplacementEnabled = false
-        view.layoutManager?.delegate = view
-        view.string = text
-        view.applyStyling()
+        view.setMarkdown(markdown)
+        commands.view = view
         return view
     }
 
@@ -62,11 +68,11 @@ struct NoteTextEditor: NSViewRepresentable {
         view.onFocusChange = { context.coordinator.parent.onFocusChange?($0) }
         context.coordinator.parent = self
 
-        // Only when the text genuinely differs — assigning it back mid-typing would move
-        // the insertion point to the end on every keystroke.
-        if view.string != text {
-            view.string = text
-            view.applyStyling()
+        commands.view = view
+        // Only when the file's text genuinely differs — assigning it back mid-typing would
+        // move the insertion point to the end on every keystroke.
+        if view.currentMarkdown != markdown {
+            view.setMarkdown(markdown)
         }
         let length = (view.string as NSString).length
         let wanted = NSRange(
@@ -80,6 +86,20 @@ struct NoteTextEditor: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
+    /// The way the bar above reaches the page.
+    ///
+    /// Bold is no longer something that can be done to a string — it is an attribute on a
+    /// range of the page — so the controls have to speak to the view rather than hand back
+    /// new text.
+    @MainActor
+    final class NoteEditorCommands {
+        weak var view: NoteTextView?
+
+        func toggleEmphasis(bold: Bool) { view?.toggleEmphasis(bold: bold) }
+        func setBlock(_ block: MarkdownEdit.Block) { view?.setBlock(block) }
+        func isOn(bold: Bool) -> Bool { view?.hasEmphasis(bold: bold) ?? false }
+    }
+
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: NoteTextEditor
 
@@ -89,15 +109,14 @@ struct NoteTextEditor: NSViewRepresentable {
             guard let view = notification.object as? NoteTextView else { return }
             view.applyStyling()
             parent.selection = view.selectedRange()
-            parent.text = view.string
-            parent.onEdited(view.string)
+            parent.displayText = view.string
+            let markdown = view.currentMarkdown
+            parent.markdown = markdown
+            parent.onEdited(markdown)
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let view = notification.object as? NoteTextView else { return }
-            // Markers are shown on the line the caret is on, so moving the caret is a
-            // reason to lay the text out again.
-            view.applyStyling()
             guard parent.selection != view.selectedRange() else { return }
             parent.selection = view.selectedRange()
         }
@@ -105,79 +124,10 @@ struct NoteTextEditor: NSViewRepresentable {
 }
 
 /// The text view itself: styling, a click that ticks a box, and a height that fits.
-final class NoteTextView: NSTextView, @MainActor NSLayoutManagerDelegate {
+final class NoteTextView: NSTextView {
 
     var onToggleTask: ((Int) -> Void)?
     var onFocusChange: ((Bool) -> Void)?
-
-    /// Character ranges that are in the text but not drawn: the `**` around a bold word,
-    /// on every line except the one being edited.
-    private var hiddenRanges: [NSRange] = []
-
-    /// Glyphs are generated once and cached, so a range that has just become hidden — or
-    /// just stopped being — has to be asked for again.
-    private func setHidden(_ ranges: [NSRange]) {
-        guard ranges != hiddenRanges else { return }
-        hiddenRanges = ranges
-        guard let manager = layoutManager else { return }
-        let whole = NSRange(location: 0, length: (string as NSString).length)
-        manager.invalidateGlyphs(forCharacterRange: whole, changeInLength: 0, actualCharacterRange: nil)
-        manager.invalidateLayout(forCharacterRange: whole, actualCharacterRange: nil)
-        invalidateIntrinsicContentSize()
-    }
-
-    /// Where the markers are dropped on the floor.
-    ///
-    /// `.null` is the layout manager's own way of saying "this character takes no glyph
-    /// and no width". The alternative — deleting the markers from the text and putting
-    /// them back on save — would mean the file and the page holding different strings,
-    /// and every offset in this file would have to be translated between them.
-    func layoutManager(
-        _ layoutManager: NSLayoutManager,
-        shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
-        properties: UnsafePointer<NSLayoutManager.GlyphProperty>,
-        characterIndexes: UnsafePointer<Int>,
-        font: NSFont,
-        forGlyphRange glyphRange: NSRange
-    ) -> Int {
-        guard !hiddenRanges.isEmpty else { return 0 }
-
-        var changed = false
-        var updated = [NSLayoutManager.GlyphProperty](repeating: [], count: glyphRange.length)
-        for offset in 0..<glyphRange.length {
-            let index = characterIndexes[offset]
-            if hiddenRanges.contains(where: { NSLocationInRange(index, $0) }) {
-                updated[offset] = .null
-                changed = true
-            } else {
-                updated[offset] = properties[offset]
-            }
-        }
-        guard changed else { return 0 }
-
-        updated.withUnsafeBufferPointer { buffer in
-            layoutManager.setGlyphs(
-                glyphs,
-                properties: buffer.baseAddress!,
-                characterIndexes: characterIndexes,
-                font: font,
-                forGlyphRange: glyphRange
-            )
-        }
-        return glyphRange.length
-    }
-
-    override func becomeFirstResponder() -> Bool {
-        let became = super.becomeFirstResponder()
-        if became { onFocusChange?(true) }
-        return became
-    }
-
-    override func resignFirstResponder() -> Bool {
-        let resigned = super.resignFirstResponder()
-        if resigned { onFocusChange?(false) }
-        return resigned
-    }
 
     /// Where the box sits on a task line: `- [ ] `.
     private static let boxRange = 2..<5
@@ -264,7 +214,9 @@ final class NoteTextView: NSTextView, @MainActor NSLayoutManagerDelegate {
         paragraph.paragraphSpacing = 4
 
         storage.beginEditing()
-        storage.setAttributes(
+        // Everything but the emphasis, which is ours and is the one attribute that
+        // carries meaning rather than appearance.
+        storage.addAttributes(
             [
                 .font: body,
                 .foregroundColor: NSColor(Theme.Palette.text),
@@ -272,6 +224,7 @@ final class NoteTextView: NSTextView, @MainActor NSLayoutManagerDelegate {
             ],
             range: whole
         )
+        storage.removeAttribute(.strikethroughStyle, range: whole)
 
         text.enumerateSubstrings(in: whole, options: [.byLines]) { substring, range, _, _ in
             guard let line = substring else { return }
@@ -322,40 +275,125 @@ final class NoteTextView: NSTextView, @MainActor NSLayoutManagerDelegate {
             }
         }
 
-        // Inline emphasis: the weight goes on, the asterisks come off.
-        //
-        // The line the caret is on keeps its markers. They are the only way to take a
-        // bold off by hand, and text that silently rearranges itself as the caret arrives
-        // is worse than a pair of visible asterisks.
-        let caretLine = text.length > 0
-            ? text.lineRange(for: NSRange(location: min(selectedRange().location, text.length - 1), length: 0))
-            : NSRange(location: 0, length: 0)
-
-        var hide: [NSRange] = []
-        for span in MarkdownEdit.emphasis(in: text) {
-            let existing = span.inner.length > 0
-                ? storage.attribute(.font, at: span.inner.location, effectiveRange: nil) as? NSFont
-                : nil
-            let base = existing ?? body
-            let trait: NSFontTraitMask = span.isBold ? .boldFontMask : .italicFontMask
+        // Emphasis last, over whatever font the line already earned, so bold inside a
+        // heading is a bold heading rather than body text that happens to be bold.
+        storage.enumerateAttribute(Self.emphasisKey, in: whole, options: []) { value, range, _ in
+            guard let kind = value as? String, range.length > 0 else { return }
+            let base = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+                ?? body
             storage.addAttribute(
                 .font,
-                value: NSFontManager.shared.convert(base, toHaveTrait: trait),
-                range: span.inner
+                value: NSFontManager.shared.convert(
+                    base, toHaveTrait: kind == "bold" ? .boldFontMask : .italicFontMask
+                ),
+                range: range
             )
-            guard !isEditing || NSIntersectionRange(span.whole, caretLine).length == 0 else { continue }
-            hide.append(span.opening)
-            hide.append(span.closing)
         }
 
         storage.endEditing()
-        setHidden(hide)
         invalidateIntrinsicContentSize()
     }
 
-    /// Whether the caret is in this view. Markers stay hidden on a page nobody is typing
-    /// on, so a note reads as a note until the moment it is being written.
-    private var isEditing: Bool {
-        window?.firstResponder === self
+    // MARK: - Emphasis, as weight rather than characters
+
+    /// Bold and italic ride on the text as an attribute of our own.
+    ///
+    /// Not the font, which `applyStyling` rewrites from scratch on every keystroke and
+    /// would wipe. This survives that, and the font is computed from it.
+    static let emphasisKey = NSAttributedString.Key("app.murmr.emphasis")
+
+    /// Replaces everything with the file's text, markers taken out and turned into weight.
+    func setMarkdown(_ markdown: String) {
+        let (text, runs) = MarkdownEdit.stripEmphasis(markdown)
+        string = text
+        guard let storage = textStorage else { return }
+        storage.beginEditing()
+        for run in runs where run.range.location + run.range.length <= (text as NSString).length {
+            storage.addAttribute(
+                Self.emphasisKey, value: run.isBold ? "bold" : "italic", range: run.range
+            )
+        }
+        storage.endEditing()
+        applyStyling()
+    }
+
+    /// What the file should hold: the words, with the markers put back.
+    var currentMarkdown: String {
+        MarkdownEdit.markdown(text: string, runs: emphasisRuns())
+    }
+
+    private func emphasisRuns() -> [MarkdownEdit.EmphasisRun] {
+        guard let storage = textStorage else { return [] }
+        var runs: [MarkdownEdit.EmphasisRun] = []
+        storage.enumerateAttribute(
+            Self.emphasisKey,
+            in: NSRange(location: 0, length: storage.length),
+            options: []
+        ) { value, range, _ in
+            guard let kind = value as? String else { return }
+            runs.append(MarkdownEdit.EmphasisRun(range: range, isBold: kind == "bold"))
+        }
+        return runs
+    }
+
+    /// Whether the whole selection already carries this weight, which is what lights the
+    /// button and what makes pressing it take the weight off.
+    func hasEmphasis(bold: Bool) -> Bool {
+        guard let storage = textStorage else { return false }
+        let range = selectedRange()
+        let wanted = bold ? "bold" : "italic"
+        guard range.length > 0 else {
+            let index = min(max(range.location - 1, 0), max(storage.length - 1, 0))
+            guard storage.length > 0 else { return false }
+            return storage.attribute(Self.emphasisKey, at: index, effectiveRange: nil) as? String == wanted
+        }
+        var all = true
+        storage.enumerateAttribute(Self.emphasisKey, in: range, options: []) { value, _, stop in
+            if value as? String != wanted {
+                all = false
+                stop.pointee = true
+            }
+        }
+        return all
+    }
+
+    /// Puts the weight on the selection, or takes it off when it is already there.
+    func toggleEmphasis(bold: Bool) {
+        guard let storage = textStorage else { return }
+        let range = selectedRange()
+        guard range.length > 0 else { return }
+        let on = !hasEmphasis(bold: bold)
+
+        storage.beginEditing()
+        storage.removeAttribute(Self.emphasisKey, range: range)
+        if on {
+            storage.addAttribute(Self.emphasisKey, value: bold ? "bold" : "italic", range: range)
+        }
+        storage.endEditing()
+        applyStyling()
+        didChangeText()
+    }
+
+    /// Makes the lines the selection touches a heading, a bullet, a task or plain text.
+    ///
+    /// Prefix edits rather than a new string, so every character that is not part of a
+    /// marker — and the weight riding on it — stays exactly where it was.
+    func setBlock(_ block: MarkdownEdit.Block) {
+        guard let storage = textStorage else { return }
+        let (edits, selection) = MarkdownEdit.blockEdits(
+            block, in: string, selection: selectedRange()
+        )
+        guard !edits.isEmpty else { return }
+
+        storage.beginEditing()
+        for edit in edits where edit.range.location + edit.range.length <= storage.length {
+            storage.replaceCharacters(in: edit.range, with: edit.replacement)
+        }
+        storage.endEditing()
+        applyStyling()
+        setSelectedRange(
+            NSRange(location: min(selection.location, (string as NSString).length), length: 0)
+        )
+        didChangeText()
     }
 }

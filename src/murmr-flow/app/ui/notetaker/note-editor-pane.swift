@@ -21,8 +21,15 @@ struct NoteEditorPane<Tabs: View>: View {
     /// a line with the bar, which is the one row the pane has to spare.
     @ViewBuilder let tabs: Tabs
 
+    /// The file's text, which is what gets saved.
     @State private var draft: String
+    /// The same words as the page shows them, with no markers in them — which is what the
+    /// bar reasons about, because a line's kind is a fact about the page.
+    @State private var display: String
     @State private var selection = NSRange(location: 0, length: 0)
+    /// Bumped after a change the text does not show, so the bar's lit buttons follow.
+    @State private var stamp = 0
+    private let commands = NoteTextEditor.NoteEditorCommands()
     @State private var saving: Task<Void, Never>?
     @State private var focused = false
     /// Whether anything has been typed here. Leaving an untouched pane must write
@@ -42,6 +49,7 @@ struct NoteEditorPane<Tabs: View>: View {
         @ViewBuilder tabs: () -> Tabs
     ) {
         _draft = State(initialValue: text)
+        _display = State(initialValue: MarkdownEdit.stripEmphasis(text).text)
         self.placeholder = placeholder
         self.emptyAction = emptyAction
         self.onSave = onSave
@@ -60,7 +68,7 @@ struct NoteEditorPane<Tabs: View>: View {
 
     /// What the line the caret is on already is, which is what the menu shows as chosen.
     private var block: MarkdownEdit.Block {
-        MarkdownEdit.block(of: draft as NSString, at: selection)
+        MarkdownEdit.block(of: display as NSString, at: selection)
     }
 
     /// The controls for shaping a line, because the Markdown is visible but knowing to
@@ -86,7 +94,7 @@ struct NoteEditorPane<Tabs: View>: View {
             Menu {
                 Picker("Style", selection: Binding(
                     get: { block },
-                    set: { apply(.setBlock($0)) }
+                    set: { set($0) }
                 )) {
                     ForEach(MarkdownEdit.Block.allCases) { Text($0.title).tag($0) }
                 }
@@ -101,17 +109,13 @@ struct NoteEditorPane<Tabs: View>: View {
 
             Divider().frame(height: 14)
 
-            command("bold", help: "Bold", on: isWrapped("**")) { apply(.wrap("**")) }
-            command("italic", help: "Italic", on: isWrapped("*")) { apply(.wrap("*")) }
+            command("bold", help: "Bold", on: isOn(bold: true)) { emphasise(bold: true) }
+            command("italic", help: "Italic", on: isOn(bold: false)) { emphasise(bold: false) }
 
             Divider().frame(height: 14)
 
-            command(
-                "list.bullet", help: "Bullet", on: block == .bullet
-            ) { apply(.setBlock(.bullet)) }
-            command(
-                "checklist", help: "Task", on: block == .task
-            ) { apply(.setBlock(.task)) }
+            command("list.bullet", help: "Bullet", on: block == .bullet) { set(.bullet) }
+            command("checklist", help: "Task", on: block == .task) { set(.task) }
 
         }
         .font(Theme.Text.small)
@@ -123,8 +127,21 @@ struct NoteEditorPane<Tabs: View>: View {
         .animation(.easeOut(duration: 0.12), value: focused)
     }
 
-    private func isWrapped(_ marker: String) -> Bool {
-        MarkdownEdit.isWrapped(marker, in: draft, selection: selection)
+    /// Read through the stamp, so pressing Bold relights the button — the text is
+    /// unchanged by it, and nothing else would tell the bar to look again.
+    private func isOn(bold: Bool) -> Bool {
+        _ = stamp
+        return commands.isOn(bold: bold)
+    }
+
+    private func emphasise(bold: Bool) {
+        commands.toggleEmphasis(bold: bold)
+        stamp += 1
+    }
+
+    private func set(_ block: MarkdownEdit.Block) {
+        commands.setBlock(block)
+        stamp += 1
     }
 
     private func command(
@@ -147,30 +164,10 @@ struct NoteEditorPane<Tabs: View>: View {
         .help(help)
     }
 
-    /// One way in and out for every toolbar action: change the text, move the caret, save.
-    private enum Command {
-        case setBlock(MarkdownEdit.Block)
-        case wrap(String)
-    }
-
-    private func apply(_ command: Command) {
-        let result = switch command {
-        case .setBlock(let block):
-            MarkdownEdit.setBlock(block, in: draft, selection: selection)
-        case .wrap(let marker):
-            MarkdownEdit.wrap(marker, in: draft, selection: selection)
-        }
-        guard result.text != draft else { return }
-        dirty = true
-        draft = result.text
-        selection = result.selection
-        saving?.cancel()
-        onSave(result.text)
-    }
-
     private var editor: some View {
         NoteTextEditor(
-            text: $draft,
+            markdown: $draft,
+            displayText: $display,
             selection: $selection,
             onEdited: { text in
                 dirty = true
@@ -181,6 +178,7 @@ struct NoteEditorPane<Tabs: View>: View {
                     onSave(text)
                 }
             },
+            commands: commands,
             onFocusChange: { focused = $0 },
             onToggleTask: { index in
                 // Ticked here rather than through the file: the box has to fill the
@@ -194,7 +192,7 @@ struct NoteEditorPane<Tabs: View>: View {
         )
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .topLeading) {
-            if draft.isEmpty {
+            if display.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(placeholder)
                         .font(Theme.Text.body)

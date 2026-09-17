@@ -87,56 +87,25 @@ enum MarkdownEdit {
         return line
     }
 
-    /// Makes every line the selection touches the given kind, or plain text when it
-    /// already is that kind — so the same control both applies and removes.
-    static func setBlock(
-        _ block: Block, in text: String, selection: NSRange
-    ) -> (text: String, selection: NSRange) {
-        let string = text as NSString
-        let lines = lineRange(in: string, covering: selection)
-        guard lines.length > 0 || string.length == 0 else { return (text, selection) }
+    // MARK: - Finding emphasis in the file
 
-        let slice = string.substring(with: lines)
-        let endsWithNewline = slice.hasSuffix("\n")
-        let pieces = (endsWithNewline ? String(slice.dropLast()) : slice)
-            .components(separatedBy: "\n")
-
-        let alreadyIs = pieces.allSatisfy { self.block(ofLine: $0) == block }
-        let target: Block = alreadyIs ? .body : block
-
-        let rewritten = pieces
-            .map { target.prefix + stripPrefix($0) }
-            .joined(separator: "\n") + (endsWithNewline ? "\n" : "")
-
-        let updated = string.replacingCharacters(in: lines, with: rewritten)
-        // The caret lands at the end of the changed block, which is where somebody who
-        // just made a heading wants to carry on typing.
-        let end = lines.location + (rewritten as NSString).length - (endsWithNewline ? 1 : 0)
-        return (updated, NSRange(location: end, length: 0))
-    }
-
-    /// A run of emphasis found in the text: where the markers are, and what they wrap.
+    /// A run of emphasis as the *file* writes it: where the markers are, and what they
+    /// wrap. Only ever used on the way in, to take them out again.
     struct Emphasis: Equatable {
         /// `**` or `*`.
         let marker: String
-        /// The markers themselves, which is what gets hidden.
         let opening: NSRange
         let closing: NSRange
-        /// The words between them, which is what gets the weight.
+        /// The words between them.
         let inner: NSRange
 
         var isBold: Bool { marker == "**" }
-        /// Markers and words together, for deciding which line it belongs to.
-        var whole: NSRange {
-            NSRange(location: opening.location, length: closing.location + closing.length - opening.location)
-        }
     }
 
     /// Every `**bold**` and `*italic*` in the text.
     ///
     /// Bold is matched first and its ranges are then off limits, so the outer asterisk of
-    /// a bold pair is never read as the start of an italic one — which would leave half a
-    /// marker drawn and half hidden.
+    /// a bold pair is never read as the start of an italic one.
     ///
     /// A marker has to sit against a word: `4 * 3 * 2` is arithmetic, and an editor that
     /// silently italicised it would be worse than one that did nothing.
@@ -175,72 +144,103 @@ enum MarkdownEdit {
         return found.sorted { $0.opening.location < $1.opening.location }
     }
 
-    /// Whether the selection is already wrapped in a marker, so the button showing it can
-    /// be lit the way the bullet and task buttons are.
-    ///
-    /// Bold wins over italic when both could match: `**word**` is bold, and reading the
-    /// outer asterisk of a bold pair as an italic one would light both buttons for text
-    /// that is only ever one of them.
-    static func isWrapped(_ marker: String, in text: String, selection: NSRange) -> Bool {
-        let string = text as NSString
-        guard selection.location + selection.length <= string.length else { return false }
-        if marker == "*", isWrapped("**", in: text, selection: selection) { return false }
+    // MARK: - Between the file and the page
 
-        let selected = string.substring(with: selection)
-        if selected.hasPrefix(marker), selected.hasSuffix(marker),
-           selected.count >= marker.count * 2 {
-            return true
-        }
-        let markerLength = (marker as NSString).length
-        let outer = NSRange(
-            location: selection.location - markerLength,
-            length: selection.length + markerLength * 2
-        )
-        guard outer.location >= 0, outer.location + outer.length <= string.length else {
-            return false
-        }
-        return string.substring(with: outer) == marker + selected + marker
+    /// Emphasis as the page holds it: a stretch of words that is bold or italic, with no
+    /// markers anywhere in the text.
+    struct EmphasisRun: Equatable, Sendable {
+        let range: NSRange
+        let isBold: Bool
     }
 
-    /// Wraps the selection in a marker, or unwraps it when it is already wrapped. With
-    /// nothing selected it leaves the pair behind with the caret between them, which is
-    /// how every editor behaves and is what makes the button usable before typing.
-    static func wrap(
-        _ marker: String, in text: String, selection: NSRange
-    ) -> (text: String, selection: NSRange) {
+    /// Takes the markers out, and says where the emphasis now is.
+    ///
+    /// **This is the whole design in one function.** The page never contains `**`, so
+    /// there is nothing to hide, nothing to step the caret over, and nothing to half
+    /// delete — the three faults that come with drawing markers and pretending they are
+    /// not there. The file keeps them; the page keeps weight.
+    static func stripEmphasis(_ markdown: String) -> (text: String, runs: [EmphasisRun]) {
+        let source = markdown as NSString
+        let spans = emphasis(in: source)
+        guard !spans.isEmpty else { return (markdown, []) }
+
+        var out = ""
+        var runs: [EmphasisRun] = []
+        var cursor = 0
+        for span in spans {
+            out += source.substring(with: NSRange(location: cursor, length: span.opening.location - cursor))
+            let start = (out as NSString).length
+            out += source.substring(with: span.inner)
+            runs.append(
+                EmphasisRun(
+                    range: NSRange(location: start, length: (out as NSString).length - start),
+                    isBold: span.isBold
+                )
+            )
+            cursor = span.closing.location + span.closing.length
+        }
+        out += source.substring(from: cursor)
+        return (out, runs)
+    }
+
+    /// Puts the markers back, for the file.
+    ///
+    /// Applied from the end backwards, so an insertion never moves the range of the run
+    /// after it.
+    static func markdown(text: String, runs: [EmphasisRun]) -> String {
+        var out = text as NSString
+        for run in runs.sorted(by: { $0.range.location > $1.range.location }) {
+            guard run.range.location >= 0,
+                  run.range.location + run.range.length <= out.length,
+                  run.range.length > 0
+            else { continue }
+            let marker = run.isBold ? "**" : "*"
+            let words = out.substring(with: run.range)
+            out = out.replacingCharacters(in: run.range, with: marker + words + marker) as NSString
+        }
+        return out as String
+    }
+
+    /// The prefix changes that make every line the selection touches the given kind.
+    ///
+    /// Edits rather than a whole new string, so applying them leaves every other character
+    /// — and every attribute riding on it — exactly where it was. Rebuilding the text
+    /// wholesale would drop the emphasis the page is holding.
+    ///
+    /// Returned last line first, so applying them in order never invalidates the next.
+    static func blockEdits(
+        _ block: Block, in text: String, selection: NSRange
+    ) -> (edits: [(range: NSRange, replacement: String)], selection: NSRange) {
         let string = text as NSString
-        let markerLength = (marker as NSString).length
-        guard selection.location + selection.length <= string.length else { return (text, selection) }
+        guard string.length > 0 else {
+            return ([(NSRange(location: 0, length: 0), block.prefix)],
+                    NSRange(location: (block.prefix as NSString).length, length: 0))
+        }
+        let lines = lineRange(in: string, covering: selection)
 
-        let selected = string.substring(with: selection)
-        if selected.hasPrefix(marker), selected.hasSuffix(marker),
-           selected.count >= markerLength * 2 {
-            let bare = String(selected.dropFirst(marker.count).dropLast(marker.count))
-            return (
-                string.replacingCharacters(in: selection, with: bare),
-                NSRange(location: selection.location, length: (bare as NSString).length)
-            )
+        var starts: [Int] = []
+        string.enumerateSubstrings(in: lines, options: [.byLines]) { _, range, _, _ in
+            starts.append(range.location)
+        }
+        if starts.isEmpty { starts = [lines.location] }
+
+        let kinds = starts.map { start -> Block in
+            let line = string.substring(with: string.lineRange(for: NSRange(location: start, length: 0)))
+            return self.block(ofLine: line.hasSuffix("\n") ? String(line.dropLast()) : line)
+        }
+        let target: Block = kinds.allSatisfy { $0 == block } ? .body : block
+
+        var edits: [(range: NSRange, replacement: String)] = []
+        var delta = 0
+        for (start, kind) in zip(starts, kinds) {
+            let existing = (kind.prefix as NSString).length
+            let replacement = target.prefix
+            guard existing > 0 || !replacement.isEmpty else { continue }
+            edits.append((NSRange(location: start, length: existing), replacement))
+            delta += (replacement as NSString).length - existing
         }
 
-        // Already wrapped from just outside the selection: "**word**" with "word" picked.
-        let outer = NSRange(
-            location: selection.location - markerLength,
-            length: selection.length + markerLength * 2
-        )
-        if outer.location >= 0, outer.location + outer.length <= string.length,
-           string.substring(with: outer) == marker + selected + marker {
-            return (
-                string.replacingCharacters(in: outer, with: selected),
-                NSRange(location: outer.location, length: selection.length)
-            )
-        }
-
-        let wrapped = marker + selected + marker
-        return (
-            string.replacingCharacters(in: selection, with: wrapped),
-            selection.length == 0
-                ? NSRange(location: selection.location + markerLength, length: 0)
-                : NSRange(location: selection.location + markerLength, length: selection.length)
-        )
+        let caret = min(selection.location + delta, string.length + delta)
+        return (edits.reversed(), NSRange(location: max(caret, 0), length: 0))
     }
 }
