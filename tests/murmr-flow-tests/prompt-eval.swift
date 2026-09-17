@@ -38,6 +38,8 @@ struct PromptEval {
             case exactBulletLines(Int)
             case leadIns(min: Int)
             case noNumbering
+            /// Lines opening with `###`, which is how the note's topics are marked.
+            case headings(min: Int)
             case startsUppercase
             /// The output is the input, character for character.
             case unchanged
@@ -50,6 +52,9 @@ struct PromptEval {
         /// Phrases that must appear exactly once — the restatement checks.
         var once: [String] = []
         var extra: [Extra] = []
+        /// Markdown is a fault in a dictation, which is typed into someone's document,
+        /// and the point of a note, which is a file you open in an editor.
+        var allowsMarkdown = false
     }
 
     /// One person talking, as Default and Formal both receive it.
@@ -225,6 +230,33 @@ struct PromptEval {
         ),
     ]
 
+    /// A whole conversation, the way `writeNote` hands one over: one line per turn,
+    /// speaker first. Invented rather than taken from a real meeting — a fixture lives in
+    /// the repository for good, and somebody's actual call does not belong there.
+    static let summary: [Case] = [
+        Case(
+            name: "a walkthrough, with figures and one thing taken on",
+            raw: "You: ok so can you hear me right um i wanted to walk through how the deploy works so i can write it up after\nThem: yeah sure so uh there's two environments there's staging and there's production and everything goes through staging first\nThem: a build goes out to staging automatically on every merge and then someone has to press the button for production\nYou: and how long does that usually take\nThem: staging is about four minutes production is closer to twelve because it does the database migration as well\nThem: the rule we have is you never deploy on a friday after 4pm unless it's a hotfix and a hotfix needs two approvals not one\nYou: two approvals ok\nThem: yeah and if the error rate goes above zero point five percent in the first ten minutes it rolls back on its own\nYou: right that's the bit i didn't know\nThem: i'll send you the runbook link this afternoon so you've got the exact steps\nYou: perfect thanks",
+            keep: [
+                "staging", "production", "four minutes", "twelve",
+                "two approvals", "0.5%", "ten minutes", "runbook",
+            ],
+            drop: ["can you hear me", "perfect thanks"],
+            extra: [.headings(min: 2), .bulletLines(min: 4)],
+            allowsMarkdown: true
+        ),
+        Case(
+            name: "nothing was taken on, so there are no next steps",
+            raw: "You: um so i was reading about the new pricing page and i think the three tier layout reads better than the four we had\nThem: yeah i saw that too although the middle one is doing most of the work at the moment about sixty percent of signups\nYou: right so maybe the middle one just needs to be the one that's highlighted\nThem: maybe i don't know we'd want to look at it properly",
+            keep: ["60%", "middle"],
+            // The section is only written when somebody agreed to do something, and
+            // nobody did — the hardest instruction in the prompt to keep.
+            drop: ["Next steps"],
+            extra: [.headings(min: 1)],
+            allowsMarkdown: true
+        ),
+    ]
+
     struct Variant: Sendable {
         let name: String
         let template: String
@@ -259,6 +291,13 @@ struct PromptEval {
                     Variant(name: "Full", template: ShippedPrompts.structure),
                 ],
                 cases: structure
+            ),
+            Target(
+                key: "summary", name: "Summary",
+                variants: [
+                    Variant(name: "Full", template: ShippedPrompts.summary),
+                ],
+                cases: summary
             ),
         ]
     }
@@ -326,7 +365,8 @@ struct PromptEval {
         {
             failures.append("preamble")
         }
-        if output.contains("**") || lines.contains(where: { $0.hasPrefix("#") }) {
+        if !c.allowsMarkdown,
+           output.contains("**") || lines.contains(where: { $0.hasPrefix("#") }) {
             failures.append("markdown")
         }
         if let first = output.first, first == "\"" || first == "“" {
@@ -351,6 +391,9 @@ struct PromptEval {
                 if bullets != n { failures.append("\(bullets) bullet lines, wanted \(n)") }
             case .leadIns(let min):
                 if leadIns < min { failures.append("\(leadIns) lead-ins, wanted ≥\(min)") }
+            case .headings(let min):
+                let headings = lines.filter { $0.hasPrefix("###") }.count
+                if headings < min { failures.append("\(headings) headings, wanted >=\(min)") }
             case .noNumbering:
                 if lines.contains(where: { $0.range(of: "^\\d+\\.", options: .regularExpression) != nil }) {
                     failures.append("numbered a set")

@@ -168,4 +168,22 @@ struct AppStylesTests {
         // Re-recording the key a style already has is not a clash with itself.
         #expect(prompts.style(usingHotkey: fnOption, excluding: target.id) == nil)
     }
+
+    @Test("Summary starts on the shipped style, and cleared stays cleared")
+    func summaryAssignment() {
+        let (prompts, defaults) = store()
+        #expect(prompts.summaryPrompt?.name == "Summary")
+
+        prompts.summaryPromptID = nil
+        #expect(PromptStore(defaults: defaults).summaryPrompt == nil)
+    }
+
+    @Test("Deleting the Summary style stops the note rather than picking another")
+    func deletingSummaryStyle() {
+        let (prompts, _) = store()
+        let summary = prompts.presets.first { $0.name == "Summary" }!
+        prompts.delete(summary)
+        // Anything else would write the note with a style meant for tidying turns.
+        #expect(prompts.summaryPromptID == nil)
+    }
 }
