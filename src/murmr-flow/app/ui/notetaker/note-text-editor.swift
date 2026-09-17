@@ -19,6 +19,9 @@ import SwiftUI
 struct NoteTextEditor: NSViewRepresentable {
 
     @Binding var text: String
+    /// What is selected, so the toolbar above knows which lines it is about to change and
+    /// can put the caret back where it belongs afterwards.
+    @Binding var selection: NSRange
     /// Called on every keystroke, debounced by the caller — the file is the only copy, so
     /// nothing waits for a button.
     var onEdited: (String) -> Void
@@ -51,15 +54,22 @@ struct NoteTextEditor: NSViewRepresentable {
 
     func updateNSView(_ view: NoteTextView, context: Context) {
         view.onToggleTask = { context.coordinator.parent.onToggleTask?($0) }
+        context.coordinator.parent = self
+
         // Only when the text genuinely differs — assigning it back mid-typing would move
         // the insertion point to the end on every keystroke.
-        guard view.string != text else { return }
-        let selected = view.selectedRange()
-        view.string = text
-        view.applyStyling()
-        view.setSelectedRange(
-            NSRange(location: min(selected.location, (text as NSString).length), length: 0)
+        if view.string != text {
+            view.string = text
+            view.applyStyling()
+        }
+        let length = (view.string as NSString).length
+        let wanted = NSRange(
+            location: min(selection.location, length),
+            length: min(selection.length, max(length - min(selection.location, length), 0))
         )
+        if view.selectedRange() != wanted {
+            view.setSelectedRange(wanted)
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -72,8 +82,15 @@ struct NoteTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? NoteTextView else { return }
             view.applyStyling()
+            parent.selection = view.selectedRange()
             parent.text = view.string
             parent.onEdited(view.string)
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let view = notification.object as? NoteTextView else { return }
+            guard parent.selection != view.selectedRange() else { return }
+            parent.selection = view.selectedRange()
         }
     }
 }
@@ -148,8 +165,20 @@ final class NoteTextView: NSTextView {
         let whole = NSRange(location: 0, length: text.length)
 
         let body = NSFont(name: Theme.Face.ui, size: 13) ?? .systemFont(ofSize: 13)
-        let heading = NSFont(name: Theme.Face.ui, size: 15) ?? .boldSystemFont(ofSize: 15)
         let mono = NSFont(name: Theme.Face.data, size: 12) ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
+
+        /// One size per level, so the outline of a note can be read at a glance rather
+        /// than counted in hashes. Anything past three is the same as three: a note with
+        /// four levels of heading has a different problem.
+        func headingFont(_ level: Int) -> NSFont {
+            let size: CGFloat = switch level {
+            case 1: 21
+            case 2: 17
+            default: 15
+            }
+            let face = NSFont(name: Theme.Face.ui, size: size) ?? .systemFont(ofSize: size)
+            return NSFontManager.shared.convert(face, toHaveTrait: .boldFontMask)
+        }
 
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 3
@@ -170,11 +199,7 @@ final class NoteTextView: NSTextView {
 
             if line.hasPrefix("#") {
                 let hashes = line.prefix { $0 == "#" }.count
-                storage.addAttribute(
-                    .font,
-                    value: NSFontManager.shared.convert(heading, toHaveTrait: .boldFontMask),
-                    range: range
-                )
+                storage.addAttribute(.font, value: headingFont(hashes), range: range)
                 // The hashes stay — the file is Markdown — but they recede, so the line
                 // reads as a heading rather than as a heading with punctuation on it.
                 storage.addAttributes(
@@ -196,9 +221,14 @@ final class NoteTextView: NSTextView {
                     range: NSRange(location: range.location, length: min(6, range.length))
                 )
                 if done, range.length > 6 {
-                    storage.addAttribute(
-                        .foregroundColor,
-                        value: NSColor(Theme.Palette.muted),
+                    // Struck through as well as dimmed. Colour alone reads as "less
+                    // important"; a line through it reads as "done", which is the claim.
+                    storage.addAttributes(
+                        [
+                            .foregroundColor: NSColor(Theme.Palette.faint),
+                            .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+                            .strikethroughColor: NSColor(Theme.Palette.faint),
+                        ],
                         range: NSRange(location: range.location + 6, length: range.length - 6)
                     )
                 }

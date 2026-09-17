@@ -16,6 +16,7 @@ struct NoteEditorPane: View {
     let onSave: (String) -> Void
 
     @State private var draft: String
+    @State private var selection = NSRange(location: 0, length: 0)
     @State private var saving: Task<Void, Never>?
     /// Whether anything has been typed here. Leaving an untouched pane must write
     /// nothing: the file may have been changed by something else since this was seeded,
@@ -33,8 +34,107 @@ struct NoteEditorPane: View {
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            toolbar
+            editor
+        }
+    }
+
+    /// What the line the caret is on already is, which is what the menu shows as chosen.
+    private var block: MarkdownEdit.Block {
+        MarkdownEdit.block(of: draft as NSString, at: selection)
+    }
+
+    /// The controls for shaping a line, because the Markdown is visible but knowing to
+    /// type `###` is not something anyone should have to be told.
+    ///
+    /// The same control applies and removes: pressing Heading 2 on a line that is already
+    /// one makes it plain again. There is no "remove formatting" button anywhere here,
+    /// which is what that buys.
+    private var toolbar: some View {
+        HStack(spacing: 6) {
+            Menu {
+                Picker("Style", selection: Binding(
+                    get: { block },
+                    set: { apply(.setBlock($0)) }
+                )) {
+                    ForEach([MarkdownEdit.Block.body, .heading(1), .heading(2), .heading(3)]) {
+                        Text($0.title).tag($0)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Text(block.title).lineLimit(1)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .frame(minWidth: 96, alignment: .leading)
+
+            Divider().frame(height: 14)
+
+            command("bold", help: "Bold") { apply(.wrap("**")) }
+            command("italic", help: "Italic") { apply(.wrap("*")) }
+
+            Divider().frame(height: 14)
+
+            command(
+                "list.bullet", help: "Bullet", on: block == .bullet
+            ) { apply(.setBlock(.bullet)) }
+            command(
+                "checklist", help: "Task", on: block == .task
+            ) { apply(.setBlock(.task)) }
+
+            Spacer(minLength: 0)
+        }
+        .font(Theme.Text.small)
+        .foregroundStyle(Theme.Palette.muted)
+    }
+
+    private func command(
+        _ symbol: String, help: String, on: Bool = false, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 22, height: 18)
+                .foregroundStyle(on ? Theme.Palette.gold : Theme.Palette.muted)
+                .background {
+                    if on {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Theme.Palette.gold.opacity(0.14))
+                    }
+                }
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// One way in and out for every toolbar action: change the text, move the caret, save.
+    private enum Command {
+        case setBlock(MarkdownEdit.Block)
+        case wrap(String)
+    }
+
+    private func apply(_ command: Command) {
+        let result = switch command {
+        case .setBlock(let block):
+            MarkdownEdit.setBlock(block, in: draft, selection: selection)
+        case .wrap(let marker):
+            MarkdownEdit.wrap(marker, in: draft, selection: selection)
+        }
+        guard result.text != draft else { return }
+        dirty = true
+        draft = result.text
+        selection = result.selection
+        saving?.cancel()
+        onSave(result.text)
+    }
+
+    private var editor: some View {
         NoteTextEditor(
             text: $draft,
+            selection: $selection,
             onEdited: { text in
                 dirty = true
                 saving?.cancel()
