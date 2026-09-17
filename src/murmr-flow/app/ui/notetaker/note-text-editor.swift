@@ -187,12 +187,14 @@ final class NoteTextView: NSTextView {
     /// The face both boxes are drawn in. Menlo carries ☐ and ☑ alike; the system font
     /// carries only the second, which is what made a ticked line taller than an open one.
     private static let boxFont: NSFont =
-        NSFont(name: "Menlo", size: 15)
+        NSFont(name: "Menlo", size: 18)
         ?? NSFont(name: "AppleSymbols", size: 15)
         ?? .systemFont(ofSize: 14)
 
-    /// Where the box sits on a task line: the first character of it.
-    private static let boxRange = 0..<1
+    /// How far outside the box a click still counts, in points. A box is one character
+    /// wide and a pointer is not that accurate — the target should be the size of the
+    /// thing you are trying to hit, not the size of the glyph that draws it.
+    private static let boxSlop = NSSize(width: 7, height: 4)
 
     /// Sized to its content rather than scrolling on its own, so the pane's one scroll
     /// bar covers the note, what you typed and the transcript together.
@@ -231,19 +233,17 @@ final class NoteTextView: NSTextView {
         }
         let lineRange = text.lineRange(for: NSRange(location: min(index, max(text.length - 1, 0)), length: 0))
         let line = text.substring(with: lineRange)
-        let column = index - lineRange.location
 
         guard line.hasPrefix(MarkdownEdit.uncheckedBox)
                 || line.hasPrefix(MarkdownEdit.checkedBox),
-              Self.boxRange.contains(column)
+              boxRect(atLineStart: lineRange.location)?.contains(point) == true
         else {
             takeFocus()
             super.mouseDown(with: event)
             return
         }
 
-        // Count the tasks above this one; the file ticks by position.
-        var position = 0
+        // Count the tasks above this one; the page ticks by position.
         var scanned = 0
         text.enumerateSubstrings(
             in: NSRange(location: 0, length: lineRange.location), options: [.byLines]
@@ -252,8 +252,23 @@ final class NoteTextView: NSTextView {
             if substring.hasPrefix(MarkdownEdit.uncheckedBox)
                 || substring.hasPrefix(MarkdownEdit.checkedBox) { scanned += 1 }
         }
-        position = scanned
-        onToggleTask?(position)
+        onToggleTask?(scanned)
+    }
+
+    /// Where the box is drawn, grown by enough that hitting it is not a test of aim.
+    ///
+    /// Asked of the layout rather than worked out from the column, because the answer has
+    /// to be in points on screen — the box is one character and the pointer is nowhere
+    /// near that precise.
+    private func boxRect(atLineStart start: Int) -> NSRect? {
+        guard let manager = layoutManager, let container = textContainer else { return nil }
+        let glyphs = manager.glyphRange(
+            forCharacterRange: NSRange(location: start, length: 1), actualCharacterRange: nil
+        )
+        var rect = manager.boundingRect(forGlyphRange: glyphs, in: container)
+        rect.origin.x += textContainerOrigin.x
+        rect.origin.y += textContainerOrigin.y
+        return rect.insetBy(dx: -Self.boxSlop.width, dy: -Self.boxSlop.height)
     }
 
     /// Markdown styled where it stands. Applied whole on every change: a note is a page,
