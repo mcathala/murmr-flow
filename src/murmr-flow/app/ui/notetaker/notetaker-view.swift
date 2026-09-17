@@ -332,7 +332,12 @@ struct NotetakerView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if selection.count > 1 {
+        // A meeting that is running takes the pane, whatever was selected. Writing while
+        // you listen is the thing the pane is for at that moment, and the note you were
+        // reading a minute ago is not.
+        if meetings.stage.isRecording {
+            liveNotes
+        } else if selection.count > 1 {
             EmptyPane(
                 symbol: "checklist",
                 title: "\(selection.count) notes selected",
@@ -369,6 +374,60 @@ struct NotetakerView: View {
         }
     }
 
+    // MARK: - Writing while it records
+
+    /// The page you write on while the meeting runs.
+    ///
+    /// Whatever you type here is kept whole in the finished file, **and** handed to the
+    /// style that writes the note — six words typed during a call say more about what you
+    /// want out of it than the whole transcript does. Blank is a perfectly good answer; the
+    /// note is written from the conversation either way.
+    private var liveNotes: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text("Your notes")
+                    .font(Theme.Text.title)
+                    .foregroundStyle(Theme.Palette.text)
+                Spacer(minLength: 0)
+                Circle()
+                    .fill(Theme.Palette.danger)
+                    .frame(width: 7, height: 7)
+                Text(MeetingTranscript.clock(meetings.elapsed))
+                    .font(Theme.Text.monoLarge)
+                    .foregroundStyle(Theme.Palette.muted)
+            }
+
+            Text("Kept word for word, and used to write the note when you stop.")
+                .font(Theme.Text.small)
+                .foregroundStyle(Theme.Palette.faint)
+
+            Divider()
+
+            // No placeholder art and no empty state: the cursor is already here and the
+            // meeting is already running.
+            TextEditor(text: Binding(
+                get: { meetings.liveNotes },
+                set: { meetings.liveNotes = $0 }
+            ))
+            .font(Theme.Text.body)
+            .lineSpacing(4)
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .topLeading) {
+                if meetings.liveNotes.isEmpty {
+                    Text("Write anything worth keeping. Headings and - bullets work.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Palette.faint)
+                        .padding(.top, 8)
+                        .padding(.leading, 5)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
     /// You and Them as turns, which is what the file actually holds.
     ///
     /// This pane used to print the body verbatim, so it showed `**Them** · ` and backticks
@@ -398,10 +457,25 @@ struct NotetakerView: View {
             .frame(minHeight: 360)
             .background(.quaternary.opacity(0.3), in: .rect(cornerRadius: Theme.Radius.row))
         } else if !summary.isEmpty {
-            NoteSummaryView(lines: summary)
+            NoteSummaryView(lines: summary) { index in
+                notes.toggleTask(index, in: note)
+            }
         }
 
-        if !summary.isEmpty || editing != nil {
+        if let own = NoteFile.ownNotes(in: body) {
+            SectionLabel(title: "Your notes")
+                .padding(.top, summary.isEmpty && editing == nil ? 0 : 20)
+                .padding(.bottom, 6)
+            Text(own)
+                .font(Theme.Text.body)
+                .foregroundStyle(Theme.Palette.text)
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        if !summary.isEmpty || editing != nil || NoteFile.ownNotes(in: body) != nil {
             if !turns.isEmpty {
                 SectionLabel(title: "Transcript")
                     .padding(.top, 20)
@@ -409,7 +483,7 @@ struct NotetakerView: View {
             }
         }
 
-        if turns.isEmpty, summary.isEmpty, editing == nil {
+        if turns.isEmpty, summary.isEmpty, editing == nil, NoteFile.ownNotes(in: body) == nil {
             // A note somebody wrote by hand, or one with nothing in it. Files are the
             // source of truth, so it still has to display.
             Text(body)
