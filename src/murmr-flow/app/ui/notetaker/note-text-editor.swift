@@ -184,6 +184,13 @@ final class NoteTextView: NSTextView {
         return resigned
     }
 
+    /// The face both boxes are drawn in. Menlo carries ☐ and ☑ alike; the system font
+    /// carries only the second, which is what made a ticked line taller than an open one.
+    private static let boxFont: NSFont =
+        NSFont(name: "Menlo", size: 15)
+        ?? NSFont(name: "AppleSymbols", size: 15)
+        ?? .systemFont(ofSize: 14)
+
     /// Where the box sits on a task line: the first character of it.
     private static let boxRange = 0..<1
 
@@ -304,11 +311,14 @@ final class NoteTextView: NSTextView {
             if line.hasPrefix(MarkdownEdit.uncheckedBox)
                 || line.hasPrefix(MarkdownEdit.checkedBox) {
                 let done = line.hasPrefix(MarkdownEdit.checkedBox)
-                // The box in a face that actually draws one, a size up so it reads as a
-                // control rather than as punctuation.
+                // **One font for both boxes**, and this is not fussiness. The system
+                // font has ☑ and not ☐, so the empty one fell back to Apple Symbols —
+                // ascender 10 against 14.5 — and ticking a task changed the height of its
+                // line, which shunted the words down a couple of points. Menlo has both
+                // and is on every Mac.
                 storage.addAttributes(
                     [
-                        .font: NSFont.systemFont(ofSize: 15),
+                        .font: Self.boxFont,
                         .foregroundColor: NSColor(
                             done ? Theme.Palette.gold : Theme.Palette.faint
                         ),
