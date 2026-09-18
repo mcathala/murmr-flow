@@ -18,22 +18,32 @@ struct SelectableRow<Content: View>: View {
     var radius: CGFloat = Theme.Radius.row
     @ViewBuilder let content: () -> Content
 
+    @State private var isHovering = false
+
+    /// Selection is a gold wash; hover is a plain lift of white.
+    ///
+    /// The wash used to carry a gold border as well. Two marks for one state, and gold is
+    /// meant to be the scarce thing on a screen — the fill alone says "chosen" and leaves
+    /// the accent for the one place that has to be seen.
+    private var fill: Color {
+        if isSelected { return Theme.Palette.gold.opacity(0.16) }
+        return isHovering ? .white.opacity(0.065) : .clear
+    }
+
     var body: some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
             .background {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .fill(Theme.Palette.gold.opacity(0.16))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                                .strokeBorder(Theme.Palette.gold.opacity(0.34), lineWidth: 1)
-                        }
-                }
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(fill)
             }
             .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            // Every Mac sidebar answers the pointer. Without it a row only ever looked
+            // like a target once it had already been clicked.
+            .onHover { isHovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: isHovering)
     }
 }
 

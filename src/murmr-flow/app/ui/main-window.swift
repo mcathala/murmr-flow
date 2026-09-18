@@ -68,18 +68,34 @@ struct MainWindow: View {
     static let sidebarWidth: CGFloat = 198
 
     var body: some View {
-        Group {
-            // First launch takes the whole window. The sidebar is navigation, and there is
-            // nowhere to navigate to until the app can hear you.
-            if services.onboarding.isComplete {
-                shell.transition(.opacity)
-            } else {
-                OnboardingView(services: services).transition(.opacity)
+        ZStack {
+            // One ground behind everything, reaching every edge of the window — the title
+            // bar's row included.
+            //
+            // A sibling in a stack rather than a `.background`. `InkGround` ignores the
+            // safe area and always has, but as the *root view's* background it was laid
+            // out inside that safe area with no room to expand past it, so the strip
+            // beside the traffic lights was left to the window's own colour. A sibling in
+            // a stack has the room.
+            //
+            // This is not what cured the grey band across the top — that was AppKit
+            // drawing the title bar over everything, and `.windowStyle(.hiddenTitleBar)`
+            // in `MurmrFlowApp` is what answers it. The ground should reach the window's
+            // edges either way.
+            InkGround()
+                .ignoresSafeArea()
+
+            Group {
+                // First launch takes the whole window. The sidebar is navigation, and
+                // there is nowhere to navigate to until the app can hear you.
+                if services.onboarding.isComplete {
+                    shell.transition(.opacity)
+                } else {
+                    OnboardingView(services: services).transition(.opacity)
+                }
             }
+            .animation(.easeInOut(duration: 0.3), value: services.onboarding.isComplete)
         }
-        .animation(.easeInOut(duration: 0.3), value: services.onboarding.isComplete)
-        // One ground behind everything, so no layout state leaves a strip unpainted.
-        .background(InkGround())
         // Zero-size, draws nothing: it is here to hear which window it ends up in.
         .background(WindowChrome().frame(width: 0, height: 0))
         .font(Theme.Text.body)
@@ -88,19 +104,22 @@ struct MainWindow: View {
         .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
     }
 
+    /// Whether the peek card is out. Not persisted and not in `AppServices`: it is a
+    /// property of where the pointer is, which does not outlive the window.
+    @State private var isPeeking = false
+
+    /// Leaving the card does not put it away at once — see `hidePeek()`.
+    @State private var closeWork: Task<Void, Never>?
+
     /// The sidebar and the section it selects — the window on every launch but the first.
     private var shell: some View {
         HStack(spacing: 0) {
-            sidebar
-                .frame(width: Self.sidebarWidth)
-                // Reaches under the title bar; the contents do not, so the column is one
-                // surface with no seam below the traffic lights.
-                .glassColumn(.thick)
+            sidebarColumn
 
             // Drawn rather than a `Divider`, which resolves its own colour.
             Rectangle()
                 .fill(Theme.Palette.hairline)
-                .frame(width: 1)
+                .frame(width: services.isSidebarCollapsed ? 0 : 1)
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -108,6 +127,108 @@ struct MainWindow: View {
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .overlay(alignment: .topLeading) { peekLayer }
+        .animation(.smooth(duration: 0.28), value: services.isSidebarCollapsed)
+        .onChange(of: services.isSidebarCollapsed) { _, _ in
+            closeWork?.cancel()
+            isPeeking = false
+        }
+    }
+
+    /// The column in the window's own flow: its full width, or nothing at all.
+    ///
+    /// Two frames rather than one. The inner holds the contents at 198 pt so nothing
+    /// reflows while the column is moving — a label re-wrapping mid-slide is the tell that
+    /// a sidebar is being *resized* rather than put away. The outer is the width that
+    /// animates, aligned trailing so the contents slide out to the left instead of being
+    /// cut off at the right.
+    private var sidebarColumn: some View {
+        GeometryReader { proxy in
+            sidebarBody(topInset: proxy.safeAreaInsets.top)
+                .ignoresSafeArea(edges: .top)
+        }
+        .frame(width: Self.sidebarWidth)
+        .opacity(services.isSidebarCollapsed ? 0 : 1)
+        // Out before the column closes, in after it has opened. Run on the same clock as
+        // the width, the labels smear against the moving edge.
+        .animation(
+            services.isSidebarCollapsed
+                ? .easeOut(duration: 0.09)
+                : .easeIn(duration: 0.15).delay(0.13),
+            value: services.isSidebarCollapsed
+        )
+        .frame(
+            width: services.isSidebarCollapsed ? 0 : Self.sidebarWidth,
+            alignment: .trailing
+        )
+        .clipped()
+        // Reaches under the title bar; the contents do not, so the column is one surface
+        // with no seam below the traffic lights.
+        .glassColumn(.thick)
+    }
+
+    // MARK: - The peek
+
+    /// While the column is away: an invisible strip down the window's left edge that
+    /// brings it back, and the column itself as a card floating over the content.
+    ///
+    /// The card rather than the column, because the column would push the content sideways
+    /// for as long as the pointer rested there — the reason to put the sidebar away is to
+    /// stop the content moving.
+    @ViewBuilder
+    private var peekLayer: some View {
+        if services.isSidebarCollapsed {
+            ZStack(alignment: .topLeading) {
+                Color.clear
+                    .frame(width: Self.edgeWidth)
+                    .frame(maxHeight: .infinity)
+                    .overlay { HoverStrip { if $0 { showPeek() } } }
+
+                peekCard
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    /// The strip that opens it. Wide enough to catch a pointer thrown at the edge of the
+    /// screen, narrow enough that it is never in the way of the content beside it.
+    static let edgeWidth: CGFloat = 16
+
+    private var peekCard: some View {
+        sidebarBody(topInset: 6)
+            .frame(width: Self.sidebarWidth)
+            .frame(maxHeight: .infinity)
+            .glass(.thick, radius: Theme.Radius.pane)
+            // Inset from the window rather than flush with it, so it reads as a card over
+            // the content and not as the column having come back.
+            .padding(EdgeInsets(top: 38, leading: 8, bottom: 8, trailing: 0))
+            .overlay { HoverStrip { $0 ? showPeek() : hidePeek() } }
+            .offset(x: isPeeking ? 0 : -(Self.sidebarWidth + 26))
+            .opacity(isPeeking ? 1 : 0)
+            .allowsHitTesting(isPeeking)
+            .animation(.smooth(duration: 0.26), value: isPeeking)
+            // Choosing a section is the end of the errand the card was opened for.
+            .onChange(of: services.route) { _, _ in
+                if isPeeking { withAnimation { isPeeking = false } }
+            }
+    }
+
+    private func showPeek() {
+        closeWork?.cancel()
+        closeWork = nil
+        isPeeking = true
+    }
+
+    /// Leaving the card does not put it away at once. The pointer has to cross the gap
+    /// between the edge strip and the card, and passes over the traffic lights on the way
+    /// to the corner; without the wait the card shuts under the pointer on the way in.
+    private func hidePeek() {
+        closeWork?.cancel()
+        closeWork = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            isPeeking = false
         }
     }
 
@@ -153,28 +274,32 @@ struct MainWindow: View {
     /// Selection is drawn by `SelectableRow`, not by `List`. The system highlight is
     /// `controlAccentColor` — a system-wide setting no app can override — so a selected row
     /// arrived bright blue in the middle of a navy and gold interface.
-    private var sidebar: some View {
-        // The header takes the title bar's own height, read from the safe area rather than
-        // assumed, so it sits exactly where AppKit's title did whatever this macOS makes the
-        // bar. Only the stack below ignores the inset; the reader keeps it so it can be read.
-        GeometryReader { proxy in
-            VStack(spacing: 0) {
-                SidebarHeader()
-                    .frame(height: proxy.safeAreaInsets.top)
+    ///
+    /// `topInset` is the height to leave clear above the brand row: the title bar's own,
+    /// read from the safe area, for the column in the window; a few points for the peek
+    /// card, which is below the title bar already.
+    private func sidebarBody(topInset: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: topInset)
 
-                List {
-                    topLevel
-                }
-                .listStyle(.sidebar)
-                // Hidden, or `List` paints its own opaque sidebar material and the window
-                // ends up with a grey column beside a navy one.
-                .scrollContentBackground(.hidden)
+            SidebarHeader()
 
-                settingsBlock
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
+            Rectangle()
+                .fill(Theme.Palette.hairline.opacity(0.72))
+                .frame(height: 1)
+                .padding(.horizontal, 14)
+
+            List {
+                topLevel
             }
-            .ignoresSafeArea(edges: .top)
+            .listStyle(.sidebar)
+            // Hidden, or `List` paints its own opaque sidebar material and the window
+            // ends up with a grey column beside a navy one.
+            .scrollContentBackground(.hidden)
+
+            settingsBlock
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
         }
     }
 
@@ -285,26 +410,34 @@ struct MainWindow: View {
 
 }
 
-/// The window's name with the mark in front of it, in the title bar's row.
+/// The window's name with the mark in front of it, at the top of the sidebar.
 ///
-/// Drawn by the app rather than AppKit — the system title is hidden in `AppDelegate` — so
+/// Drawn by the app rather than AppKit — the system title is hidden in `WindowChrome` — so
 /// the mark can sit beside the name. Most Mac apps leave their face to the Dock; this one
 /// has no Dock icon, so the window is where it has to show it.
+///
+/// It used to sit *in* the title bar's row, inset 92 pt to clear the traffic lights. Two
+/// things were wrong with that. The inset left 106 pt of a 198 pt column for a mark and
+/// ten characters, which is a couple of points from truncating. And macOS draws the title
+/// bar as a surface above the content view, so the row came out grey on navy — the
+/// washed-out header. The row now sits under the title bar, where it has the column's full
+/// width; the toggle that does belong up there is `TitleBarControls`, which is AppKit's own.
 struct SidebarHeader: View {
-    /// Clear of the traffic lights, which end near 80 pt on this macOS. The name then
-    /// lands within a few points of where AppKit drew the title.
-    static let leading: CGFloat = 92
+    /// Tall enough to be a band of its own rather than a line of text stuck to the top.
+    static let height: CGFloat = 48
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 9) {
             MurmrMarkShape()
                 .fill(Theme.Palette.gold)
-                .frame(width: 15, height: 15)
+                .frame(width: 17, height: 15.3)
             Text("Murmr Flow")
                 .font(Theme.Text.bodyStrong)
                 .foregroundStyle(Theme.Palette.text)
+                .fixedSize()
         }
-        .padding(.leading, Self.leading)
+        .padding(.horizontal, 16)
+        .frame(height: Self.height)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

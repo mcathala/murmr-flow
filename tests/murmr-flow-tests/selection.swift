@@ -146,8 +146,9 @@ struct SidebarSnapshotTests {
 
         func column(@ViewBuilder _ rows: () -> some View) -> some View {
             VStack(alignment: .leading, spacing: 2) {
-                // The real header, at a title bar's height, so the mark is seen here too.
-                SidebarHeader().frame(height: 28)
+                // The real header, at its own height, so the mark is seen here too. It no
+                // longer sits in the title bar's row, so nothing is imposed on it here.
+                SidebarHeader()
                 rows()
             }
                 // The sidebar's default width, so a label that does not fit shows here too.

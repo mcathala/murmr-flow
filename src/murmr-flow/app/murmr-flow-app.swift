@@ -30,6 +30,18 @@ struct MurmrFlowApp: App {
                 // ground looks like a bug rather than a choice.
                 .preferredColorScheme(.dark)
         }
+        // macOS 26.0 draws the title bar's own background even with
+        // `titlebarAppearsTransparent` set — a grey band across the top of a navy window
+        // that nothing the app draws could cover, because it is painted above the content
+        // view. Apple's radar for it (FB20341654) is fixed in 26.1, and its reproduction
+        // is a horizontal stack of a narrow view beside a scroll view with a vertical
+        // scroller, which is this window exactly.
+        //
+        // Asking for the style up front is what avoids it: the window is built without a
+        // title bar to draw rather than being told to stop drawing one afterwards. The
+        // traffic lights and `TitleBarControls` are unaffected — they are the title bar's
+        // accessories, not its background.
+        .windowStyle(.hiddenTitleBar)
         // Resizable now, not sized to its contents: Notes is a list beside a reading pane
         // and has to be able to grow.
         .windowResizability(.contentMinSize)
@@ -45,6 +57,15 @@ struct MurmrFlowApp: App {
                     openWindow(id: Self.mainWindowID)
                 }
                 .keyboardShortcut(",", modifiers: .command)
+            }
+
+            // The keyboard route to the same thing the title bar's glyph does. ⌘\ is what
+            // the apps that hide a sidebar have settled on, and it is not taken here.
+            CommandGroup(after: .sidebar) {
+                Button(services.isSidebarCollapsed ? "Show Sidebar" : "Hide Sidebar") {
+                    services.toggleSidebar()
+                }
+                .keyboardShortcut("\\", modifiers: .command)
             }
         }
 
