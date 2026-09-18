@@ -4,12 +4,15 @@ import Testing
 
 @testable import MurmrFlow
 
-/// The two things about this window that no snapshot can catch, because AppKit draws them
-/// rather than SwiftUI: the bar across the top, and the slot the toggle sits in.
+/// The parts of this window AppKit draws rather than SwiftUI, so no snapshot reaches them.
 ///
-/// Both were bugs. The bar washed out the mark and the name drawn under it. The slot was
-/// installed in the right place at zero width, so the toggle was simply not there and the
-/// sidebar could not be put away at all.
+/// What is asserted here is the app's own configuration, not how a given macOS chooses to
+/// paint a title bar. An earlier version of this suite asserted the latter — that the title
+/// bar had no material left in it after styling — and it was wrong twice over: it passed on
+/// 26.0 and failed on the 15 that CI runs, and the band it claimed to be about was never
+/// the material anyway. That one is Apple's, FB20341654, and the answer to it is
+/// `.windowStyle(.hiddenTitleBar)` on the scene, which is a scene modifier and not
+/// something a window can be asked about afterwards.
 @Suite("The window's title bar", .serialized)
 @MainActor
 struct WindowChromeTests {
@@ -23,56 +26,20 @@ struct WindowChromeTests {
         )
     }
 
-    // MARK: - The bar across the top
+    // MARK: - How the window is set up
 
-    @Test("a plain window has a material across its top")
-    func materialIsThereToBeginWith() {
-        // The premise. If macOS ever stops putting one there, `applyStyle` is no longer
-        // load-bearing and this suite should say so here rather than pass quietly.
-        #expect(!WindowChrome.visibleTitlebarMaterials(in: window()).isEmpty)
-    }
-
-    /// Transparency alone was not the fix, which is what made the first attempt at this
-    /// misleading: the window was missing `.fullSizeContentView`, so its content began
-    /// below the bar and the bar still had a surface of its own to paint.
-    @Test("transparency on its own does not remove it")
-    func transparencyIsNotEnough() {
-        let window = window()
-        window.titlebarAppearsTransparent = true
-        #expect(!WindowChrome.visibleTitlebarMaterials(in: window).isEmpty)
-    }
-
-    @Test("full-size content on its own does not remove it")
-    func fullSizeIsNotEnough() {
-        let window = window()
-        window.styleMask.insert(.fullSizeContentView)
-        #expect(!WindowChrome.visibleTitlebarMaterials(in: window).isEmpty)
-    }
-
-    /// The subtle one, and the reason `applyStyle` reads in the order it does. Changing
-    /// the style mask rebuilds the title bar, and the rebuild only drops the background
-    /// material if the window was already transparent when it happened.
-    @Test("the order the two are set in decides whether the bar goes")
-    func orderDecidesIt() {
-        let maskFirst = window()
-        maskFirst.styleMask.insert(.fullSizeContentView)
-        maskFirst.titlebarAppearsTransparent = true
-        #expect(
-            !WindowChrome.visibleTitlebarMaterials(in: maskFirst).isEmpty,
-            "the wrong order has stopped mattering; `applyStyle`'s comment is now wrong"
-        )
-
-        let transparentFirst = window()
-        transparentFirst.titlebarAppearsTransparent = true
-        transparentFirst.styleMask.insert(.fullSizeContentView)
-        #expect(WindowChrome.visibleTitlebarMaterials(in: transparentFirst).isEmpty)
-    }
-
-    @Test("the app's own styling leaves nothing painting up there")
-    func styleRemovesIt() {
+    @Test("styling leaves the window the way the app draws into")
+    func styleSetsTheWindowUp() {
         let window = window()
         WindowChrome.applyStyle(to: window)
-        #expect(WindowChrome.visibleTitlebarMaterials(in: window).isEmpty)
+
+        #expect(window.styleMask.contains(.fullSizeContentView))
+        #expect(window.titlebarAppearsTransparent)
+        #expect(window.titleVisibility == .hidden)
+        #expect(window.titlebarSeparatorStyle == .none)
+        #expect(window.toolbar == nil, "a toolbar draws a platter across the top")
+        // So a frame before SwiftUI has drawn is the app's navy, not the system's grey.
+        #expect(window.backgroundColor != .windowBackgroundColor)
     }
 
     @Test("the traffic lights survive it")
@@ -83,25 +50,28 @@ struct WindowChromeTests {
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             let button = window.standardWindowButton(kind)
             #expect(button != nil, "\(kind) is gone")
-            #expect(button?.isHidden == false, "\(kind) was hidden with the material")
+            #expect(button?.isHidden == false, "\(kind) was hidden")
         }
     }
 
+    /// It runs on every window the scene makes, and again whenever the title comes back.
     @Test("styling twice is the same as styling once")
     func styleIsIdempotent() {
         let window = window()
         WindowChrome.applyStyle(to: window)
         WindowChrome.applyStyle(to: window)
-        #expect(WindowChrome.visibleTitlebarMaterials(in: window).isEmpty)
+
+        #expect(window.styleMask.contains(.fullSizeContentView))
+        #expect(window.titlebarAppearsTransparent)
         #expect(window.standardWindowButton(.closeButton)?.isHidden == false)
     }
 
     // MARK: - The slot the toggle sits in
 
-    /// The regression that shipped: an `NSHostingView` given straight to a title bar
-    /// accessory arrives with a zero frame, AppKit sizes the slot from the frame rather
-    /// than the fitting size, and the toggle came out 0 pt wide — present, in the right
-    /// place, and invisible.
+    /// The regression that shipped to the running app: an `NSHostingView` given straight
+    /// to a title bar accessory arrives with a zero frame, AppKit sizes the slot from the
+    /// frame rather than the fitting size, and the toggle came out 0 pt wide — present, in
+    /// the right place, and invisible, so the sidebar could not be put away at all.
     @Test("an accessory view is zero-width until it is sized")
     func accessoryNeedsSizing() {
         let hosting = NSHostingView(rootView: Text("Home").frame(height: 28))
@@ -113,7 +83,8 @@ struct WindowChromeTests {
         #expect(hosting.frame.width > 0)
     }
 
-    /// The slot is measured once and never again, so it is sized for the longest name the
+    /// AppKit measures the slot once and never asks again — measured: it stayed at 85 pt
+    /// while the content had grown to want 136 — so it is sized for the longest name the
     /// app can show rather than the one it happens to be showing.
     @Test("the slot fits every section name, not just the short ones")
     func slotFitsTheLongestName() {

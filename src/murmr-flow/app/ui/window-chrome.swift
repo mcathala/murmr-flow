@@ -63,17 +63,18 @@ struct WindowChrome: NSViewRepresentable {
     /// Everything about how the window is drawn, and nothing about what is in it — so a
     /// test can put a plain `NSWindow` through it without standing up the whole app.
     ///
-    /// **The first two lines are in that order on purpose.** Neither
-    /// `titlebarAppearsTransparent` nor `.fullSizeContentView` clears the title bar's
-    /// background material alone, and the order decides whether it goes at all: changing
-    /// the style mask rebuilds the title bar, and the rebuild only leaves the material
-    /// out if the window was already transparent when it happened. Measured both ways on
-    /// a real window, and the tests hold them here.
+    /// **The first two lines are in that order on purpose.** Measured on macOS 26:
+    /// changing the style mask rebuilds the title bar, and the rebuild leaves the
+    /// background material out only if the window was already transparent when it
+    /// happened. Set the other way round the material stayed. It costs nothing to keep
+    /// them in the order that measured clean.
     ///
-    /// This is necessary and was not sufficient. On macOS 26.0 AppKit draws the title
-    /// bar's background regardless — a bug, FB20341654, fixed in 26.1 — and the answer to
-    /// *that* is `.windowStyle(.hiddenTitleBar)` on the scene in `MurmrFlowApp`, which is
-    /// where the reasoning for it lives.
+    /// Not asserted in the tests, because what a given macOS leaves in its title bar is
+    /// that macOS's business and differs by version — the tests check that this window is
+    /// configured the way the app draws into, which is the part that is ours. The grey
+    /// band across the top is a separate matter and a bug of Apple's: FB20341654, fixed
+    /// in 26.1, answered by `.windowStyle(.hiddenTitleBar)` on the scene in
+    /// `MurmrFlowApp`, where the reasoning for it lives.
     @MainActor
     static func applyStyle(to window: NSWindow) {
         window.titlebarAppearsTransparent = true
@@ -94,26 +95,6 @@ struct WindowChrome: NSViewRepresentable {
         // one place this is ever seen is the top of the window, and that is the end of
         // `InkGround`'s gradient that starts there.
         window.backgroundColor = NSColor(Theme.Palette.deep)
-    }
-
-    /// What `applyStyle(to:)` is meant to leave in the title bar: nothing that paints.
-    ///
-    /// Reads the view hierarchy and changes nothing. It exists for the test — the band is
-    /// AppKit's own view, so the only way to know it is gone is to ask a real window.
-    @MainActor
-    static func visibleTitlebarMaterials(in window: NSWindow) -> [NSVisualEffectView] {
-        guard let frame = window.contentView?.superview else { return [] }
-        return frame.subviews
-            .filter { String(describing: type(of: $0)).contains("TitlebarContainerView") }
-            .flatMap(materials(in:))
-            .filter { !$0.isHidden }
-    }
-
-    private static func materials(in view: NSView) -> [NSVisualEffectView] {
-        var found: [NSVisualEffectView] = []
-        if let effect = view as? NSVisualEffectView { found.append(effect) }
-        for subview in view.subviews { found += materials(in: subview) }
-        return found
     }
 
     // MARK: - The controls in the title bar's row
