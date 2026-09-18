@@ -52,11 +52,35 @@ struct WindowChrome: NSViewRepresentable {
     /// Mode they came out pale grey against a navy window.
     @MainActor
     static func dress(_ window: NSWindow) {
-        window.appearance = NSAppearance(named: .darkAqua)
-        // The content view runs the full height of the window, title bar included, so the
-        // sidebar's ground reaches the top edge rather than starting below a bar.
-        window.styleMask.insert(.fullSizeContentView)
+        applyStyle(to: window)
+        installControls(window)
+        // Opened from the menu bar while the window sits on another Space, macOS would
+        // otherwise switch the whole screen over to it. The window comes to the user
+        // instead: the menu bar is where they are, so that is where the app should be.
+        window.collectionBehavior.insert(.moveToActiveSpace)
+    }
+
+    /// Everything about how the window is drawn, and nothing about what is in it — so a
+    /// test can put a plain `NSWindow` through it without standing up the whole app.
+    ///
+    /// **The first two lines are in that order on purpose.** Neither
+    /// `titlebarAppearsTransparent` nor `.fullSizeContentView` clears the title bar's
+    /// background material alone, and the order decides whether it goes at all: changing
+    /// the style mask rebuilds the title bar, and the rebuild only leaves the material
+    /// out if the window was already transparent when it happened. Measured both ways on
+    /// a real window, and the tests hold them here.
+    ///
+    /// This is necessary and was not sufficient. On macOS 26.0 AppKit draws the title
+    /// bar's background regardless — a bug, FB20341654, fixed in 26.1 — and the answer to
+    /// *that* is `.windowStyle(.hiddenTitleBar)` on the scene in `MurmrFlowApp`, which is
+    /// where the reasoning for it lives.
+    @MainActor
+    static func applyStyle(to window: NSWindow) {
         window.titlebarAppearsTransparent = true
+        // The content view runs the window's full height, title bar included.
+        window.styleMask.insert(.fullSizeContentView)
+
+        window.appearance = NSAppearance(named: .darkAqua)
         // The app draws its own name — see `SidebarHeader` and `TitleBarControls`. The
         // title string stays: it is how this window is found.
         window.titleVisibility = .hidden
@@ -65,65 +89,26 @@ struct WindowChrome: NSViewRepresentable {
         // ground is meant to be continuous from the traffic lights down.
         window.toolbar = nil
         window.titlebarSeparatorStyle = .none
-        removeTitlebarMaterial(window)
-        installControls(window)
-        // Opened from the menu bar while the window sits on another Space, macOS would
-        // otherwise switch the whole screen over to it. The window comes to the user
-        // instead: the menu bar is where they are, so that is where the app should be.
-        window.collectionBehavior.insert(.moveToActiveSpace)
+        // Whatever shows through before or between SwiftUI's passes is the ground's own
+        // colour rather than the system's grey. `deep` rather than `abyss`, because the
+        // one place this is ever seen is the top of the window, and that is the end of
+        // `InkGround`'s gradient that starts there.
+        window.backgroundColor = NSColor(Theme.Palette.deep)
     }
 
-    // MARK: - The bar across the top
-
-    /// Removes the blurred bar macOS draws across the top of the window.
+    /// What `applyStyle(to:)` is meant to leave in the title bar: nothing that paints.
     ///
-    /// `titlebarAppearsTransparent` clears the title bar's *background colour* and nothing
-    /// else. The bar is also an `NSVisualEffectView`, and it sits in the frame view —
-    /// above the content view, not behind it. So the sidebar's glass stopped a title
-    /// bar's height short of the window's top edge, and the mark and the name drawn up
-    /// there came out grey on navy. That was the washed-out header: not ink that was too
-    /// dark, but a surface laid over it.
-    ///
-    /// The material is a view, so it can be found and hidden. Only `NSVisualEffectView`s
-    /// are touched — the traffic lights are plain buttons alongside them and are left
-    /// exactly where AppKit put them. Nothing here is load-bearing: if the hierarchy ever
-    /// changes shape the search finds nothing, says so in the log, and the window is the
-    /// one we had before.
-    /// Separate from `dress(_:)`, and not private, so a test can put a real `NSWindow`
-    /// through it and count what is left. This is the one part of the window that cannot
-    /// be caught in a snapshot, because it is not SwiftUI that draws it.
-    @MainActor
-    static func removeTitlebarMaterial(_ window: NSWindow) {
-        guard let frame = window.contentView?.superview else {
-            log.notice("no frame view; the bar across the top is left alone")
-            return
-        }
-        for container in frame.subviews where isTitlebarContainer(container) {
-            container.wantsLayer = true
-            container.layer?.backgroundColor = NSColor.clear.cgColor
-            for effect in materials(in: container) { effect.isHidden = true }
-        }
-        if !visibleTitlebarMaterials(in: window).isEmpty {
-            log.notice("a title bar material is still showing")
-        }
-    }
-
-    /// What `removeTitlebarMaterial(_:)` is meant to leave behind: nothing.
+    /// Reads the view hierarchy and changes nothing. It exists for the test — the band is
+    /// AppKit's own view, so the only way to know it is gone is to ask a real window.
     @MainActor
     static func visibleTitlebarMaterials(in window: NSWindow) -> [NSVisualEffectView] {
         guard let frame = window.contentView?.superview else { return [] }
         return frame.subviews
-            .filter(isTitlebarContainer)
+            .filter { String(describing: type(of: $0)).contains("TitlebarContainerView") }
             .flatMap(materials(in:))
             .filter { !$0.isHidden }
     }
 
-    private static func isTitlebarContainer(_ view: NSView) -> Bool {
-        String(describing: type(of: view)).contains("TitlebarContainerView")
-    }
-
-    /// Only `NSVisualEffectView`s. The traffic lights are plain buttons alongside them, so
-    /// a search that reached for their superviews would take the buttons with it.
     private static func materials(in view: NSView) -> [NSVisualEffectView] {
         var found: [NSVisualEffectView] = []
         if let effect = view as? NSVisualEffectView { found.append(effect) }
@@ -153,10 +138,26 @@ struct WindowChrome: NSViewRepresentable {
 
         let hosting = NSHostingView(rootView: TitleBarControls(services: AppServices.shared))
         hosting.identifier = controlsIdentifier
+        size(hosting)
         let controller = NSTitlebarAccessoryViewController()
         controller.view = hosting
         controller.layoutAttribute = .leading
         window.addTitlebarAccessoryViewController(controller)
+    }
+
+    /// Gives the accessory its width, which AppKit will not work out on its own.
+    ///
+    /// An `NSHostingView` handed straight to a `NSTitlebarAccessoryViewController` arrives
+    /// with a zero frame, and AppKit sizes the slot from the frame rather than from the
+    /// view's fitting size — so the toggle was installed, in the right place, 0 pt wide,
+    /// and the title bar looked empty. Setting the frame is what fills the slot;
+    /// `translatesAutoresizingMaskIntoConstraints` and `sizingOptions` were each measured
+    /// and neither made any difference.
+    @MainActor
+    @discardableResult
+    static func size(_ view: NSView) -> NSView {
+        view.frame = NSRect(origin: .zero, size: view.fittingSize)
+        return view
     }
 }
 
@@ -174,6 +175,29 @@ struct TitleBarControls: View {
     private var toggleLabel: String {
         services.isSidebarCollapsed ? "Show sidebar" : "Hide sidebar"
     }
+
+    /// Fixed, and as wide as the longest section name the app can put here.
+    ///
+    /// A title bar accessory does not follow its content. AppKit measures the slot once,
+    /// from the view's frame, and never asks again — measured: the slot stayed at 85 pt
+    /// while the content had grown to want 136, so "Privacy & data" would have been cut
+    /// off where "Home" fitted. Sizing it for the worst case and leaving the row
+    /// left-aligned inside costs nothing, because what is beside it is empty title bar.
+    static let width: CGFloat = {
+        let font =
+            NSFont(name: Theme.Face.ui, size: 13)
+            ?? NSFont.systemFont(ofSize: 13, weight: .medium)
+        let names =
+            MainWindow.Route.top.map(\.label) + SettingsPane.allCases.map(\.label)
+        let widest =
+            names
+            .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+            .max() ?? 90
+        // leading 6, glyph 24, gap 9, mark 15, gap 9, the name, trailing 14. Two points
+        // of slack, because the measured width is the face's and the rendered one is
+        // SwiftUI's and they are not always the same to the pixel.
+        return 6 + 24 + 9 + 15 + 9 + ceil(widest) + 14 + 2
+    }()
 
     var body: some View {
         HStack(spacing: 9) {
@@ -209,7 +233,7 @@ struct TitleBarControls: View {
         }
         .padding(.leading, 6)
         .padding(.trailing, 14)
-        .frame(height: 28)
+        .frame(width: Self.width, height: 28, alignment: .leading)
         .animation(.easeInOut(duration: 0.18), value: services.isSidebarCollapsed)
     }
 }
