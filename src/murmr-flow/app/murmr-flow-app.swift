@@ -46,6 +46,15 @@ struct MurmrFlowApp: App {
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
+
+            // The keyboard route to the same thing the title bar's glyph does. ⌘\ is what
+            // the apps that hide a sidebar have settled on, and it is not taken here.
+            CommandGroup(after: .sidebar) {
+                Button(services.isSidebarCollapsed ? "Show Sidebar" : "Hide Sidebar") {
+                    services.toggleSidebar()
+                }
+                .keyboardShortcut("\\", modifiers: .command)
+            }
         }
 
         MenuBarExtra {
