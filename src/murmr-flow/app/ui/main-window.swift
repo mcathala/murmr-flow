@@ -68,18 +68,34 @@ struct MainWindow: View {
     static let sidebarWidth: CGFloat = 198
 
     var body: some View {
-        Group {
-            // First launch takes the whole window. The sidebar is navigation, and there is
-            // nowhere to navigate to until the app can hear you.
-            if services.onboarding.isComplete {
-                shell.transition(.opacity)
-            } else {
-                OnboardingView(services: services).transition(.opacity)
+        ZStack {
+            // One ground behind everything, reaching every edge of the window — the title
+            // bar's row included.
+            //
+            // A sibling in a stack rather than a `.background`. `InkGround` ignores the
+            // safe area and always has, but as the *root view's* background it was laid
+            // out inside that safe area with no room to expand past it, so the strip
+            // beside the traffic lights was left to the window's own colour. A sibling in
+            // a stack has the room.
+            //
+            // This is not what cured the grey band across the top — that was AppKit
+            // drawing the title bar over everything, and `.windowStyle(.hiddenTitleBar)`
+            // in `MurmrFlowApp` is what answers it. The ground should reach the window's
+            // edges either way.
+            InkGround()
+                .ignoresSafeArea()
+
+            Group {
+                // First launch takes the whole window. The sidebar is navigation, and
+                // there is nowhere to navigate to until the app can hear you.
+                if services.onboarding.isComplete {
+                    shell.transition(.opacity)
+                } else {
+                    OnboardingView(services: services).transition(.opacity)
+                }
             }
+            .animation(.easeInOut(duration: 0.3), value: services.onboarding.isComplete)
         }
-        .animation(.easeInOut(duration: 0.3), value: services.onboarding.isComplete)
-        // One ground behind everything, so no layout state leaves a strip unpainted.
-        .background(InkGround())
         // Zero-size, draws nothing: it is here to hear which window it ends up in.
         .background(WindowChrome().frame(width: 0, height: 0))
         .font(Theme.Text.body)
@@ -167,8 +183,7 @@ struct MainWindow: View {
                 Color.clear
                     .frame(width: Self.edgeWidth)
                     .frame(maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                    .onHover { if $0 { showPeek() } }
+                    .overlay { HoverStrip { if $0 { showPeek() } } }
 
                 peekCard
             }
@@ -188,10 +203,10 @@ struct MainWindow: View {
             // Inset from the window rather than flush with it, so it reads as a card over
             // the content and not as the column having come back.
             .padding(EdgeInsets(top: 38, leading: 8, bottom: 8, trailing: 0))
+            .overlay { HoverStrip { $0 ? showPeek() : hidePeek() } }
             .offset(x: isPeeking ? 0 : -(Self.sidebarWidth + 26))
             .opacity(isPeeking ? 1 : 0)
             .allowsHitTesting(isPeeking)
-            .onHover { if !$0 { hidePeek() } }
             .animation(.smooth(duration: 0.26), value: isPeeking)
             // Choosing a section is the end of the errand the card was opened for.
             .onChange(of: services.route) { _, _ in
