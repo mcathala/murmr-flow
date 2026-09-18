@@ -2,6 +2,10 @@ import AppKit
 import Observation
 import OSLog
 
+/// Outside the class: a stored property's default value is evaluated before there is a
+/// `Self` to name, so the key cannot be a static member of the type that reads it.
+private let sidebarCollapsedKey = "sidebar.collapsed"
+
 /// Owns the objects that live for as long as the process does.
 ///
 /// These used to be `@State` on the `App` struct, started from a view's `.task`. That
@@ -22,6 +26,23 @@ final class AppServices {
         didSet {
             if case .settings(let pane) = route { lastSettingsPane = pane }
         }
+    }
+
+    /// Whether the sidebar is away, across launches.
+    ///
+    /// `NavigationSplitView` persisting its own collapsed state was one of the reasons it
+    /// was dropped — the app could open with no navigation at all. That objection does not
+    /// apply now: the toggle sits in the title bar, in the same place in both states, and
+    /// brushing the left edge brings the column back. Collapsed is a smaller window to
+    /// work in, not a window you are stuck in.
+    var isSidebarCollapsed: Bool = UserDefaults.standard.bool(forKey: sidebarCollapsedKey) {
+        didSet {
+            UserDefaults.standard.set(isSidebarCollapsed, forKey: sidebarCollapsedKey)
+        }
+    }
+
+    func toggleSidebar() {
+        isSidebarCollapsed.toggle()
     }
 
     /// A note or a dictation the app has been asked to show, and which tab has not
