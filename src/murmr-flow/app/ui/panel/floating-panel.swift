@@ -49,8 +49,16 @@ final class FloatingPanel {
         panel?.orderFrontRegardless()
     }
 
-    /// The window's current size, for tests that need to check it followed the phase.
-    var windowSize: CGSize? { panel?.frame.size }
+    /// The frame the window has last been told to take.
+    ///
+    /// Kept because the resize is animated now: `panel.frame` is wherever the animation has
+    /// got to, which a caller asking "did the window follow the phase?" does not mean. This
+    /// is the answer to that question, and it is set in the same breath as the frame.
+    private(set) var targetFrame: NSRect = .zero
+
+    /// The size the window is headed for, for tests that need to check it followed the
+    /// phase. Not `panel.frame.size`, for the reason above.
+    var windowSize: CGSize? { panel == nil ? nil : targetFrame.size }
 
     func dismiss() {
         panel?.orderOut(nil)
@@ -73,7 +81,23 @@ final class FloatingPanel {
         // origin calculation, which meant it was already false by the time the window
         // moved — so every resize we performed was recorded as a user drag, and the panel
         // pinned itself on first launch and then crept off centre.
-        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        let frame = NSRect(origin: origin, size: size)
+        targetFrame = frame
+
+        // The frame is set in one step, on purpose.
+        //
+        // Animating it as well looked like the obvious fix for the transition reading as
+        // two events — and it made things worse, because it put two animations on one
+        // property. The contents are laid out to `model.size` and eased there by SwiftUI;
+        // AppKit was easing the window to the same size on its own curve, resizing the
+        // hosting view every frame underneath a SwiftUI pass that was already mid-flight.
+        // The two never agreed on where an edge was.
+        //
+        // Whichever of the two drives has to be the only one. The window is the one that
+        // cannot overshoot, cannot be clipped, and has to be large enough *before* the
+        // contents need the room — so it goes first, in one step, and the contents move
+        // inside a frame that is already the right size.
+        panel.setFrame(frame, display: true)
 
         currentScreenFrame = pointerScreen()?.frame
 
@@ -212,7 +236,16 @@ final class FloatingPanel {
             targets.append(target)
             menu.addItem(item)
         }
-        menu.popUp(positioning: nil, at: point, in: nil)
+        // Upward, not downward.
+        //
+        // `popUp` puts the menu's *upper-left* corner at the point it is given, so a menu
+        // opened from the pill runs straight down into the Dock and off the bottom of the
+        // screen — the one direction this panel never has room in. Offsetting by the
+        // menu's own height puts its bottom edge at the pointer instead, so it grows up
+        // over the content, where all the room is. AppKit still flips it back if a screen
+        // ever has more room below than above.
+        let above = NSPoint(x: point.x, y: point.y + menu.size.height + 6)
+        menu.popUp(positioning: nil, at: above, in: nil)
         targets.removeAll()
     }
 

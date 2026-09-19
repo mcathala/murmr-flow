@@ -51,6 +51,11 @@ final class PanelModel {
         /// opposite outcomes, on states that look alike. Removing it entirely was the
         /// wrong correction: it left a meeting you could start from the panel but not
         /// stop from it.
+        ///
+        /// **Nothing reads this any more.** The view answers the same question from
+        /// `showsExitSatellite` and `exitDestroys`, which also say *where* the control
+        /// goes and what colour it is. Kept for now only because it is the record of why
+        /// there are two of them; it should go when the panel next settles.
         var controls: Controls {
             switch self {
             case .dictating:
@@ -197,8 +202,21 @@ final class PanelModel {
 
     // MARK: - Transitions
 
+    /// Whether the change that just happened is one to animate.
+    ///
+    /// Everything the pill does between open states is a *movement* — the mic leaves, the
+    /// target slides into its slot, the clock opens behind it — and those are worth
+    /// watching. Coming out of rest is not a movement: a 44×5 bar and a row of controls
+    /// share no parts, so there is nothing to carry from one to the other and the tween
+    /// only draws attention to the fact. It appears, and it goes.
+    ///
+    /// Decided here rather than in the view because this is the only place that sees both
+    /// the phase being left and the one being entered.
+    private(set) var animatesTransition = true
+
     func set(_ phase: Phase) {
         guard self.phase != phase else { return }
+        animatesTransition = self.phase != .resting && phase != .resting
         // Anything that starts running un-hides the panel: you should never be recording
         // with no sign of it on screen.
         if phase.isBusy { isHidden = false }

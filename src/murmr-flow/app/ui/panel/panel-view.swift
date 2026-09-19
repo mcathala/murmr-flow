@@ -16,10 +16,19 @@ struct PanelView: View {
 
     @Bindable var model: PanelModel
 
-    /// One curve for the whole panel: about 8% of overshoot, settling once. A second bounce
-    /// is where liquid turns into jelly, and a linear resize reads as a window rather than
-    /// as something with surface tension.
-    static let drop = Animation.spring(response: 0.40, dampingFraction: 0.72)
+    /// One curve for the whole panel, and it does **not** overshoot.
+    ///
+    /// The prototype's water-drop spring bounced 8% past its target, which a window cannot
+    /// do: the panel is exactly the size of its contents, so everything the bounce pushes
+    /// past the edge is clipped flat by the window's backing store. The pill appeared to
+    /// squash against its own frame on every transition.
+    ///
+    /// The window animates to the same curve over the same duration — see
+    /// `FloatingPanel.apply()`. That is the part that was actually wrong: the frame used to
+    /// snap to its new size while the contents eased into it, so the glass arrived before
+    /// the things inside it.
+    static let duration: Double = 0.32
+    static let drop = Animation.smooth(duration: duration)
 
     /// Drives the red ring's pulse while something is recording.
     @State private var breath = false
@@ -38,14 +47,28 @@ struct PanelView: View {
             Color.clear
             if model.phase == .resting { resting } else { open }
         }
+        // The animations go **inside** the frame, and the frame is not one of them.
+        //
+        // Attached outside, they animated `model.size` too — so the window snapped to its
+        // new size while this box eased there over a third of a second, and for that third
+        // the contents were laid out in a small box floating inside a large window. That
+        // is the resting lozenge appearing up beside the deck: not a stray view, the right
+        // view in a box that had not caught up.
+        //
+        // The window owns the size and takes it in one step. Everything in here moves
+        // within a frame that is already correct.
+        //
+        // And coming out of rest does not move at all — see `animatesTransition`. The
+        // lozenge and the row have no parts in common, so there was nothing being carried
+        // across and the tween only drew attention to itself.
+        .animation(model.animatesTransition ? Self.drop : nil, value: model.phase)
+        .animation(Self.drop, value: model.mode)
         .frame(width: model.size.width, height: model.size.height)
         // The whole window, including the transparent margin the satellites orbit in.
         // Without it, moving the pointer from the row toward a satellite leaves the pill
         // and collapses it mid-reach.
         .contentShape(.rect)
         .onHover { model.hover($0) }
-        .animation(Self.drop, value: model.phase)
-        .animation(Self.drop, value: model.mode)
     }
 
     // MARK: - The centre line
@@ -102,8 +125,12 @@ struct PanelView: View {
             }
         }
         .padding(.horizontal, PanelLayout.shoulderPad)
+        // The nudge goes *inside* the frame. Outside it, the 3pt was added to the deck's
+        // height after the model had already sized the window from `PanelLayout.shoulder`,
+        // so the panel came to 59pt in a 56pt window — and since the stack is bottom
+        // aligned, the 3pt that had nowhere to go was taken off the top of the deck.
+        .padding(.top, 2)
         .frame(height: PanelLayout.shoulder + 4, alignment: .top)
-        .padding(.top, 3)
         .glass(.floating, radius: 9, elevated: false)
         .padding(.bottom, -4)
         .zIndex(-1)
@@ -384,68 +411,72 @@ struct PanelView: View {
     /// A bin was the wrong correction: it read as a different *control* when the action is
     /// the same one, just costlier. And a hold is the only confirmation a floating panel can
     /// offer, having nowhere to put a sheet.
+    /// How long the red one has to be held before it fires.
+    static let holdToDestroy: Double = 0.6
+
+    @ViewBuilder
     private var exitSatellite: some View {
-        let destroys = model.exitDestroys
-        return satellite(
-            "xmark",
-            tint: destroys ? Theme.Palette.danger : Theme.Palette.muted,
-            help: destroys
-                ? (model.phase == .meeting ? "Hold to delete the recording" : "Hold to discard")
-                : "Hide the pill"
-        ) {
-            // A plain click only dismisses. Anything destructive comes from the gesture
-            // below, which is why this does nothing while something is running.
-            if !destroys { model.onDiscard?() }
-        }
-        .overlay {
-            if destroys {
-                Circle()
-                    .trim(from: 0, to: hold)
-                    .stroke(
-                        Theme.Palette.danger,
-                        style: StrokeStyle(lineWidth: 1.6, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-                    .frame(width: PanelLayout.satellite, height: PanelLayout.satellite)
-                    .allowsHitTesting(false)
+        if model.exitDestroys {
+            // **Not a Button.** A Button takes the press for itself, so the drag gesture
+            // that used to drive the arc never received a single event and the red ✕ did
+            // nothing at all while recording. A long press is the gesture this actually
+            // is, and `onPressingChanged` gives the arc its start and its cancel for free.
+            satelliteFace("xmark", tint: Theme.Palette.danger)
+                .overlay {
+                    Circle()
+                        .trim(from: 0, to: hold)
+                        .stroke(
+                            Theme.Palette.danger,
+                            style: StrokeStyle(lineWidth: 1.6, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: PanelLayout.satellite, height: PanelLayout.satellite)
+                        .allowsHitTesting(false)
+                }
+                .contentShape(.circle)
+                .onLongPressGesture(minimumDuration: Self.holdToDestroy) {
+                    hold = 0
+                    model.onDiscard?()
+                } onPressingChanged: { pressing in
+                    withAnimation(
+                        pressing
+                            ? .linear(duration: Self.holdToDestroy)
+                            : .easeOut(duration: 0.18)
+                    ) {
+                        hold = pressing ? 1 : 0
+                    }
+                }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel(destroyLabel)
+                .help(destroyLabel)
+        } else {
+            Button { model.onDiscard?() } label: {
+                satelliteFace("xmark", tint: Theme.Palette.muted)
             }
+            .buttonStyle(.plain)
+            .help("Hide the pill")
         }
-        .gesture(destroys ? holdToDestroy : nil)
     }
 
-    private var holdToDestroy: some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { _ in
-                guard holdTask == nil else { return }
-                withAnimation(.linear(duration: 0.6)) { hold = 1 }
-                holdTask = Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(600))
-                    guard !Task.isCancelled else { return }
-                    hold = 0
-                    holdTask = nil
-                    model.onDiscard?()
-                }
-            }
-            .onEnded { _ in
-                holdTask?.cancel()
-                holdTask = nil
-                withAnimation(.easeOut(duration: 0.18)) { hold = 0 }
-            }
+    private var destroyLabel: String {
+        model.phase == .meeting ? "Hold to delete the recording" : "Hold to discard"
     }
 
     private func satellite(
         _ symbol: String, tint: Color, help: String, action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .frame(width: PanelLayout.satellite, height: PanelLayout.satellite)
-                // Same reason as the row: no shadow inside a window with no room for one.
-                .glass(.floating, radius: PanelLayout.satellite / 2, elevated: false)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(tint)
-        .help(help)
+        Button(action: action) { satelliteFace(symbol, tint: tint) }
+            .buttonStyle(.plain)
+            .help(help)
+    }
+
+    private func satelliteFace(_ symbol: String, tint: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 12, weight: .semibold))
+            .frame(width: PanelLayout.satellite, height: PanelLayout.satellite)
+            // Same reason as the row: no shadow inside a window with no room for one.
+            .glass(.floating, radius: PanelLayout.satellite / 2, elevated: false)
+            .foregroundStyle(tint)
     }
 
     // MARK: - The countdown
