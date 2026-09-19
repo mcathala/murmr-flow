@@ -16,6 +16,21 @@ struct SelectableRow<Content: View>: View {
     /// Rounded on all four sides and inset from the column edge, the way a Mac sidebar row
     /// sits — a full-bleed rectangle reads as a table.
     var radius: CGFloat = Theme.Radius.row
+    /// How much air the row keeps above and below its content.
+    ///
+    /// The one thing that is allowed to differ between a sidebar and a menu. A sidebar is
+    /// read at rest and a menu is used in a hurry, which is why every Mac menu is denser
+    /// than every Mac sidebar — that is the platform's convention, not a preference. What
+    /// must *not* differ is the horizontal inset: that is the wash's relationship to its
+    /// container, and two answers to it in one window is how the same row starts looking
+    /// like two components.
+    var verticalPadding: CGFloat = 7
+    /// Held lit from outside, for a row whose submenu is out.
+    ///
+    /// The pointer is on the flyout, not on the row that opened it — but the row is still
+    /// the reason the flyout is there, and a parent that goes dark the moment you reach its
+    /// children leaves the panes belonging to nothing.
+    var isArmed: Bool = false
     @ViewBuilder let content: () -> Content
 
     @State private var isHovering = false
@@ -27,14 +42,14 @@ struct SelectableRow<Content: View>: View {
     /// the accent for the one place that has to be seen.
     private var fill: Color {
         if isSelected { return Theme.Palette.gold.opacity(0.16) }
-        return isHovering ? .white.opacity(0.065) : .clear
+        return isHovering || isArmed ? .white.opacity(0.065) : .clear
     }
 
     var body: some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 9)
-            .padding(.vertical, 7)
+            .padding(.vertical, verticalPadding)
             .background {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(fill)

@@ -258,7 +258,7 @@ struct RecentItem: Identifiable {
             RecentItem(
                 id: "d-\($0.id)",
                 date: $0.date,
-                title: $0.summary(limit: 70),
+                title: $0.singleLine,
                 subtitle: [
                     Self.when($0.date),
                     String(format: "%.0fs", $0.audioDuration),
