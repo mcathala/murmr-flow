@@ -328,9 +328,15 @@ struct MainWindow: View {
                 .allowsHitTesting(services.sectionMenu.isOpen)
                 // Under the header, in the same column it sits in. Both numbers are the
                 // app's own layout; nothing here is read back out of AppKit.
+                //
+                // 8pt of daylight, not 2. At 2 the menu's top edge sat against the bottom
+                // of the name it drops from, so the two read as one tall slab rather than
+                // as a control and the menu it opened. The gap still has to be crossable
+                // without the menu closing underneath the pointer — that is what
+                // `SectionMenu.closeDelay` is for, and 8 is well inside it.
                 .offset(
                     x: Self.contentGutter,
-                    y: Self.sectionHeaderHeight + (services.sectionMenu.isOpen ? 2 : -3)
+                    y: Self.sectionHeaderHeight + (services.sectionMenu.isOpen ? 8 : 3)
                 )
                 .animation(.smooth(duration: 0.16), value: services.sectionMenu.isOpen)
         }
