@@ -31,21 +31,9 @@ struct HotkeysPane: View {
         PaneScroll(title: "Hotkeys") {
             SectionLabel(title: "Active")
 
-            bindCard(
-                slot: .dictate,
-                title: "Dictation",
-                hotkey: settings.hotkey,
-                subtitle: nil
-            )
+            bindCard(slot: .dictate, title: "Dictation", hotkey: settings.hotkey)
 
-            bindCard(
-                slot: .meeting,
-                title: "Notetaker",
-                hotkey: settings.meetingHotkey,
-                subtitle: settings.meetingHotkey == nil
-                    ? "No key. Notes start from the pill or the window."
-                    : nil
-            )
+            bindCard(slot: .meeting, title: "Notetaker", hotkey: settings.meetingHotkey)
 
             if let rejected {
                 WarningRow(message: rejected)
@@ -80,7 +68,8 @@ struct HotkeysPane: View {
             if !dictation.hotkeyActive {
                 if services.permissions.accessibility != .granted {
                     WarningRow(
-                        message: "Accessibility is off, so no hotkey will fire.",
+                        message: "Nothing starts when you press a hotkey \u{2014} Accessibility "
+                            + "is off.",
                         action: ("Allow", { services.permissions.requestAccessibility() })
                     )
                 } else {
@@ -97,22 +86,12 @@ struct HotkeysPane: View {
 
     // MARK: - One bind
 
-    private func bindCard(
-        slot: Slot, title: String, hotkey: Hotkey?, subtitle: String?
-    ) -> some View {
+    private func bindCard(slot: Slot, title: String, hotkey: Hotkey?) -> some View {
         let isRecording = recording == slot
         return Card(highlighted: isRecording) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title).font(.callout.weight(.medium))
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
+                    Text(title).font(.callout.weight(.medium))
 
                     Spacer(minLength: 0)
 
@@ -123,11 +102,14 @@ struct HotkeysPane: View {
                         Button("Cancel") { stopRecording() }
                             .controlSize(.small)
                     } else {
-                        if let hotkey {
-                            Keycap(text: hotkey.displayName)
-                        }
+                        // Always a cap, set or not — see `Keycap`.
+                        Keycap(text: hotkey?.displayName)
                         Button(hotkey == nil ? "Set" : "Change") { start(slot) }
                             .controlSize(.small)
+                            // "Set" and "Change" are different lengths, and a row is not
+                            // the place to discover that: the buttons sit in the same
+                            // column whichever word is on them.
+                            .frame(minWidth: 62)
                         // The Notetaker key is optional — the store keeps "cleared" as a
                         // state of its own — but there was no control that cleared it.
                         if slot == .meeting, hotkey != nil {
@@ -154,15 +136,6 @@ struct HotkeysPane: View {
                             message: warning,
                             action: ("Open Keyboard Settings", { HotkeyMonitor.openKeyboardSettings() })
                         )
-                    } else if hotkey.usesFn {
-                        // The app takes the 🌐 key's system job for itself while fn is a
-                        // hotkey. Done silently until now; the person deserves to know
-                        // where their emoji picker went.
-                        Text("While fn is your hotkey, its usual job — emoji, switching "
-                             + "input sources — is paused.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -203,14 +176,26 @@ struct HotkeysPane: View {
 }
 
 /// A key drawn as a key, so it is recognised rather than read.
+///
+/// An unset key is drawn as an empty cap rather than as nothing at all. The two rows in
+/// this pane are built by the same function, but one had a key and one did not, so one
+/// had a cap and one did not — and the buttons beside them landed in different places
+/// down a list that is meant to read as a column. An empty cap keeps the shape, and says
+/// "there is a key here, it is unset" rather than leaving the eye to infer it.
 struct Keycap: View {
-    let text: String
+    let text: String?
+
+    init(text: String?) { self.text = text }
 
     var body: some View {
-        Text(text)
+        Text(text ?? "—")
             .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(text == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
+            // Wide enough for the longest key this app binds, so the buttons beside every
+            // cap line up whatever is in it.
+            .frame(minWidth: 34)
             .background(.background.secondary, in: .rect(cornerRadius: 5))
             .overlay {
                 RoundedRectangle(cornerRadius: 5)
