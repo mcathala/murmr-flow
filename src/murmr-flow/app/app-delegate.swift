@@ -15,6 +15,24 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Runs the app as a normal one — Dock icon, ⌘-Tab entry, menu bar — instead of the
+        // agent `Info.plist` declares it to be.
+        //
+        // Full screen is the reason it exists. `Info.plist` sets `LSUIElement`, so the app
+        // runs `.accessory` and has no Dock icon, and an accessory app's window will not
+        // enter full screen however its own flags are set: the window reported
+        // `fullScreenPrimary` set, `fullScreenNone` cleared, titled and resizable, and the
+        // green button produced no attempt at all — not even a `willEnterFullScreen`.
+        // Measured both ways; the policy is the whole difference.
+        //
+        // Which is a product decision rather than a bug, and it is not settled: the Dock
+        // icon is what the app gave up to be a menu-bar utility. Until it is decided, this
+        // is how full screen can be had — and if the answer is "yes, always", it becomes
+        // one line in `Info.plist` and this goes away.
+        if ProcessInfo.processInfo.environment["MURMR_REGULAR"] != nil {
+            NSApp.setActivationPolicy(.regular)
+        }
+
         Task { @MainActor in
             AppServices.shared.start(trigger: "didFinishLaunching")
         }
