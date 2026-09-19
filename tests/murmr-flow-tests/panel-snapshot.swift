@@ -44,19 +44,37 @@ struct PanelSnapshotTests {
             return
         }
 
-        let cases: [(String, PanelModel.Phase)] = [
-            ("resting", .resting),
+        // Every phase, in both modes where the mode changes what is drawn. The three
+        // message states and the Notetaker's armed row are here because each one is a
+        // layout the arithmetic cannot check: a row sized from a *measured* string is only
+        // right if the string is allowed to take the width it was measured at, and a Text
+        // that wraps instead is invisible to every assertion in this file.
+        let cases: [(String, PanelModel.Phase, PanelModel.Mode)] = [
+            ("resting", .resting, .dictation),
 
-            ("armed", .armed),
-            ("dictating", .dictating),
-            ("meeting", .meeting),
+            ("armed", .armed, .dictation),
+            ("armed-note", .armed, .note),
+            ("dictating", .dictating, .dictation),
+            ("meeting", .meeting, .note),
+
+            ("working", .working("Cleaning up…"), .dictation),
+            ("notice", .notice("Didn\u{2019}t hear anything"), .dictation),
+            // The longest headline there is: if the message states fit anything, they fit
+            // this, and the row is sized from it rather than clipping it.
+            ("failed", .failed(.insertion), .dictation),
         ]
 
-        for (name, phase) in cases {
+        for (name, phase, mode) in cases {
             let model = PanelModel()
+            model.mode = mode
             model.set(phase)
-            model.promptName = "Default"
+            model.promptName = "Formal"
+            // The case that used to be cut to fifteen characters and an ellipsis. The row
+            // is sized from it now, so if it ever clips again it clips here first.
+            model.promptDetail = "Mail"
             model.hotkeyLabel = "right ⌥"
+            model.meetingHotkeyLabel = "⌥Space"
+            model.hotkeyArmed = true
             model.targetAppName = "Brave Browser"
             model.targetAppIcon = AppIconCache.icon(forBundleID: "com.brave.Browser")
                 ?? NSWorkspace.shared.icon(for: .applicationBundle)
@@ -64,7 +82,6 @@ struct PanelSnapshotTests {
             model.micLevel = 0.09        // speaking
             model.youLevel = 0.003       // a quiet room: should light nothing
             model.themLevel = 0.08       // audio actually playing
-            if phase == .meeting { model.mode = .note }
 
             let renderer = ImageRenderer(
                 content: PanelView(model: model).environment(\.colorScheme, .dark)
