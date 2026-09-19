@@ -149,15 +149,6 @@ final class PanelModel {
         }
     }
 
-    /// Whether anything is bending the output away from what you would expect — translate
-    /// on, or a per-app rule overriding your standing style.
-    ///
-    /// At rest the pill is a 44×5 lozenge with room for exactly one signal, so it uses the
-    /// one gold already means. Without it, leaving translate on is invisible until you
-    /// reach for the pill — and "why is this coming out in English?" is precisely the
-    /// question the deck exists to answer.
-    var outputIsBent: Bool { translateOn || promptDetail != nil }
-
     /// The language half of the deck. `Off` is a value like any other here; it costs no
     /// more room than a code does, now that the deck is one line rather than two capsules.
     var shoulderLanguage: String { translateOn ? translateCode : "Off" }

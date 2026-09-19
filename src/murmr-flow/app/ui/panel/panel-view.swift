@@ -64,17 +64,17 @@ struct PanelView: View {
     /// Deliberately almost nothing. If you are not reaching for it, it should not be asking
     /// for attention.
     ///
-    /// The one exception is gold: a 44×5 lozenge has room for exactly one signal, so it
-    /// spends it saying that something is bending what comes out — translate left on, or a
-    /// per-app rule overriding your style. Otherwise that is invisible until you reach for
-    /// the pill, which is too late to be told.
+    /// It stays muted whatever the settings are. Lighting it gold when translate was left
+    /// on was a way of answering "why is this coming out in English?" a moment earlier —
+    /// but it spends the resting state's whole job to do it. A 44×5 bar glowing at the
+    /// bottom of the screen is not discreet, and this state exists to be ignored. The deck
+    /// says it the moment you reach for the pill, which is soon enough.
     private var resting: some View {
         Capsule()
-            .fill(model.outputIsBent ? Theme.Palette.gold : Theme.Palette.muted.opacity(0.5))
+            .fill(Theme.Palette.muted.opacity(0.5))
             .frame(width: 44, height: 5)
             .overlay(Capsule().fill(Theme.Palette.rim).frame(height: 1), alignment: .top)
             .padding(.bottom, Self.centreLine - 2.5)
-            .help(model.outputIsBent ? "Something is changing the output" : "")
     }
 
     // MARK: - Open
