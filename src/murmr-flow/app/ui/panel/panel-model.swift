@@ -133,19 +133,45 @@ final class PanelModel {
     var translateLanguage: String = "English"
     var translateOn = false
 
-    /// Whether the two bubbles — 文A language, ✦ style — ride the top edge. They are the
-    /// job's *settings*, floated above the row so the row keeps only facts and actions,
-    /// and so the settings stay visible mid-recording, which is exactly when "is this
-    /// coming out in English?" matters.
-    var showsBubbles: Bool {
+    /// Whether the settings deck — output language, style — is docked to the top edge.
+    ///
+    /// They were two capsules floating above the pill, which made the panel a constellation
+    /// of five separate objects and cost 24pt of empty headroom to hold them apart. Grown
+    /// out of the row instead, it is one object with two decks.
+    ///
+    /// It stays through `working`, which is the correction: it used to leave exactly when
+    /// the language and the style were being applied to your words, and to be present all
+    /// through the recording, when nothing was using them yet.
+    var showsShoulder: Bool {
         switch phase {
-        case .armed, .dictating, .meeting: true
-        case .resting, .working, .notice, .failed: false
+        case .armed, .dictating, .meeting, .working: true
+        case .resting, .notice, .failed: false
         }
     }
 
-    /// Height the bubble needs above the row.
-    static let bubbleReach: CGFloat = 24
+    /// Whether anything is bending the output away from what you would expect — translate
+    /// on, or a per-app rule overriding your standing style.
+    ///
+    /// At rest the pill is a 44×5 lozenge with room for exactly one signal, so it uses the
+    /// one gold already means. Without it, leaving translate on is invisible until you
+    /// reach for the pill — and "why is this coming out in English?" is precisely the
+    /// question the deck exists to answer.
+    var outputIsBent: Bool { translateOn || promptDetail != nil }
+
+    /// The language half of the deck. `Off` is a value like any other here; it costs no
+    /// more room than a code does, now that the deck is one line rather than two capsules.
+    var shoulderLanguage: String { translateOn ? translateCode : "Off" }
+
+    /// The style half — and, when something other than your standing style chose it, what
+    /// did. `Formal · Mail`.
+    ///
+    /// This used to be cut to fifteen characters and an ellipsis, because the settings
+    /// floated over a pill whose width they could not influence. The row is sized from this
+    /// string now, so there is nothing left to cut.
+    var styleLabel: String {
+        guard mode != .note, let detail = promptDetail else { return activePromptName }
+        return "\(promptName) \u{00B7} \(detail)"
+    }
 
     /// True once the user has hidden it. The key still works and still opens the panel —
     /// a global hotkey that fires invisibly is a trap.
@@ -200,13 +226,52 @@ final class PanelModel {
         }
     }
 
-    /// How far the Notes satellite sits outside the row, and how big it is. The window is
-    /// widened by this on **both** sides so the row itself stays centred on the screen and
-    /// the existing centring needs no special case — the spare width on the right is
-    /// simply transparent.
-    static let satelliteSize: CGFloat = 30
-    static let satelliteGap: CGFloat = 9
-    static var satelliteReach: CGFloat { satelliteSize + satelliteGap }
+    /// Which satellites are in orbit. The window is widened by their reach on **both**
+    /// sides so the row itself stays centred on the screen; the spare width on a side with
+    /// no satellite is simply transparent.
+    ///
+    /// The left one offers the job you are **not** set up for, so it only exists while you
+    /// are choosing — and it must never repeat the glyph already in the row, or the pair
+    /// reads as one control duplicated rather than two jobs to pick between.
+    var showsModeSatellite: Bool { phase == .armed }
+
+    /// The way out: a muted ✕ that puts the pill down, or — while something is running — a
+    /// red ✕ that throws the work away.
+    ///
+    /// One glyph that sometimes dismissed and sometimes destroyed was the worst
+    /// contradiction in the old panel. The glyph stays; the colour carries the difference,
+    /// and the red one only fires if you hold it.
+    var showsExitSatellite: Bool {
+        switch phase {
+        case .armed, .dictating, .meeting: true
+        case .resting, .working, .notice, .failed: false
+        }
+    }
+
+    var exitDestroys: Bool {
+        switch phase {
+        case .dictating, .meeting: true
+        default: false
+        }
+    }
+
+    /// How long a message stays before clearing itself.
+    ///
+    /// A notice and a failure are both *only a message*, so neither carries a control: the
+    /// row itself is the dismiss and a hairline drains to show it is leaving. That drain is
+    /// drawn from these values, so the countdown cannot disagree with the timer that
+    /// actually fires.
+    static let noticeDuration: TimeInterval = 2
+    /// Longer, because a failure has to be read and not merely noticed.
+    static let failureDuration: TimeInterval = 6
+
+    static func dismissal(for phase: Phase) -> TimeInterval? {
+        switch phase {
+        case .notice: noticeDuration
+        case .failed: failureDuration
+        default: nil
+        }
+    }
 
     func hide() {
         guard !phase.isBusy else { return }
@@ -220,41 +285,137 @@ final class PanelModel {
 
     // MARK: - Geometry
 
-    /// The panel is sized from its state rather than laid out to a fixed frame, so it
-    /// grows and shrinks between states instead of swapping content inside a box.
+    /// The panel is sized from its state rather than laid out to a fixed frame, so it grows
+    /// and shrinks between states instead of swapping content inside a box.
+    ///
+    /// Every width here is **measured, not chosen**. The armed row used to be a hard-coded
+    /// 240pt holding 143pt of content, and the 97pt of nothing between the keycap and the
+    /// start button was not a spacing mistake — it was this number. Nothing is hard-coded
+    /// now: a keycap reading `right ⌥` sizes the row differently from one reading `fn`,
+    /// because it is a different width, and only the font knows by how much.
     var size: CGSize {
-        var size: CGSize = switch phase {
-        case .resting:
-            // Tall enough to hold a capsule centred on the shared centre line, plus room
-            // for its shadow.
-            CGSize(width: 62, height: 34)
-        case .armed:
-            // The row, plus the satellite's reach mirrored on both sides. Slim: with the
-            // two settings in orbit above, the row only holds facts and the start button.
-            CGSize(width: 240 + Self.satelliteReach * 2, height: 48)
-        case .dictating:
-            // Content-hugging: icon, app, waveform, clock, two controls, no dead middle.
-            CGSize(width: 250, height: 48)
-        case .working:
-            CGSize(width: 232, height: 48)
-        case .meeting:
-            CGSize(width: 368, height: 48)
-        case .notice:
-            CGSize(width: 200, height: 48)
-        case .failed(let failure):
-            // The message and the way out — the two-word failure needs no mode icon.
-            CGSize(width: failure.pillWidth, height: 48)
+        var size = CGSize(width: rowWidth, height: PanelLayout.rowHeight)
+
+        if case .resting = phase {
+            // Tall enough to hold the lozenge centred on the shared centre line, and wide
+            // enough to be a hover target rather than a hairline.
+            return CGSize(width: 62, height: 34)
         }
-        // The bubbles ride above the row, so they are window height, not row height.
-        if showsBubbles { size.height += Self.bubbleReach }
+
+        // The deck is docked above the row, so it is window height, not row height.
+        if showsShoulder { size.height += PanelLayout.shoulder }
+        // Mirrored on both sides, so the row stays centred on the screen whichever
+        // satellites are out.
+        size.width += PanelLayout.satelliteReach * 2
+        // Whole points, because a window is measured in them. The mark's width comes from
+        // its own grid — five bars of 90 on a box of 610 — which lands on fractions, and
+        // AppKit rounds the frame it is given. Rounding here instead keeps the size the
+        // model reports and the size the window actually takes the same number.
+        size.width.round(.up)
+        size.height.round(.up)
         return size
     }
 
-    /// The pill itself, without the bubbles' headroom. The row must be laid out to this,
-    /// not to the window: filling the window made the capsule grow taller whenever the
-    /// bubbles appeared, swallowing the space they were supposed to float in.
+    /// The pill itself, without the deck's headroom. The row is laid out to this rather
+    /// than to the window: filling the window made the capsule grow taller whenever the
+    /// deck appeared, swallowing the space it was supposed to occupy.
     var rowHeight: CGFloat {
-        size.height - (showsBubbles ? Self.bubbleReach : 0)
+        phase == .resting ? 5 : PanelLayout.rowHeight
+    }
+
+    /// The capsule's own width — its contents, or the deck docked to it, whichever is
+    /// wider.
+    ///
+    /// The deck setting the floor is what finally fixed the truncation: `promptLabel` used
+    /// to clip the style to fifteen characters because the settings floated over a pill
+    /// whose width they could not influence. A layout problem solved with a substring. The
+    /// row grows to meet the deck instead, so nothing is cut and no label lies.
+    var rowWidth: CGFloat {
+        var width = contentWidth
+        if showsShoulder {
+            width = max(width, shoulderWidth + PanelLayout.shoulderClearance)
+        }
+        return width.rounded(.up)
+    }
+
+    private var contentWidth: CGFloat {
+        let slot = PanelLayout.slot
+        let group = PanelLayout.groupGap
+
+        switch phase {
+        case .resting:
+            return 44
+
+        case .armed where mode == .note:
+            // A note goes to a *folder*, not to a focused app — so the well holds where it
+            // lands and which key fires it, and never an app icon that does not exist.
+            return PanelLayout.row([
+                slot,
+                PanelLayout.well(icon: true, cap: meetingHotkeyLabel),
+                slot,
+            ])
+
+        case .armed:
+            return PanelLayout.row([
+                slot,
+                PanelLayout.well(icon: targetAppIcon != nil, cap: hotkeyLabel),
+                slot,
+            ])
+
+        case .dictating:
+            // The mic has gone and the well has taken its slot: you already know which job
+            // is running, and the row would rather show you it can hear you.
+            return PanelLayout.row([
+                PanelLayout.well(icon: targetAppIcon != nil, cap: hotkeyLabel),
+                PanelLayout.markWidth(PanelLayout.markHeight),
+                PanelLayout.mono(clock, size: 12),
+                slot,
+            ])
+
+        case .meeting:
+            // No mode icon and no record dot: the red ring already says recording, and you
+            // do not need telling you are in a meeting while watching two people's voices
+            // move. What is left is the only four things it has to say.
+            return PanelLayout.row([
+                PanelLayout.mono(clock, size: 12),
+                meterWidth("You") + group,
+                meterWidth("Them") + group,
+                slot + group,
+            ])
+
+        case .working(let label):
+            return PanelLayout.row([
+                PanelLayout.markWidth(PanelLayout.workingMarkHeight),
+                PanelLayout.body(label),
+            ])
+
+        case .notice(let text):
+            return PanelLayout.row(
+                [PanelLayout.markWidth(PanelLayout.markHeight), PanelLayout.body(text)],
+                pad: PanelLayout.messagePad
+            )
+
+        case .failed(let failure):
+            return PanelLayout.row(
+                [
+                    PanelLayout.markWidth(PanelLayout.markHeight),
+                    PanelLayout.body(failure.headline, size: 12, weight: .semibold),
+                ],
+                pad: PanelLayout.messagePad
+            )
+        }
+    }
+
+    /// A meter is as wide as its bars or its name, whichever needs more.
+    private func meterWidth(_ label: String) -> CGFloat {
+        max(PanelLayout.markWidth(PanelLayout.meterHeight), PanelLayout.label(label))
+    }
+
+    private var shoulderWidth: CGFloat {
+        PanelLayout.shoulderPad * 2
+            + PanelLayout.label(shoulderLanguage)
+            + PanelLayout.shoulderGap * 2 + 1
+            + PanelLayout.label(styleLabel)
     }
 
     /// `0:04`, and `12:04` once a meeting runs long.

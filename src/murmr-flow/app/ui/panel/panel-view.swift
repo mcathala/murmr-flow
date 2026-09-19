@@ -2,13 +2,32 @@ import SwiftUI
 
 /// The floating panel's contents.
 ///
-/// **Every state goes through one container.** Each state used to apply its own
-/// `frame(maxWidth:maxHeight:alignment:)` and its own padding, in a different order — so
-/// each one centred slightly differently, and some not at all. Position belongs to the
-/// container now; the states own only their contents.
+/// **One row of parts that move, not seven pictures that swap.** Every state used to build
+/// its own `HStack` from scratch, so starting a dictation replaced the whole row at once —
+/// which is why it could only ever cross-fade. The parts are declared once here and shown
+/// or hidden per phase, so the ones that survive a transition keep their identity and
+/// *slide*: press start and the mic leaves, the target well travels into its slot, and the
+/// clock opens in the gap behind it.
+///
+/// Two rules hold the rest of it together. **The ring is the only thing you press** — it
+/// changes what it holds rather than being replaced. **The mark is the only thing that
+/// reports** — sound, work and silence, never a spinner or a generic bar.
 struct PanelView: View {
 
     @Bindable var model: PanelModel
+
+    /// One curve for the whole panel: about 8% of overshoot, settling once. A second bounce
+    /// is where liquid turns into jelly, and a linear resize reads as a window rather than
+    /// as something with surface tension.
+    static let drop = Animation.spring(response: 0.40, dampingFraction: 0.72)
+
+    /// Drives the red ring's pulse while something is recording.
+    @State private var breath = false
+    /// How far round the hold-to-destroy arc has travelled, 0…1.
+    @State private var hold: CGFloat = 0
+    @State private var holdTask: Task<Void, Never>?
+    /// The message countdown, draining left to right.
+    @State private var drain: CGFloat = 1
 
     var body: some View {
         // Bottom-aligned, because the panel grows upward from where it rests. The
@@ -17,453 +36,489 @@ struct PanelView: View {
         // against.
         ZStack(alignment: .bottom) {
             Color.clear
-            content
-        }
-        .overlay(alignment: .top) {
-            if model.showsBubbles {
-                HStack(spacing: 8) {
-                    translateBubble
-                    promptBubble
-                }
-            }
+            if model.phase == .resting { resting } else { open }
         }
         .frame(width: model.size.width, height: model.size.height)
+        // The whole window, including the transparent margin the satellites orbit in.
+        // Without it, moving the pointer from the row toward a satellite leaves the pill
+        // and collapses it mid-reach.
         .contentShape(.rect)
         .onHover { model.hover($0) }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        switch model.phase {
-        case .resting: resting
-        case .armed: armed
-        case .dictating: dictating
-        case .meeting: meeting
-        case .working(let label): working(label)
-        case .notice(let text): notice(text)
-        case .failed(let failure): failed(failure)
-        }
+        .animation(Self.drop, value: model.phase)
+        .animation(Self.drop, value: model.mode)
     }
 
     // MARK: - The centre line
 
-    /// Distance from the window's bottom edge to the line the pill and the two round
-    /// buttons **share**.
+    /// Distance from the window's bottom edge to the line the pill and the satellites
+    /// **share**.
     ///
-    /// This is the whole geometry of the collapsed states in one number. Both are centred
-    /// on it, so hovering swaps a 5pt capsule for a 34pt button in the same place rather
-    /// than stacking one above the other. Stacking was the bug: the buttons ended up in
-    /// the strip between the pill and the Dock, and at 34pt tall they reached into it.
-    ///
-    /// 24 is the smallest value that leaves a button clear of the Dock: the window sits
-    /// 10pt above it, a button centred here spans 7…41pt from the window's bottom edge,
-    /// so its lowest point is 17pt clear.
+    /// This is the whole geometry of the collapsed state in one number. Both are centred on
+    /// it, so hovering swaps a 5pt capsule for a 28pt button in the same place rather than
+    /// stacking one above the other. Stacking was the bug: the buttons ended up in the
+    /// strip between the pill and the Dock, and at full height they reached into it.
     static let centreLine: CGFloat = 24
 
     // MARK: - Resting
 
-    /// Deliberately almost nothing. If you are not reaching for it, it should not be
-    /// asking for attention.
+    /// Deliberately almost nothing. If you are not reaching for it, it should not be asking
+    /// for attention.
+    ///
+    /// The one exception is gold: a 44×5 lozenge has room for exactly one signal, so it
+    /// spends it saying that something is bending what comes out — translate left on, or a
+    /// per-app rule overriding your style. Otherwise that is invisible until you reach for
+    /// the pill, which is too late to be told.
     private var resting: some View {
         Capsule()
-            .fill(Theme.Palette.muted.opacity(0.5))
+            .fill(model.outputIsBent ? Theme.Palette.gold : Theme.Palette.muted.opacity(0.5))
             .frame(width: 44, height: 5)
             .overlay(Capsule().fill(Theme.Palette.rim).frame(height: 1), alignment: .top)
             .padding(.bottom, Self.centreLine - 2.5)
+            .help(model.outputIsBent ? "Something is changing the output" : "")
     }
 
-    // MARK: - Armed
+    // MARK: - Open
 
-    /// Reaching for the pill opens the controls directly. The two-button cluster that used
-    /// to sit in between existed only to ask which mode you wanted, and a button per mode
-    /// answers that without a step.
+    private var open: some View {
+        VStack(spacing: 0) {
+            if model.showsShoulder { shoulder }
+            row
+        }
+    }
+
+    /// The settings deck, grown out of the pill's top edge rather than floating above it.
     ///
-    /// Notes is an overlay rather than a sibling in the stack, which is what keeps the row
-    /// centred on the screen: a plain `HStack` would centre the *pair*, shifting the row
-    /// right by half the satellite every time it opened.
-    private var armed: some View {
-        row {
-            HStack(spacing: 8) {
-                indicator
-                divider
-                if model.mode == .note {
-                    keycap(model.meetingHotkeyLabel)
-                } else {
-                    appIcon
-                    keycap(model.hotkeyLabel)
-                }
-                Spacer(minLength: 0)
-                // The primary action ends the row: the eye reads the row's facts
-                // left-to-right and lands here, on the thing it came to do — not on a
-                // button that makes the pill go away, which is what used to own this slot.
-                startButton
+    /// It extends 4pt *under* the row and is drawn first, so the row's own glass covers its
+    /// lower corners — which is what makes the two read as one object with two decks rather
+    /// than as a capsule with a tab balanced on it.
+    private var shoulder: some View {
+        HStack(spacing: PanelLayout.shoulderGap) {
+            deckButton(model.shoulderLanguage, lit: model.translateOn, help: translateHelp) {
+                model.onToggleTranslate?()
+            }
+            Rectangle().fill(Theme.Palette.hairline).frame(width: 1, height: 8)
+            deckButton(model.styleLabel, lit: model.promptDetail != nil, help: styleHelp) {
+                model.onPickPrompt?(NSEvent.mouseLocation)
             }
         }
-        .overlay(alignment: .leading) {
-            leftSatellite.offset(x: -PanelModel.satelliteReach)
-        }
-        // In orbit, like the satellite opposite: in the row is the work, around it is
-        // meta. Dismissing the pill from inside the row was one fat-finger away from
-        // "stop", and the window was already widened on this side for symmetry.
-        .overlay(alignment: .trailing) {
-            satellite("xmark", size: 8, help: "Hide the pill") { model.onDiscard?() }
-                .offset(x: PanelModel.satelliteReach)
-        }
-        .frame(width: rowWidth)
+        .padding(.horizontal, PanelLayout.shoulderPad)
+        .frame(height: PanelLayout.shoulder + 4, alignment: .top)
+        .padding(.top, 3)
+        .glass(.floating, radius: 9, elevated: false)
+        .padding(.bottom, -4)
+        .zIndex(-1)
     }
 
-    @ViewBuilder
-    private func keycap(_ label: String?) -> some View {
-        if let label {
-            Text(label)
-                .font(Theme.Text.mono)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .glass(.thin, radius: Theme.Radius.inner, elevated: false)
-                .foregroundStyle(.secondary)
-                .opacity(model.hotkeyArmed ? 1 : 0.45)
-                .help(
-                    model.hotkeyArmed
-                        ? ""
-                        : "The key won\u{2019}t fire until Accessibility is granted"
-                )
-        }
-    }
-
-    /// Play, as the user reads it: start the job this row is set up for.
-    private var startButton: some View {
-        Button {
-            if model.mode == .note {
-                model.onToggleMeeting?()
-            } else {
-                model.onToggleDictation?()
-            }
-        } label: {
-            Image(systemName: "play.fill")
-                .font(.system(size: 10, weight: .bold))
-                .frame(width: 26, height: 26)
-                .glass(.thin, radius: 13, elevated: false)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Theme.Palette.gold)
-        .help(model.mode == .note ? "Start recording the meeting" : "Start dictating")
-    }
-
-    /// The row's own width, with the satellite's reach removed from both sides.
-    private var rowWidth: CGFloat {
-        model.size.width - PanelModel.satelliteReach * 2
-    }
-
-    /// Switches which job the row is set up for — it does not start anything. A meeting
-    /// used to begin on one click of this floating button; an hour of recording is not a
-    /// thing to start by accident, and dictation always got an armed row first. Now both do.
-    @ViewBuilder
-    private var leftSatellite: some View {
-        if model.mode == .note {
-            satellite("mic.fill", size: 12, help: "Set up a dictation") {
-                model.arm(.dictation)
-            }
-        } else {
-            satellite("text.document", size: 12, help: "Set up the Notetaker") {
-                model.arm(.note)
-            }
-        }
-    }
-
-    private func satellite(
-        _ symbol: String, size: CGFloat, help: String, action: @escaping () -> Void
+    private func deckButton(
+        _ text: String, lit: Bool, help: String, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: size, weight: .medium))
-                .frame(width: PanelModel.satelliteSize, height: PanelModel.satelliteSize)
-                // Same reason as the row: no shadow inside a window with no room for one.
-                .glass(.floating, radius: PanelModel.satelliteSize / 2, elevated: false)
+            Text(text)
+                .font(Theme.Text.label)
+                .tracking(Theme.labelTracking)
+                .lineLimit(1)
+                .fixedSize()
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Theme.Palette.muted)
+        .foregroundStyle(lit ? Theme.Palette.gold : Theme.Palette.muted)
         .help(help)
     }
 
-    // MARK: - Open states
-
-    /// No live transcript here, on purpose. Reading your own words as they are guessed
-    /// pulls attention mid-sentence and shows the roughest draft the pipeline ever has;
-    /// the waveform and the clock say "heard, running" without inviting proofreading.
-    /// The words land where the cursor is — that is the reveal.
-    private var dictating: some View {
-        row {
-            HStack(spacing: 8) {
-                indicator
-                divider
-                appIcon
-                Waveform(level: model.micLevel)
-                Text(model.clock)
-                    .font(Theme.Text.monoLarge)
-                    .foregroundStyle(Theme.Palette.text)
-                Spacer(minLength: 0)
-                controls
-            }
-        }
+    private var translateHelp: String {
+        model.translateOn
+            ? "Coming out in \(model.translateLanguage) — click to turn off"
+            : "Click to translate to \(model.translateLanguage)"
     }
 
-    private var meeting: some View {
-        row {
-            HStack(spacing: 8) {
-                indicator
-                divider
-                HStack(spacing: 5) {
-                    Circle().fill(Theme.Palette.danger).frame(width: 7, height: 7)
-                    Text(model.clock).font(Theme.Text.monoLarge)
-                }
-                LevelMeter(label: "You", level: model.youLevel)
-                LevelMeter(label: "Them", level: model.themLevel)
-                Spacer(minLength: 0)
-                controls
-            }
-        }
-    }
-
-    private func working(_ label: String) -> some View {
-        row {
-            HStack(spacing: 8) {
-                indicator
-                divider
-                ProgressView().controlSize(.small).scaleEffect(0.7)
-                Text(label).font(Theme.Text.small).foregroundStyle(Theme.Palette.muted)
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    /// Quiet, in the muted colour: information, not alarm. No controls — it goes by
-    /// itself.
-    private func notice(_ text: String) -> some View {
-        row {
-            HStack(spacing: 8) {
-                indicator
-                divider
-                Text(text)
-                    .font(Theme.Text.small)
-                    .foregroundStyle(Theme.Palette.muted)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    private func failed(_ failure: PanelModel.Failure) -> some View {
-        row {
-            HStack(spacing: 8) {
-                Text(failure.headline)
-                    .font(Theme.Text.bodyStrong)
-                    // Red, not gold: gold is the colour of the chosen thing everywhere
-                    // else in the app, and a fault is not that.
-                    .foregroundStyle(Theme.Palette.danger)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                controls
-            }
-        }
-    }
-
-    // MARK: - Parts
-
-    /// One radius, named once, used for both the fill and the hairline — so the two can
-    /// never drift apart by a point and start looking wrong.
-    /// The chrome every open state shares: fill the window, one set of insets, one
-    /// background. States supply contents and nothing else, which is what stopped them
-    /// each aligning differently.
-    private func row<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .frame(height: model.rowHeight)
-            // `elevated: false` is load-bearing, not a preference. The window is exactly
-            // the size of its contents, so a shadow drawn *inside* it spreads into the
-            // transparent margins and is cut flat at the frame — a window's backing store
-            // ends there. That clip was the hard-edged rectangle around the pill.
-            .glass(.floating, radius: Theme.Radius.panel, elevated: false)
-    }
-
-    /// One icon saying which of the two is running.
-    ///
-    /// This replaced two mode dots. They were a switch you set *before* acting, and with a
-    /// button per mode there is nothing left to switch — they also spent the whole of every
-    /// recording disabled, which is a good sign a control has stopped being one.
-    private var indicator: some View {
-        Image(systemName: model.mode == .note ? "text.document" : "mic.fill")
-            .font(.system(size: 10, weight: .medium))
-            .frame(width: 22, height: 22)
-            .background(.quaternary, in: .circle)
-            .foregroundStyle(.primary)
-    }
-
-    private var divider: some View {
-        Rectangle().fill(Theme.Palette.hairline).frame(width: 1, height: 18)
-    }
-
-    @ViewBuilder
-    private var appIcon: some View {
-        if let icon = model.targetAppIcon {
-            Image(nsImage: icon)
-                .resizable()
-                .frame(width: 18, height: 18)
-                .help(model.targetAppName ?? "")
-        }
-    }
-
-    /// The two settings, in orbit above the row — each shown as its value, never a verb.
-    /// 文A reads "Off" muted or the language code gold; one click flips it. The language
-    /// itself is picked in the window.
-    private var translateBubble: some View {
-        Button {
-            model.onToggleTranslate?()
-        } label: {
-            bubbleLabel(
-                symbol: "translate",
-                text: model.translateOn ? model.translateCode : "Off",
-                active: model.translateOn
-            )
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(model.translateOn ? Theme.Palette.gold : Theme.Palette.text)
-        .help(
-            model.translateOn
-                ? "Coming out in \(model.translateLanguage) — click to turn off"
-                : "Click to translate to \(model.translateLanguage)"
-        )
-    }
-
-    /// The active job's style, named by the app's own mark for AI clean-up — and, when
-    /// something other than the standing style chose it, what did.
-    ///
-    /// Gold for a style that was chosen *for* you, plain for the one that always applies.
-    /// The palette's rule is that gold means live or chosen, and a rule firing is exactly
-    /// that; without the distinction, a style arriving because you happen to be in Mail
-    /// would look identical to one you picked, which is how a helpful setting starts
-    /// reading as the app changing its mind on its own.
-    private var promptBubble: some View {
-        Button {
-            model.onPickPrompt?(NSEvent.mouseLocation)
-        } label: {
-            bubbleLabel(
-                symbol: "sparkles",
-                text: promptLabel,
-                active: model.promptDetail != nil
-            )
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(model.promptDetail != nil ? Theme.Palette.gold : Theme.Palette.text)
-        .help(promptHelp)
-    }
-
-    /// `Formal · Mail`. The reason is capped rather than wrapped: the bubbles float over a
-    /// pill of fixed width, so a long app name has to give way instead of running past it.
-    private var promptLabel: String {
-        guard model.mode != .note else { return model.activePromptName }
-        guard let detail = model.promptDetail else { return model.promptName }
-        let short = detail.count > 16
-            ? detail.prefix(15).trimmingCharacters(in: .whitespaces) + "\u{2026}"
-            : detail
-        return "\(model.promptName) \u{00B7} \(short)"
-    }
-
-    private var promptHelp: String {
+    private var styleHelp: String {
         guard model.mode != .note, let detail = model.promptDetail else {
             return "Style — click to change"
         }
         return "\(model.promptName), because of \(detail) — click to change"
     }
 
-    private func bubbleLabel(symbol: String, text: String, active: Bool) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: symbol)
-                .font(.system(size: 9, weight: .semibold))
-            Text(text)
-                .font(Theme.Text.label)
+    // MARK: - The row
+
+    /// The chrome every open state shares, with the satellites in orbit around it.
+    ///
+    /// `elevated: false` is load-bearing, not a preference. The window is exactly the size
+    /// of its contents, so a shadow drawn *inside* it spreads into the transparent margins
+    /// and is cut flat at the frame — a window's backing store ends there. That clip was
+    /// the hard-edged rectangle around the pill.
+    private var row: some View {
+        contents
+            .padding(.horizontal, shows.messagePadding
+                ? PanelLayout.messagePad : PanelLayout.pad)
+            .frame(width: model.rowWidth, height: model.rowHeight)
+            .glass(.floating, radius: model.rowHeight / 2, elevated: false)
+            .overlay(alignment: .bottom) { countdown }
+            .contentShape(.rect)
+            .onTapGesture { if shows.dismissOnTap { model.onDiscard?() } }
+            .overlay(alignment: .leading) {
+                if model.showsModeSatellite {
+                    modeSatellite.offset(x: -PanelLayout.satelliteReach)
+                }
+            }
+            .overlay(alignment: .trailing) {
+                if model.showsExitSatellite {
+                    exitSatellite.offset(x: PanelLayout.satelliteReach)
+                }
+            }
+    }
+
+    /// Every part the row can hold, in one order that serves all of them — which is what
+    /// lets a part survive a phase change instead of being rebuilt.
+    private var contents: some View {
+        HStack(spacing: PanelLayout.gap) {
+            if shows.modeDisc { modeDisc }
+            if shows.well { well }
+            if let motion = markMotion {
+                MarkBars(motion: motion, height: markHeight, tint: markTint)
+            }
+            if let message = messageText { messageLabel(message) }
+            if shows.clock { clock }
+            if shows.meters {
+                meter("You", level: model.youLevel, tint: Theme.Palette.gold)
+                    .padding(.leading, PanelLayout.groupGap)
+                meter("Them", level: model.themLevel, tint: Theme.Palette.tide)
+                    .padding(.leading, PanelLayout.groupGap)
+            }
+            if shows.ring {
+                ring.padding(.leading, shows.meters ? PanelLayout.groupGap : 0)
+            }
         }
-        .fixedSize()
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        // The pill's own material, not a translucent black: over a dark wallpaper the
-        // black wash disappeared and the bubbles with it.
-        .background {
-            if active { Capsule().fill(Theme.Palette.gold.opacity(0.2)) }
+    }
+
+    // MARK: - What each phase shows
+
+    private struct Parts {
+        var modeDisc = false
+        var well = false
+        var clock = false
+        var meters = false
+        var ring = false
+        var messagePadding = false
+        var dismissOnTap = false
+    }
+
+    private var shows: Parts {
+        switch model.phase {
+        case .resting:
+            Parts()
+        case .armed:
+            Parts(modeDisc: true, well: true, ring: true)
+        case .dictating:
+            // The mic has gone: you know which job is running, and its slot is better spent
+            // on the target the words are about to land in.
+            Parts(well: true, clock: true, ring: true)
+        case .meeting:
+            // No mode icon, no record dot. The red ring already says recording, and two
+            // people's voices moving says meeting more plainly than an icon does.
+            Parts(clock: true, meters: true, ring: true)
+        case .working:
+            Parts()
+        case .notice, .failed:
+            // Only a message, so no control at all: the countdown says it is leaving and
+            // the row itself is the dismiss.
+            Parts(messagePadding: true, dismissOnTap: true)
         }
-        .glass(.floating, radius: 20, elevated: false)
+    }
+
+    // MARK: - Parts
+
+    /// Which job is armed. A label, not a control — so it is muted, with only a trace of
+    /// gold on its rim. Lighting it made the row two primaries and no answer to "what do I
+    /// press".
+    private var modeDisc: some View {
+        Image(systemName: model.mode == .note ? "text.document" : "mic.fill")
+            .font(.system(size: 12, weight: .medium))
+            .frame(width: PanelLayout.slot, height: PanelLayout.slot)
+            .background(Color.white.opacity(0.06), in: .circle)
+            .overlay(Circle().stroke(Theme.Palette.gold.opacity(0.17), lineWidth: 1))
+            .foregroundStyle(Theme.Palette.text.opacity(0.85))
+    }
+
+    /// What the row *knows*: where this lands, and which key fires it. Recessed, because
+    /// nothing in here is pressable — raised is pressed, sunken is read — and the key is
+    /// set in gold, since it is the thing that starts the job.
+    private var well: some View {
+        HStack(spacing: PanelLayout.wellGap) {
+            if model.mode == .note {
+                Image(systemName: "folder")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: PanelLayout.wellIcon, height: PanelLayout.wellIcon)
+                    .foregroundStyle(Theme.Palette.muted)
+                    .help("Saved to your notes folder")
+            } else if let icon = model.targetAppIcon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: PanelLayout.wellIcon, height: PanelLayout.wellIcon)
+                    .help(model.targetAppName ?? "")
+            }
+            if let label = model.mode == .note ? model.meetingHotkeyLabel : model.hotkeyLabel {
+                Text(label)
+                    .font(Theme.Text.mono)
+                    // The row is sized from this string's measured width, so it must be
+                    // allowed to take it. Without this a two-word key like `right ⌥` wraps
+                    // to two lines inside a slot one line tall.
+                    .lineLimit(1)
+                    .fixedSize()
+                    .foregroundStyle(Theme.Palette.gold)
+                    .opacity(model.hotkeyArmed ? 1 : 0.45)
+                    .help(
+                        model.hotkeyArmed
+                            ? ""
+                            : "The key won\u{2019}t fire until Accessibility is granted"
+                    )
+            }
+        }
+        .padding(.horizontal, PanelLayout.wellPad)
+        .frame(height: PanelLayout.slot)
+        .background(
+            Theme.Palette.abyss.opacity(0.5),
+            in: .rect(cornerRadius: PanelLayout.wellRadius)
+        )
         .overlay(
-            Capsule().stroke(
-                active ? Theme.Palette.gold.opacity(0.7) : Theme.Palette.rim,
-                lineWidth: 1
-            )
+            RoundedRectangle(cornerRadius: PanelLayout.wellRadius)
+                .stroke(Color.white.opacity(0.05), lineWidth: 1)
         )
     }
 
-    /// Stop and discard, as separate controls with separate shapes — a square for
-    /// "finish", a cross for "throw away". Sharing one glyph is how a button ends up
-    /// meaning two opposite things.
-    @ViewBuilder
-    private var controls: some View {
-        let available = model.phase.controls
-        if available.stop {
-            circleButton("stop.fill", size: 9, tint: Theme.Palette.danger) { model.onStop?() }
-                .help("Stop")
-        }
-        if available.discard {
-            circleButton("xmark", size: 8, tint: nil) { model.onDiscard?() }
-                .help(model.phase.controls.stop ? "Discard" : "Dismiss")
+    private var clock: some View {
+        Text(model.clock)
+            .font(Theme.Text.monoLarge)
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
+            .foregroundStyle(Theme.Palette.text)
+    }
+
+    /// One speaker, drawn as the mark rather than as a track. The label sits **under** the
+    /// bars: on top it was the highest thing in the row and crowded the seam the deck docks
+    /// to.
+    private func meter(_ name: String, level: Float, tint: Color) -> some View {
+        VStack(spacing: 2) {
+            MarkBars(motion: .level(level), height: PanelLayout.meterHeight, tint: tint)
+            Text(name)
+                .font(Theme.Text.label)
+                .tracking(Theme.labelTracking)
+                .foregroundStyle(Theme.Palette.faint)
         }
     }
 
-    private func circleButton(
-        _ symbol: String, size: CGFloat, tint: Color?, action: @escaping () -> Void
+    private func messageLabel(_ text: String) -> some View {
+        Text(text)
+            .font(isFailure ? Theme.Text.bodyStrong : Theme.Text.small)
+            // A fault spends no colour. Red is for what is live or about to be lost, and a
+            // failure is neither — the words carry it, and the mark lies flat beside them.
+            .foregroundStyle(isFailure ? Theme.Palette.text : Theme.Palette.muted)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    /// The one thing you press. It is never replaced, only reloaded: play to start, a red
+    /// square to stop. Outlined rather than filled, so the gold is a drawn line rather than
+    /// a mass sitting on the glass.
+    private var ring: some View {
+        Button(action: primaryAction) {
+            ZStack {
+                Circle().fill(Theme.Palette.abyss.opacity(0.55))
+                Circle().stroke(ringTint, lineWidth: 1.5)
+                Image(systemName: isRecording ? "stop.fill" : "play.fill")
+                    .font(.system(size: isRecording ? 10 : 11, weight: .bold))
+                    // A triangle centred on its bounding box always looks left of centre.
+                    .offset(x: isRecording ? 0 : 0.5)
+            }
+            .frame(width: PanelLayout.slot, height: PanelLayout.slot)
+            .foregroundStyle(ringTint)
+            .shadow(
+                color: ringTint.opacity(isRecording ? (breath ? 0.5 : 0.16) : 0.26),
+                radius: isRecording ? 7 : 5
+            )
+        }
+        .buttonStyle(.plain)
+        .help(ringHelp)
+        .task(id: isRecording) {
+            guard isRecording else {
+                breath = false
+                return
+            }
+            withAnimation(.easeInOut(duration: 0.95).repeatForever(autoreverses: true)) {
+                breath = true
+            }
+        }
+    }
+
+    private func primaryAction() {
+        switch model.phase {
+        case .dictating, .meeting:
+            model.onStop?()
+        default:
+            if model.mode == .note { model.onToggleMeeting?() } else { model.onToggleDictation?() }
+        }
+    }
+
+    private var ringHelp: String {
+        if isRecording { return "Stop" }
+        return model.mode == .note ? "Start recording the meeting" : "Start dictating"
+    }
+
+    // MARK: - Orbit
+
+    /// Offers the job you are **not** set up for. It must never repeat the glyph already in
+    /// the row, or the pair reads as one control duplicated rather than two jobs to choose
+    /// between.
+    private var modeSatellite: some View {
+        satellite(
+            model.mode == .note ? "mic.fill" : "text.document",
+            tint: Theme.Palette.muted,
+            help: model.mode == .note ? "Set up a dictation" : "Set up the Notetaker"
+        ) {
+            model.arm(model.mode == .note ? .dictation : .note)
+        }
+    }
+
+    /// ✕ puts the pill down. The same ✕ in red throws the work away — and the red one only
+    /// fires if you hold it, whether that work is ten seconds or forty minutes.
+    ///
+    /// A bin was the wrong correction: it read as a different *control* when the action is
+    /// the same one, just costlier. And a hold is the only confirmation a floating panel can
+    /// offer, having nowhere to put a sheet.
+    private var exitSatellite: some View {
+        let destroys = model.exitDestroys
+        return satellite(
+            "xmark",
+            tint: destroys ? Theme.Palette.danger : Theme.Palette.muted,
+            help: destroys
+                ? (model.phase == .meeting ? "Hold to delete the recording" : "Hold to discard")
+                : "Hide the pill"
+        ) {
+            // A plain click only dismisses. Anything destructive comes from the gesture
+            // below, which is why this does nothing while something is running.
+            if !destroys { model.onDiscard?() }
+        }
+        .overlay {
+            if destroys {
+                Circle()
+                    .trim(from: 0, to: hold)
+                    .stroke(
+                        Theme.Palette.danger,
+                        style: StrokeStyle(lineWidth: 1.6, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: PanelLayout.satellite, height: PanelLayout.satellite)
+                    .allowsHitTesting(false)
+            }
+        }
+        .gesture(destroys ? holdToDestroy : nil)
+    }
+
+    private var holdToDestroy: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { _ in
+                guard holdTask == nil else { return }
+                withAnimation(.linear(duration: 0.6)) { hold = 1 }
+                holdTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(600))
+                    guard !Task.isCancelled else { return }
+                    hold = 0
+                    holdTask = nil
+                    model.onDiscard?()
+                }
+            }
+            .onEnded { _ in
+                holdTask?.cancel()
+                holdTask = nil
+                withAnimation(.easeOut(duration: 0.18)) { hold = 0 }
+            }
+    }
+
+    private func satellite(
+        _ symbol: String, tint: Color, help: String, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: size, weight: .bold))
-                .frame(width: 20, height: 20)
-                .glass(.thin, radius: 10, elevated: false)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: PanelLayout.satellite, height: PanelLayout.satellite)
+                // Same reason as the row: no shadow inside a window with no room for one.
+                .glass(.floating, radius: PanelLayout.satellite / 2, elevated: false)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(tint ?? Theme.Palette.muted)
+        .foregroundStyle(tint)
+        .help(help)
     }
-}
 
-/// A live level, drawn as bars rather than a number.
-///
-/// The bars are the mark's: at rest they sit at the M, and speech pushes the inner three
-/// up toward the stems. So the logo is not a sticker on the panel — it is what the meter
-/// looks like when nobody is talking.
-private struct Waveform: View {
-    let level: Float
-    private static let rest = MurmrMark.relativeHeights
-    private static let height: CGFloat = 20
-    private static let scale = height / MurmrMark.bounds.height
+    // MARK: - The countdown
 
-    var body: some View {
-        HStack(spacing: (MurmrMark.pitch - MurmrMark.barWidth) * Self.scale) {
-            ForEach(0..<Self.rest.count, id: \.self) { index in
-                Capsule()
-                    .fill(Theme.Palette.gold)
-                    .frame(width: MurmrMark.barWidth * Self.scale, height: height(index))
-            }
+    /// A hairline that drains over exactly as long as the message has left.
+    ///
+    /// It is drawn from the same numbers the bridge's timer uses, so the countdown cannot
+    /// disagree with the dismissal — and it is the reason neither a notice nor a failure
+    /// needs a control.
+    @ViewBuilder
+    private var countdown: some View {
+        if let duration = PanelModel.dismissal(for: model.phase) {
+            Capsule()
+                .fill(
+                    isFailure
+                        ? Theme.Palette.text.opacity(0.4)
+                        : Theme.Palette.gold.opacity(0.65)
+                )
+                .frame(height: 1)
+                .scaleEffect(x: drain, anchor: .leading)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 4)
+                .task(id: model.phase) {
+                    drain = 1
+                    withAnimation(.linear(duration: duration)) { drain = 0 }
+                }
         }
-        .frame(height: Self.height)
-        .animation(.easeOut(duration: 0.08), value: level)
     }
 
-    /// How much of the way to the stems each bar goes at full level. Less toward the
-    /// middle, so loud speech is a nearly full block with a trace of the V left in it
-    /// rather than five identical bars — a meter that has stopped saying anything.
-    private static let reach: [CGFloat] = [1, 0.9, 0.8, 0.9, 1]
+    // MARK: - Reading the phase
 
-    /// Each bar rises from its resting height toward the full height as the level rises;
-    /// the stems are already there, so only the letter moves.
-    private func height(_ index: Int) -> CGFloat {
-        let rest = Self.rest[index]
-        let room = (1 - rest) * Self.reach[index]
-        return Self.height * (rest + room * CGFloat(AudioLevel.normalised(level)))
+    private var isRecording: Bool {
+        model.phase == .dictating || model.phase == .meeting
+    }
+
+    private var isFailure: Bool {
+        if case .failed = model.phase { return true }
+        return false
+    }
+
+    private var messageText: String? {
+        switch model.phase {
+        case .working(let label): label
+        case .notice(let text): text
+        case .failed(let failure): failure.headline
+        default: nil
+        }
+    }
+
+    /// What the mark is doing, which is the only thing on the panel that reports.
+    private var markMotion: MarkBars.Motion? {
+        switch model.phase {
+        // No live transcript here, on purpose. Reading your own words as they are guessed
+        // pulls attention mid-sentence and shows the roughest draft the pipeline ever has.
+        // The mark says "heard, running" without inviting proofreading.
+        case .dictating: .level(model.micLevel)
+        case .working: .working
+        case .notice: .settling
+        case .failed: .still
+        default: nil
+        }
+    }
+
+    private var markHeight: CGFloat {
+        if case .working = model.phase { return PanelLayout.workingMarkHeight }
+        return PanelLayout.markHeight
+    }
+
+    private var markTint: Color {
+        isFailure ? Theme.Palette.faint : Theme.Palette.gold
+    }
+
+    private var ringTint: Color {
+        isRecording ? Theme.Palette.danger : Theme.Palette.gold
     }
 }
