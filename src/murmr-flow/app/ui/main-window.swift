@@ -104,12 +104,24 @@ struct MainWindow: View {
         .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
     }
 
-    /// Whether the peek card is out. Not persisted and not in `AppServices`: it is a
-    /// property of where the pointer is, which does not outlive the window.
-    @State private var isPeeking = false
-
     /// Leaving the card does not put it away at once — see `hidePeek()`.
     @State private var closeWork: Task<Void, Never>?
+
+    /// Whether the peek card is out. It lives in `AppServices` rather than here because
+    /// the name in the title bar has to know about it — see `SectionMenu`.
+    private var isPeeking: Bool { services.isPeeking }
+
+    /// How much room the title bar's row takes, read from the window rather than assumed.
+    ///
+    /// Everything at the top of this window hangs off this one number: the brand row's
+    /// clearance, where the peek card starts, where the section menu drops to. They were
+    /// three separate constants, each written for a 28 pt title bar — so in full screen,
+    /// where macOS gives the bar a different height, all three were wrong at once and the
+    /// brand row sat on the screen's edge.
+    ///
+    /// The floor is for the case where macOS reports nothing at all: the app still draws
+    /// its own name up there and it still needs somewhere to sit.
+    @State private var titlebarHeight: CGFloat = 28
 
     /// The sidebar and the section it selects — the window on every launch but the first.
     private var shell: some View {
@@ -122,17 +134,32 @@ struct MainWindow: View {
                 .frame(width: services.isSidebarCollapsed ? 0 : 1)
                 .ignoresSafeArea()
 
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                // Only while the column is away: with it open, the mark and the section
+                // are both already in it.
+                if services.isSidebarCollapsed {
+                    sectionHeader
+                }
                 permissionBanner
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .overlay(alignment: .topLeading) { sectionMenuLayer }
         }
         .overlay(alignment: .topLeading) { peekLayer }
+        // One reader, at the top, so every inset below comes from the same measurement.
+        .background(alignment: .top) {
+            GeometryReader { proxy in
+                Color.clear
+                    .onChange(of: proxy.safeAreaInsets.top, initial: true) { _, inset in
+                        titlebarHeight = max(inset, 28)
+                    }
+            }
+        }
         .animation(.smooth(duration: 0.28), value: services.isSidebarCollapsed)
         .onChange(of: services.isSidebarCollapsed) { _, _ in
             closeWork?.cancel()
-            isPeeking = false
+            services.isPeeking = false
         }
     }
 
@@ -144,11 +171,9 @@ struct MainWindow: View {
     /// animates, aligned trailing so the contents slide out to the left instead of being
     /// cut off at the right.
     private var sidebarColumn: some View {
-        GeometryReader { proxy in
-            sidebarBody(topInset: proxy.safeAreaInsets.top)
-                .ignoresSafeArea(edges: .top)
-        }
-        .frame(width: Self.sidebarWidth)
+        sidebarBody(topInset: titlebarHeight)
+            .ignoresSafeArea(edges: .top)
+            .frame(width: Self.sidebarWidth)
         .opacity(services.isSidebarCollapsed ? 0 : 1)
         // Out before the column closes, in after it has opened. Run on the same clock as
         // the width, the labels smear against the moving edge.
@@ -183,7 +208,9 @@ struct MainWindow: View {
                 Color.clear
                     .frame(width: Self.edgeWidth)
                     .frame(maxHeight: .infinity)
-                    .overlay { HoverStrip { if $0 { showPeek() } } }
+                    .overlay {
+                        HoverStrip { if $0 { showPeek() } }
+                    }
 
                 peekCard
             }
@@ -202,22 +229,126 @@ struct MainWindow: View {
             .glass(.thick, radius: Theme.Radius.pane)
             // Inset from the window rather than flush with it, so it reads as a card over
             // the content and not as the column having come back.
-            .padding(EdgeInsets(top: 38, leading: 8, bottom: 8, trailing: 0))
-            .overlay { HoverStrip { $0 ? showPeek() : hidePeek() } }
+            .padding(EdgeInsets(top: titlebarHeight + 10, leading: 8, bottom: 8, trailing: 0))
+            // Leaving the card is the only thing that puts it away. Choosing a section
+            // used to as well, which was the bounce: the card slid out from under a
+            // pointer that had not moved, its own tracking area read that as an arrival,
+            // and it came straight back. Staying open is also the better behaviour — you
+            // can look at one section and then another without going back to the edge
+            // between them.
+            //
+            // Entering it only cancels a pending close. The edge opens the card; nothing
+            // else does.
+            .overlay { HoverStrip { $0 ? keepPeek() : hidePeek() } }
             .offset(x: isPeeking ? 0 : -(Self.sidebarWidth + 26))
             .opacity(isPeeking ? 1 : 0)
             .allowsHitTesting(isPeeking)
             .animation(.smooth(duration: 0.26), value: isPeeking)
-            // Choosing a section is the end of the errand the card was opened for.
-            .onChange(of: services.route) { _, _ in
-                if isPeeking { withAnimation { isPeeking = false } }
+    }
+
+    // MARK: - The section header
+
+    /// How far in from the content's left edge the mark and the name sit.
+    static let contentGutter: CGFloat = 20
+    static let sectionHeaderHeight: CGFloat = 38
+
+    @State private var isHeaderHovered = false
+
+    /// The mark and the section you are in, at the top of the content — and the sections
+    /// themselves when the pointer rests on it.
+    ///
+    /// It used to be in the title bar's accessory beside the toggle, which cost more than
+    /// it looked. A title bar accessory is measured once and never again, so it had to be
+    /// sized for the longest section name the app could ever show; and in full screen the
+    /// title bar auto-hides, taking the name with it exactly when the sidebar is gone too.
+    /// In the content it is simply a view: as wide as its text, present in both states,
+    /// and the menu below it needs no coordinates read back out of AppKit.
+    private var sectionHeader: some View {
+        let isOpen = services.sectionMenu.isOpen
+        let isLit = isHeaderHovered || isOpen
+
+        return HStack(spacing: 8) {
+            MurmrMarkShape()
+                .fill(Theme.Palette.gold)
+                .frame(width: 15, height: 13.5)
+            Text(services.route.label)
+                .font(Theme.Text.bodyStrong)
+                .foregroundStyle(Theme.Palette.text)
+                .fixedSize()
+            // Not decoration: a menu that opens on hover with nothing to announce it is a
+            // menu nobody knows is there until it surprises them.
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Theme.Palette.muted)
+                .rotationEffect(.degrees(isOpen ? 180 : 0))
+                .opacity(isLit ? 1 : 0)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 26)
+        .background {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isLit ? Color.white.opacity(0.07) : Color.clear)
+        }
+        .onHover { hovering in
+            // The guard comes before the lit state, not after: the peek card slides
+            // across this header on its way in, and the header was taking that as a
+            // hover — a chevron appearing under a card nobody pointed at.
+            guard !services.isPeeking else { return }
+            isHeaderHovered = hovering
+            if hovering {
+                services.sectionMenu.arm()
+            } else {
+                services.sectionMenu.scheduleClose()
             }
+        }
+        .animation(.easeOut(duration: 0.13), value: isLit)
+        .onChange(of: services.isPeeking) { _, peeking in
+            if peeking { isHeaderHovered = false }
+        }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("\(services.route.label). Choose a section.")
+        .padding(.leading, Self.contentGutter - 8)
+        .frame(height: Self.sectionHeaderHeight, alignment: .leading)
+    }
+
+    // MARK: - The section menu
+
+    /// The sections, under the header.
+    ///
+    /// Drawn in the content rather than in the title bar's accessory, which is a view 28 pt
+    /// tall and clips anything hanging out of it.
+    @ViewBuilder
+    private var sectionMenuLayer: some View {
+        if services.isSidebarCollapsed {
+            SectionMenuView(services: services)
+                .scaleEffect(
+                    services.sectionMenu.isOpen ? 1 : 0.97, anchor: .topLeading
+                )
+                .opacity(services.sectionMenu.isOpen ? 1 : 0)
+                .allowsHitTesting(services.sectionMenu.isOpen)
+                // Under the header, in the same column it sits in. Both numbers are the
+                // app's own layout; nothing here is read back out of AppKit.
+                .offset(
+                    x: Self.contentGutter,
+                    y: Self.sectionHeaderHeight + (services.sectionMenu.isOpen ? 2 : -3)
+                )
+                .animation(.smooth(duration: 0.16), value: services.sectionMenu.isOpen)
+        }
     }
 
     private func showPeek() {
+        keepPeek()
+        services.isPeeking = true
+    }
+
+    /// Cancels a pending close without opening anything.
+    ///
+    /// What the card itself does when the pointer arrives on it: the errand is still in
+    /// progress, so the close that leaving the edge scheduled is off — but a card that is
+    /// away stays away.
+    private func keepPeek() {
         closeWork?.cancel()
         closeWork = nil
-        isPeeking = true
     }
 
     /// Leaving the card does not put it away at once. The pointer has to cross the gap
@@ -228,7 +359,7 @@ struct MainWindow: View {
         closeWork = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled else { return }
-            isPeeking = false
+            services.isPeeking = false
         }
     }
 
@@ -240,17 +371,29 @@ struct MainWindow: View {
     @ViewBuilder
     private var permissionBanner: some View {
         let permissions = services.permissions
-        if services.route != .settings(.privacyData), !permissions.allGranted {
+        // System audio is not in `allGranted` and should not be — it is the Notetaker's
+        // alone, and a dictation-only user has no use for a warning about it. But left
+        // out entirely it was never said at all: a meeting recorded without it captures
+        // your side and silence from everyone else, and nothing anywhere mentioned it.
+        //
+        // So it is earned rather than assumed. Once a note exists, meetings are something
+        // this person does, and a grant that would quietly halve them is worth a line.
+        let needsSystemAudio =
+            permissions.systemAudio != .granted && !services.notes.notes.isEmpty
+        let hasSomethingToSay = !permissions.allGranted || needsSystemAudio
+
+        if services.route != .settings(.privacyData), hasSomethingToSay {
             VStack(spacing: 8) {
                 if permissions.accessibility != .granted {
                     WarningRow(
-                        message: "Accessibility is off, so your hotkey won\u{2019}t fire.",
+                        message: "Nothing starts when you press a hotkey \u{2014} Accessibility "
+                            + "is off.",
                         action: ("Allow", { permissions.requestAccessibility() })
                     )
                 }
                 if permissions.microphone != .granted {
                     WarningRow(
-                        message: "Microphone isn\u{2019}t allowed, so nothing can be heard.",
+                        message: "Nothing can be heard \u{2014} Microphone is off.",
                         action: ("Allow", {
                             if permissions.microphone == .notDetermined {
                                 Task { await permissions.requestMicrophone() }
@@ -260,9 +403,30 @@ struct MainWindow: View {
                         })
                     )
                 }
+                if needsSystemAudio {
+                    WarningRow(
+                        message: "Notetaker won\u{2019}t hear other people \u{2014} System "
+                            + "audio is off.",
+                        action: ("Allow", {
+                            // The first probe is what shows Apple's prompt. After a
+                            // refusal there is nothing left to ask, so it is the pane.
+                            if permissions.systemAudio == .notDetermined {
+                                Task { await permissions.requestSystemAudio() }
+                            } else {
+                                permissions.openSystemAudioSettings()
+                            }
+                        })
+                    )
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 20)
+            // The same 8 that separates the rows from each other. There was none at all
+            // before, so the section began flush against the last warning; but matching
+            // the top's 20 was worse in its own way — a second, larger gap immediately
+            // under a stack already spaced at 8. What follows is one more thing in the
+            // column, so it sits at the column's own rhythm.
+            .padding(.bottom, 8)
         }
     }
 
