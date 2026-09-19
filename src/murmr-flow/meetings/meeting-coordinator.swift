@@ -217,6 +217,9 @@ final class MeetingCoordinator {
             return
         }
 
+        // Read before the attempt, because the attempt is what sets it.
+        let hadBeenAsked = SystemAudioRecorder.hasBeenAsked
+
         do {
             // Read the choice at the moment of recording rather than holding it, so
             // picking a different microphone takes effect on the very next take.
@@ -230,7 +233,16 @@ final class MeetingCoordinator {
             startTicking()
             onRecordingChange?(true)
         } catch {
-            stage = .failed(Self.kind(of: error), error.localizedDescription)
+            var kind = Self.kind(of: error)
+            var message = error.localizedDescription
+            // The first attempt on this machine is the one that raised Apple's dialog, and
+            // it could not have succeeded whatever the answer. Say what to do next instead
+            // of announcing a refusal nobody has made.
+            if kind == .systemAudio, !hadBeenAsked {
+                kind = .systemAudioPending
+                message = "Allow system audio in the dialog, then start the meeting again."
+            }
+            stage = .failed(kind, message)
         }
     }
 
