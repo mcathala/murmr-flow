@@ -83,13 +83,19 @@ struct DictationRecord: Codable, Identifiable, Sendable, Equatable {
         return Double(wordCount) / (audioDuration / 60)
     }
 
-    /// A single line for a list row. Long dictations get an ellipsis rather than a wrap.
-    func summary(limit: Int = 80) -> String {
-        let text = finalText
+    /// The dictation as one line, for a list row. The whole of it: where to stop is the
+    /// row's business, not this type's.
+    ///
+    /// It used to be cut here, at a character count — 70 on Home, 90 in the history. A
+    /// count is a guess about a width, and the guess was made for the window the app
+    /// opened at. Widen the window and the guess stays put: the text ended in an ellipsis
+    /// with half the row empty after it, which reads as missing data rather than as a
+    /// line that did not fit. `lineLimit(1)` already truncates at whatever width the row
+    /// turns out to have, which is the width that actually exists.
+    var singleLine: String {
+        finalText
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.count > limit else { return text }
-        return String(text.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…"
     }
 
     static func words(in text: String) -> Int {
