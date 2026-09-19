@@ -377,15 +377,20 @@ struct MainWindow: View {
     @ViewBuilder
     private var permissionBanner: some View {
         let permissions = services.permissions
-        // System audio is not in `allGranted` and should not be — it is the Notetaker's
-        // alone, and a dictation-only user has no use for a warning about it. But left
-        // out entirely it was never said at all: a meeting recorded without it captures
-        // your side and silence from everyone else, and nothing anywhere mentioned it.
+        // A grant that is off is said. No conditions.
         //
-        // So it is earned rather than assumed. Once a note exists, meetings are something
-        // this person does, and a grant that would quietly halve them is worth a line.
-        let needsSystemAudio =
-            permissions.systemAudio != .granted && !services.notes.notes.isEmpty
+        // This warning used to be *earned*: shown only once a note existed, on the reading
+        // that a dictation-only user has no use for it. Every version of that rule left a
+        // hole somewhere, and each patch moved the hole rather than closing it — a note
+        // only exists after a meeting has already been half-recorded; a running meeting is
+        // too late; a refusal needs the person to have been asked, which needs onboarding,
+        // which they can skip.
+        //
+        // The simple rule has no holes: if the app cannot do something it offers, it says
+        // so. Skipping onboarding, refusing, or never being asked all end in the same
+        // place, because from the user's side they are the same thing — the Notetaker will
+        // not hear anyone else, and nothing on screen admitted it.
+        let needsSystemAudio = permissions.systemAudio != .granted
         let hasSomethingToSay = !permissions.allGranted || needsSystemAudio
 
         if services.route != .settings(.privacyData), hasSomethingToSay {
