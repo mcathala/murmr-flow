@@ -343,7 +343,7 @@ struct DictationView: View {
                                     ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary)
                             )
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(record.summary(limit: 90))
+                                Text(record.singleLine)
                                     .font(.callout)
                                     .lineLimit(1)
                                 // The app's mark sits in the line, beside its name rather

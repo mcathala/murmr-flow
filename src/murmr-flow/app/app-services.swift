@@ -43,6 +43,18 @@ final class AppServices {
 
     func toggleSidebar() {
         isSidebarCollapsed.toggle()
+        sectionMenu.close()
+    }
+
+    /// The sections, reachable from the title bar while the column is away. Owns its own
+    /// timing — see `SectionMenu`.
+    let sectionMenu = SectionMenu()
+
+    /// Whether the peek card is out. Here rather than in the window's `@State` because the
+    /// name in the title bar has to know: the two answer the same trip across the corner,
+    /// and whichever the pointer reached first keeps it.
+    var isPeeking = false {
+        didSet { if isPeeking { sectionMenu.close() } }
     }
 
     /// A note or a dictation the app has been asked to show, and which tab has not
