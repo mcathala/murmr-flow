@@ -58,6 +58,15 @@ struct WindowChrome: NSViewRepresentable {
         // otherwise switch the whole screen over to it. The window comes to the user
         // instead: the menu bar is where they are, so that is where the app should be.
         window.collectionBehavior.insert(.moveToActiveSpace)
+        // The scene arrives with `.fullScreenNone` on it, which is a prohibition: the
+        // green button only zooms and ⌃⌘F does nothing. Adding `.fullScreenPrimary`
+        // beside it changes nothing, because the two are contradictory and the refusal
+        // wins — the window read `primary=true none=true` and stayed put.
+        //
+        // So the refusal is taken off first. Both lines are needed: removing `none`
+        // without saying `primary` leaves the window with no opinion either way.
+        window.collectionBehavior.remove(.fullScreenNone)
+        window.collectionBehavior.insert(.fullScreenPrimary)
     }
 
     /// Everything about how the window is drawn, and nothing about what is in it — so a
@@ -117,12 +126,20 @@ struct WindowChrome: NSViewRepresentable {
         }
         guard !existing else { return }
 
-        let hosting = NSHostingView(rootView: TitleBarControls(services: AppServices.shared))
+        let hosting = NSHostingView(
+            rootView: TitleBarControls(services: AppServices.shared)
+        )
         hosting.identifier = controlsIdentifier
         size(hosting)
         let controller = NSTitlebarAccessoryViewController()
         controller.view = hosting
         controller.layoutAttribute = .leading
+        // In full screen macOS hides the title bar and reveals it only when the pointer
+        // goes to the top edge — and the toggle and the section name go with it. This is
+        // the supported way to say "keep mine": an accessory with a full-screen height
+        // stays put, so the control that brings the sidebar back does not itself need the
+        // sidebar's absence to be noticed first.
+        controller.fullScreenMinHeight = hosting.frame.height
         window.addTitlebarAccessoryViewController(controller)
     }
 
@@ -157,64 +174,34 @@ struct TitleBarControls: View {
         services.isSidebarCollapsed ? "Show sidebar" : "Hide sidebar"
     }
 
-    /// Fixed, and as wide as the longest section name the app can put here.
+    /// Only the toggle, so the slot never has to change size.
     ///
-    /// A title bar accessory does not follow its content. AppKit measures the slot once,
-    /// from the view's frame, and never asks again — measured: the slot stayed at 85 pt
-    /// while the content had grown to want 136, so "Privacy & data" would have been cut
-    /// off where "Home" fitted. Sizing it for the worst case and leaving the row
-    /// left-aligned inside costs nothing, because what is beside it is empty title bar.
-    static let width: CGFloat = {
-        let font =
-            NSFont(name: Theme.Face.ui, size: 13)
-            ?? NSFont.systemFont(ofSize: 13, weight: .medium)
-        let names =
-            MainWindow.Route.top.map(\.label) + SettingsPane.allCases.map(\.label)
-        let widest =
-            names
-            .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
-            .max() ?? 90
-        // leading 6, glyph 24, gap 9, mark 15, gap 9, the name, trailing 14. Two points
-        // of slack, because the measured width is the face's and the rendered one is
-        // SwiftUI's and they are not always the same to the pixel.
-        return 6 + 24 + 9 + 15 + 9 + ceil(widest) + 14 + 2
-    }()
+    /// The mark and the section name were here too, which made this the one thing in the
+    /// window whose width depended on which section you were in — and a title bar
+    /// accessory is measured once and never re-measured, so it had to be sized for the
+    /// longest name the app could ever show. They live in the content now
+    /// (`MainWindow.sectionHeader`), where a view may simply be as wide as it is, and this
+    /// is a fixed 36 pt that fits one button.
+    static let width: CGFloat = 6 + 24 + 6
 
     var body: some View {
-        HStack(spacing: 9) {
-            Button {
-                services.toggleSidebar()
-            } label: {
-                Image(systemName: "sidebar.leading")
-                    .font(.system(size: 13))
-                    .foregroundStyle(isHovering ? Theme.Palette.text : Theme.Palette.muted)
-                    .frame(width: 24, height: 24)
-                    .background {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(isHovering ? Color.white.opacity(0.09) : Color.clear)
-                    }
-            }
-            .buttonStyle(.plain)
-            .onHover { isHovering = $0 }
-            .help(toggleLabel)
-            .accessibilityLabel(toggleLabel)
-
-            // Only while the column is away. With it open the name is already at the top
-            // of it, and 198 pt cannot hold "Murmr Flow" beside the traffic lights — which
-            // is what made the old header illegible in the first place.
-            if services.isSidebarCollapsed {
-                MurmrMarkShape()
-                    .fill(Theme.Palette.gold)
-                    .frame(width: 15, height: 13.5)
-                Text(services.route.label)
-                    .font(Theme.Text.bodyStrong)
-                    .foregroundStyle(Theme.Palette.text)
-                    .fixedSize()
-            }
+        Button {
+            services.toggleSidebar()
+        } label: {
+            Image(systemName: "sidebar.leading")
+                .font(.system(size: 13))
+                .foregroundStyle(isHovering ? Theme.Palette.text : Theme.Palette.muted)
+                .frame(width: 24, height: 24)
+                .background {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(isHovering ? Color.white.opacity(0.09) : Color.clear)
+                }
         }
-        .padding(.leading, 6)
-        .padding(.trailing, 14)
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(toggleLabel)
+        .accessibilityLabel(toggleLabel)
+        .padding(.horizontal, 6)
         .frame(width: Self.width, height: 28, alignment: .leading)
-        .animation(.easeInOut(duration: 0.18), value: services.isSidebarCollapsed)
     }
 }

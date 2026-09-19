@@ -83,23 +83,4 @@ struct WindowChromeTests {
         #expect(hosting.frame.width > 0)
     }
 
-    /// AppKit measures the slot once and never asks again — measured: it stayed at 85 pt
-    /// while the content had grown to want 136 — so it is sized for the longest name the
-    /// app can show rather than the one it happens to be showing.
-    @Test("the slot fits every section name, not just the short ones")
-    func slotFitsTheLongestName() {
-        let names = MainWindow.Route.top.map(\.label) + SettingsPane.allCases.map(\.label)
-        let font =
-            NSFont(name: Theme.Face.ui, size: 13)
-            ?? NSFont.systemFont(ofSize: 13, weight: .medium)
-
-        for name in names {
-            let text = (name as NSString).size(withAttributes: [.font: font]).width
-            // The glyph, the mark, the gaps and the padding around them.
-            #expect(
-                TitleBarControls.width >= text + 77,
-                "\(name) would be cut off in the title bar"
-            )
-        }
-    }
 }
