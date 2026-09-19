@@ -56,6 +56,19 @@ final class PanelBridge {
         }
         meetings.onStageChange = { [weak self] _ in self?.sync() }
 
+        // Everything that has already happened counts as reported.
+        //
+        // `lastRun` is restored from history at launch, and these two started empty — so
+        // the first sync saw the last dictation this app ever did and announced it as
+        // news. With Accessibility off, that run failed to type, which is why "Couldn't
+        // type here" greeted you on every single launch: a true sentence about something
+        // that happened yesterday.
+        //
+        // The pill speaks about the session it is in. What went before is the window's
+        // business.
+        reportedRunID = dictation.lastRun?.id
+        reportedNothingHeard = dictation.nothingHeardCount
+
         panel.present()
         sync()
         startPump()
@@ -93,12 +106,23 @@ final class PanelBridge {
         }
 
         // Throw it away. From `armed` there is nothing to throw, so it just dismisses.
+        //
+        // Every running state has to name itself here. `.meeting` used to fall to the
+        // default and call `hide()`, which is guarded by `!phase.isBusy` — so holding the
+        // red ✕ through a meeting did nothing whatsoever, while the pill said "hold to
+        // delete the recording". The panel promising something the wiring never did is
+        // worse than not offering it.
         model.onDiscard = { [weak self] in
             guard let self else { return }
             switch self.panel.model.phase {
             case .dictating:
                 self.dictation.cancelDictation()
-            case .failed:
+            case .meeting:
+                self.meetings.discard()
+            case .notice, .failed:
+                // A message is dismissed, not hidden. `hide()` would put the pill away
+                // until something next started it, which is a great deal more than
+                // clicking a two-second notice ought to mean.
                 self.panel.model.set(.resting)
             default:
                 self.panel.model.hide()
