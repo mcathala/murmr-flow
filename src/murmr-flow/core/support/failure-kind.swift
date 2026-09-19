@@ -14,6 +14,14 @@ enum FailureKind: Equatable, Sendable {
     case speechModel
     case aiProvider
     case systemAudio
+    /// The first meeting on a machine that has never been asked.
+    ///
+    /// Not a refusal, and it must not be worded as one. Starting IO is what raises Apple's
+    /// dialog, and that call returns having heard nothing while the dialog is still on
+    /// screen — so the first attempt always fails, including for someone who is in the act
+    /// of clicking Allow. Telling them it "isn't allowed" at that moment is the app
+    /// contradicting what they just did.
+    case systemAudioPending
     case microphone
     case insertion
     case notes
@@ -24,6 +32,7 @@ enum FailureKind: Equatable, Sendable {
         case .speechModel: "Speech model failed"
         case .aiProvider: "AI provider failed"
         case .systemAudio: "System audio isn\u{2019}t allowed"
+        case .systemAudioPending: "Allow system audio, then start again"
         case .microphone: "Microphone heard nothing"
         case .insertion: "Couldn\u{2019}t type here. Copied — press ⌘V"
         case .notes: "Couldn\u{2019}t save the note"

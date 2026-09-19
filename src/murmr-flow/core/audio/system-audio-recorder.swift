@@ -98,26 +98,54 @@ final class SystemAudioRecorder: @unchecked Sendable {
         !isSupported || UserDefaults.standard.bool(forKey: accessDefaultsKey)
     }
 
-    /// Asks for — or re-checks — the grant, with a throwaway tap destroyed the moment its
-    /// creation answers the question. The first call ever is what shows Apple's prompt,
-    /// so this must only run from a button the user pressed; once the grant is settled,
-    /// calling again re-checks silently.
-    static func probeAccess() -> Bool {
-        guard #available(macOS 14.2, *) else { return false }
-        let description = CATapDescription(monoGlobalTapButExcludeProcesses: [])
-        description.name = "Murmr Flow permission check"
-        description.isPrivate = true
-        description.muteBehavior = .unmuted
+    /// Whether Apple's dialog has ever been raised on this install.
+    ///
+    /// The missing half of the question. `hasKnownAccess` says whether a tap has ever
+    /// worked; it cannot tell "you said no" from "nobody has asked you yet", and those two
+    /// want opposite things from the app — a warning in the first case, silence in the
+    /// second. Recorded the moment the app does something that makes macOS ask.
+    static let askedDefaultsKey = "permissions.systemAudio.asked"
 
-        var id = AudioObjectID(kAudioObjectUnknown)
-        let status = AudioHardwareCreateProcessTap(description, &id)
-        guard status == noErr, id != kAudioObjectUnknown else {
-            UserDefaults.standard.removeObject(forKey: accessDefaultsKey)
+    static var hasBeenAsked: Bool {
+        UserDefaults.standard.bool(forKey: askedDefaultsKey)
+    }
+
+    static func markAsked() {
+        UserDefaults.standard.set(true, forKey: askedDefaultsKey)
+    }
+
+    /// Asks for — or re-checks — the grant, by recording for a moment and throwing the
+    /// result away.
+    ///
+    /// It used to create a tap, destroy it, and call that an answer. It is not one:
+    /// `AudioHardwareCreateProcessTap` is not the gated call, so it succeeds on a machine
+    /// that has granted nothing — which is how the app came to believe it had permission
+    /// it had never been given, and then said nothing while the Notetaker recorded silence
+    /// from everyone but you.
+    ///
+    /// The only thing that settles it is audio arriving, so this builds the whole pipeline
+    /// — tap, aggregate device, IOProc, start — waits for the first callback and tears it
+    /// all down. Starting IO is also what raises Apple's dialog, so the first call ever is
+    /// the request and must come from a button the user pressed; it will return false
+    /// whatever they click, because the dialog is still up when the call returns.
+    static func probeAccess() -> Bool {
+        guard isSupported else { return false }
+
+        let recorder = SystemAudioRecorder()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("murmr-permission-probe-\(UUID().uuidString).caf")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        do {
+            // Marks the question as asked and writes the remembered yes on success — both
+            // in `start`, where they belong.
+            try recorder.start(writingTo: url)
+            recorder.stop()
+            return true
+        } catch {
+            log.notice("system audio probe failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
-        AudioHardwareDestroyProcessTap(id)
-        UserDefaults.standard.set(true, forKey: accessDefaultsKey)
-        return true
     }
 
     // MARK: - Lifecycle
@@ -126,8 +154,15 @@ final class SystemAudioRecorder: @unchecked Sendable {
     ///
     /// The first call is what triggers the system permission prompt — there is no API to
     /// ask ahead of time — so this is deliberately the moment the user pressed a button.
+    ///
+    /// And it is the *starting* of IO that raises Apple's dialog, not the tap or the
+    /// aggregate device, so this is where the asking is recorded. The call cannot wait for
+    /// the answer: the dialog is put up alongside it and this returns having heard nothing,
+    /// which is why the first attempt on a fresh machine always fails however the person
+    /// answers. What the app must not do is call that a refusal.
     func start(writingTo url: URL) throws {
         guard !isRecording else { return }
+        Self.markAsked()
 
         // Try each clock in turn and keep the first that actually delivers audio. A
         // failure here is not hypothetical: a Bluetooth headset as the clock has been
@@ -172,6 +207,20 @@ final class SystemAudioRecorder: @unchecked Sendable {
         guard status == noErr else { throw RecorderError.startFailed(status) }
 
         try waitForFirstCallback()
+
+        // **This** is where the grant is proven, and the only place it can be.
+        //
+        // It used to be recorded when the tap was created, which proves nothing:
+        // `AudioHardwareCreateProcessTap` is not the gated call and succeeds whether or
+        // not anyone has allowed anything. So the app wrote down "granted" during an
+        // attempt that then failed at `AudioDeviceStart` — recording a yes and reporting a
+        // no in the same breath, and thereafter staying silent about a permission it had
+        // never actually been given.
+        //
+        // A callback carrying audio cannot happen without the grant. Nothing short of it
+        // is evidence.
+        UserDefaults.standard.set(true, forKey: Self.accessDefaultsKey)
+
         Self.log.notice(
             "system audio capture started, clocked from \(clock as String, privacy: .public)"
         )
@@ -242,12 +291,14 @@ final class SystemAudioRecorder: @unchecked Sendable {
         var id = AudioObjectID(kAudioObjectUnknown)
         let status = AudioHardwareCreateProcessTap(description, &id)
         guard status == noErr, id != kAudioObjectUnknown else {
-            // The grant was revoked or reset; forget the remembered yes, so onboarding's
-            // step comes back rather than being skipped on a machine that would fail.
+            // Something is wrong enough that the remembered yes should not be trusted —
+            // forget it, so onboarding's step comes back rather than being skipped on a
+            // machine that would fail.
             UserDefaults.standard.removeObject(forKey: Self.accessDefaultsKey)
             throw RecorderError.tapCreationFailed(status)
         }
-        UserDefaults.standard.set(true, forKey: Self.accessDefaultsKey)
+        // Nothing is written here on success. Creating a tap is not the gated call and
+        // says nothing about the grant — see where audio actually arrives.
         tapID = id
     }
 

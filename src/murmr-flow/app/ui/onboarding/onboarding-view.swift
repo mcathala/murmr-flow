@@ -86,7 +86,11 @@ struct OnboardingView: View {
                 // A denied system-audio grant flips in System Settings, which no
                 // notification announces — and once determined, the probe re-checks
                 // without prompting. The others only need their state re-read.
-                if step == .systemAudio, permissions.systemAudio == .denied {
+                // Re-probe while it is anything but granted, not only while `denied`. The
+                // first ask now settles at `notDetermined` — the dialog is still on screen
+                // and there is nothing to record yet — and that used to fall to the `else`,
+                // so the step sat there re-reading a state nothing would ever change.
+                if step == .systemAudio, permissions.systemAudio != .granted {
                     await permissions.requestSystemAudio()
                 } else {
                     permissions.refresh()

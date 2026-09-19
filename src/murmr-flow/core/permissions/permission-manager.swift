@@ -22,13 +22,24 @@ final class PermissionManager {
     private(set) var accessibility: PermissionState = .denied
     /// Meetings only, so deliberately not part of `allGranted` — a dictation-only user
     /// should never see a warning about a grant they have no use for.
-    private(set) var systemAudio: PermissionState =
-        SystemAudioRecorder.hasKnownAccess ? .granted : .notDetermined
+    private(set) var systemAudio: PermissionState = PermissionManager.systemAudioState()
+
+    /// Proven, refused, or never asked — and the third is not the same as the second.
+    ///
+    /// A tap that has worked is a grant. A tap that has never worked is only a refusal if
+    /// the person has actually been asked; before that it is simply unknown, and an app
+    /// that treats unknown as refused warns people about a decision they were never
+    /// offered.
+    private static func systemAudioState() -> PermissionState {
+        if SystemAudioRecorder.hasKnownAccess { return .granted }
+        return SystemAudioRecorder.hasBeenAsked ? .denied : .notDetermined
+    }
 
     /// True once every permission dictation needs is granted.
     var allGranted: Bool { microphone == .granted && accessibility == .granted }
 
     private var pollTask: Task<Void, Never>?
+    private var systemAudioWatch: Task<Void, Never>?
 
     init() {
         refresh()
@@ -41,9 +52,9 @@ final class PermissionManager {
         // AXIsProcessTrusted() is the only way to read this. There is no
         // "notDetermined" state — either the app is in the Accessibility list or not.
         accessibility = AXIsProcessTrusted() ? .granted : .denied
-        // Never regresses here: a probe is the only thing that can say no, and a meeting
-        // succeeding says yes as a side effect.
-        if SystemAudioRecorder.hasKnownAccess { systemAudio = .granted }
+        // Never regresses to `notDetermined` here: once the dialog has been raised the
+        // question is asked for good, and a meeting succeeding answers it as a side effect.
+        if systemAudio != .granted { systemAudio = Self.systemAudioState() }
     }
 
     /// Runs the throwaway-tap probe off the main thread — the first call ever shows
@@ -51,8 +62,58 @@ final class PermissionManager {
     /// After a denial it re-checks silently, which is what lets onboarding notice a grant
     /// made in System Settings.
     func requestSystemAudio() async {
+        let wasAsked = SystemAudioRecorder.hasBeenAsked
         let granted = await Task.detached { SystemAudioRecorder.probeAccess() }.value
-        systemAudio = granted ? .granted : .denied
+        if granted {
+            systemAudio = .granted
+            stopWatchingSystemAudio()
+        } else if wasAsked {
+            // Asked before and it still does not work: that is a refusal.
+            systemAudio = .denied
+        } else {
+            // The very first ask. The probe fails whatever the person is about to click,
+            // because Apple's dialog goes up beside it rather than in front of it — so
+            // there is no answer to record yet. Recording one here was how the app came to
+            // say "System audio isn't allowed" to someone who had just allowed it.
+            systemAudio = .notDetermined
+            // …and somebody has to come back and look. Nothing announces this grant, and
+            // the one call that can read it is the one that just returned too early, so
+            // the answer only exists in the future. Without this the warning stayed up
+            // after you pressed Allow — the app had asked the question and then stopped
+            // listening for the reply.
+            watchForSystemAudio()
+        }
+    }
+
+    /// Re-probes until the grant lands, or until it is clear it never will.
+    ///
+    /// Slower than the accessibility poll on purpose: each probe builds a whole capture
+    /// pipeline and tears it down, which is far from free. Bounded, because an unanswered
+    /// dialog is not a reason to keep doing that forever — and when the window closes with
+    /// no grant, the honest reading is a refusal, which is also what puts the Allow button
+    /// onto the one route that still works: System Settings.
+    private func watchForSystemAudio() {
+        guard systemAudioWatch == nil else { return }
+        systemAudioWatch = Task { @MainActor [weak self] in
+            let deadline = Date().addingTimeInterval(30)
+            while !Task.isCancelled, Date() < deadline {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, !Task.isCancelled else { return }
+                if await Task.detached(operation: { SystemAudioRecorder.probeAccess() }).value {
+                    self.systemAudio = .granted
+                    self.systemAudioWatch = nil
+                    return
+                }
+            }
+            guard let self, !Task.isCancelled else { return }
+            if self.systemAudio != .granted { self.systemAudio = .denied }
+            self.systemAudioWatch = nil
+        }
+    }
+
+    private func stopWatchingSystemAudio() {
+        systemAudioWatch?.cancel()
+        systemAudioWatch = nil
     }
 
     func openSystemAudioSettings() {

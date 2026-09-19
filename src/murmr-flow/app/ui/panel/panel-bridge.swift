@@ -56,6 +56,19 @@ final class PanelBridge {
         }
         meetings.onStageChange = { [weak self] _ in self?.sync() }
 
+        // Everything that has already happened counts as reported.
+        //
+        // `lastRun` is restored from history at launch, and these two started empty — so
+        // the first sync saw the last dictation this app ever did and announced it as
+        // news. With Accessibility off, that run failed to type, which is why "Couldn't
+        // type here" greeted you on every single launch: a true sentence about something
+        // that happened yesterday.
+        //
+        // The pill speaks about the session it is in. What went before is the window's
+        // business.
+        reportedRunID = dictation.lastRun?.id
+        reportedNothingHeard = dictation.nothingHeardCount
+
         panel.present()
         sync()
         startPump()
@@ -93,12 +106,23 @@ final class PanelBridge {
         }
 
         // Throw it away. From `armed` there is nothing to throw, so it just dismisses.
+        //
+        // Every running state has to name itself here. `.meeting` used to fall to the
+        // default and call `hide()`, which is guarded by `!phase.isBusy` — so holding the
+        // red ✕ through a meeting did nothing whatsoever, while the pill said "hold to
+        // delete the recording". The panel promising something the wiring never did is
+        // worse than not offering it.
         model.onDiscard = { [weak self] in
             guard let self else { return }
             switch self.panel.model.phase {
             case .dictating:
                 self.dictation.cancelDictation()
-            case .failed:
+            case .meeting:
+                self.meetings.discard()
+            case .notice, .failed:
+                // A message is dismissed, not hidden. `hide()` would put the pill away
+                // until something next started it, which is a great deal more than
+                // clicking a two-second notice ought to mean.
                 self.panel.model.set(.resting)
             default:
                 self.panel.model.hide()
@@ -209,7 +233,7 @@ final class PanelBridge {
             return
         case .failed(let kind, _):
             model.mode = .note
-            model.set(.failed(kind))
+            show(failure: kind)
             panel.apply()
             return
         case .idle, .saved:
@@ -235,7 +259,7 @@ final class PanelBridge {
             model.set(.working("Inserting…"))
 
         case .failed(let kind, _):
-            model.set(.failed(kind))
+            show(failure: kind)
 
         case .idle:
             // No success state. The text appearing in your document *is* the confirmation;
@@ -249,10 +273,11 @@ final class PanelBridge {
             // key that never fired — so the pill says which, for a moment.
             if let run = dictation.lastRun, run.id != reportedRunID {
                 reportedRunID = run.id
-                model.set(run.insertionFailed ? .failed(.insertion) : .resting)
+                if run.insertionFailed { show(failure: .insertion) } else { model.set(.resting) }
             } else if dictation.nothingHeardCount != reportedNothingHeard {
                 reportedNothingHeard = dictation.nothingHeardCount
-                show(notice: "Didn\u{2019}t hear anything", for: .seconds(2))
+                show(notice: "Didn\u{2019}t hear anything",
+                     for: .seconds(PanelModel.noticeDuration))
             } else if model.phase.isBusy {
                 model.set(.resting)
             }
@@ -264,15 +289,32 @@ final class PanelBridge {
     /// A notice is a moment, not a state: it clears itself unless something else has
     /// taken the pill over in the meantime.
     private func show(notice: String, for duration: Duration) {
-        panel.model.set(.notice(notice))
+        clears(.notice(notice), after: duration)
+    }
+
+    /// Both of the panel's message states go by themselves.
+    ///
+    /// A failure used to sit there until you dismissed it, which is why it carried a ✕
+    /// while nothing else in the row did. Now it drains like a notice — longer, because a
+    /// failure has to be read rather than merely noticed — and the pill draws that
+    /// countdown from `PanelModel.dismissal`, so what you see cannot disagree with the
+    /// timer that actually fires.
+    private func clears(_ phase: PanelModel.Phase, after duration: Duration) {
+        panel.model.set(phase)
         noticeTask?.cancel()
         noticeTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: duration)
             guard let self, !Task.isCancelled,
-                  case .notice = self.panel.model.phase else { return }
+                  self.panel.model.phase == phase else { return }
             self.panel.model.set(.resting)
             self.panel.apply()
         }
+    }
+
+    /// Shown for as long as `PanelModel` says a failure lasts, so the drain and the
+    /// dismissal are the same number.
+    private func show(failure: FailureKind) {
+        clears(.failed(failure), after: .seconds(PanelModel.failureDuration))
     }
 
     private func captureTarget() {
