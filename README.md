@@ -106,6 +106,29 @@ quickest way to look at a view without launching the app.
 | `verify-signing.sh` | Print signature, Team ID, CDHash, entitlements |
 | `make-cert.sh` | Create a persistent self-signed certificate |
 | `reset-permissions.sh` | Revoke permission grants to retest the flow |
+| `demo-data.sh` | Swap your notes and history for invented ones (`--restore` puts yours back) |
+| `screenshot.sh` | Capture the main window to `docs/screenshots/` |
+
+## Screenshots
+
+The images in this README are taken from a machine full of meetings that never
+happened. `demo-data.sh` moves your own notes and dictation log aside and writes a
+folder of fiction in the same on-disk formats the app already reads, so nothing in the
+app knows it is being photographed — and `tests/murmr-flow-tests/demo-data-tests.swift`
+reads that fiction back through `NoteStore` and `HistoryStore`, so a format change
+breaks the test rather than quietly aging the screenshots.
+
+```sh
+./scripts/demo-data.sh            # invented notes and history in place of yours
+./scripts/dev.sh                  # build, install, launch
+./scripts/screenshot.sh home      # with Home open
+./scripts/screenshot.sh notes     # with Notes open and a note selected
+./scripts/demo-data.sh --restore  # your own data back
+```
+
+Captured without the drop shadow, on purpose: a shadow baked into the PNG is the wrong
+shadow against every background but the one it was taken on, and GitHub's dark theme is
+not that background.
 
 ## Layout
 
@@ -115,6 +138,7 @@ src/murmr-flow/            app code — app/, core/, dictation/, meetings/
 resources/                 Info.plist and entitlements templates
 scripts/                   build, install, verify, helpers
 tests/                     swift-testing suites
+docs/screenshots/          the images above, made by scripts/screenshot.sh
 ```
 
 Files and directories are lowercase `kebab-case`; Swift *type* names stay
