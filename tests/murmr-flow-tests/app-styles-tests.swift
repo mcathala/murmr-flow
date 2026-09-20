@@ -169,21 +169,33 @@ struct AppStylesTests {
         #expect(prompts.style(usingHotkey: fnOption, excluding: target.id) == nil)
     }
 
-    @Test("Summary starts on the shipped style, and cleared stays cleared")
-    func summaryAssignment() {
+    @Test("Notetaker starts on the shipped style, and cleared stays cleared")
+    func notetakerAssignment() {
         let (prompts, defaults) = store()
-        #expect(prompts.summaryPrompt?.name == "Summary")
+        #expect(prompts.notetakerPrompt?.name == "Notes")
 
-        prompts.summaryPromptID = nil
-        #expect(PromptStore(defaults: defaults).summaryPrompt == nil)
+        prompts.notetakerPromptID = nil
+        #expect(PromptStore(defaults: defaults).notetakerPrompt == nil)
     }
 
-    @Test("Deleting the Summary style stops the note rather than picking another")
-    func deletingSummaryStyle() {
+    @Test("Deleting the Notetaker style stops the note rather than picking another")
+    func deletingNotetakerStyle() {
         let (prompts, _) = store()
-        let summary = prompts.presets.first { $0.name == "Summary" }!
-        prompts.delete(summary)
-        // Anything else would write the note with a style meant for tidying turns.
-        #expect(prompts.summaryPromptID == nil)
+        let notes = prompts.presets.first { $0.name == "Notes" }!
+        prompts.delete(notes)
+        // Anything else would write a meeting's note with a style meant for dictation.
+        #expect(prompts.notetakerPromptID == nil)
+    }
+
+    /// The tidying style is gone, and anyone pointed at it has to land somewhere sensible
+    /// rather than on a style that would return their transcript back to them.
+    @Test("A Notetaker still set to the retired tidier is moved to the note style")
+    func retiredTidierMigrates() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set("8B1F0C4A-0000-4000-A000-000000000005", forKey: "prompts.noteID")
+
+        let prompts = PromptStore(defaults: defaults)
+        #expect(prompts.notetakerPrompt?.name == "Notes")
+        #expect(prompts.notetakerPrompt?.template.contains("Write the notes") == true)
     }
 }

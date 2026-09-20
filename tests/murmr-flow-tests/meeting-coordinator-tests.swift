@@ -124,29 +124,18 @@ struct MeetingCoordinatorTests {
         #expect(!FileManager.default.fileExists(atPath: rig.recorder.recording!.folder.path))
     }
 
-    @Test("with clean-up on, the note carries the cleaned turns and the cleaning step shows")
+    /// A meeting is one request now, so there is no tidying step and no tidied turns.
+    /// The transcript is kept as heard, whatever the note does.
+    @Test("with the note on, the transcript is still saved exactly as heard")
     func cleaned() async {
         let rig = Rig()
         rig.settings.notetakerCleanupEnabled = true
         await rig.run()
 
-        #expect(rig.stages.stages.contains(.transcribing(.cleaning)))
         #expect(rig.coordinator.stage == .saved)
         let body = rig.notes.body(of: rig.notes.notes[0])
-        #expect(body.contains("SO ARE WE GOOD TO MOVE IT"))
+        #expect(body.contains("so are we good to move it"))
         #expect(rig.coordinator.lastResult?.cleanupNote == nil)
-    }
-
-    @Test("a clean-up that falls back keeps every turn as spoken and says why")
-    func cleanupFallback() async {
-        let rig = Rig()
-        rig.settings.notetakerCleanupEnabled = true
-        rig.cleaner.turnsOutcome = { CleanupService.TurnsOutcome.raw($0, note: "provider down") }
-        await rig.run()
-
-        #expect(rig.coordinator.stage == .saved)
-        #expect(rig.coordinator.lastResult?.cleanupNote == "provider down")
-        #expect(rig.notes.body(of: rig.notes.notes[0]).contains("so are we good to move it"))
     }
 
     /// Both streams empty is a microphone problem: nothing was captured on either side.
@@ -256,17 +245,21 @@ struct MeetingCoordinatorTests {
         let note = try #require(body.range(of: "### What was said"))
         let transcript = try #require(body.range(of: "## Transcript"))
         #expect(note.lowerBound < transcript.lowerBound)
-        #expect(body.contains("SO ARE WE GOOD TO MOVE IT"))
+        // As heard. The note is what was kept; the transcript is the evidence behind it.
+        #expect(body.contains("so are we good to move it"))
         #expect(rig.stages.stages.contains(.transcribing(.noting)))
     }
 
-    @Test("the note is written from the cleaned turns, not the raw ones")
-    func notesTheCleanedWording() async {
+    @Test("the note is written straight from the raw turns, in one request")
+    func notesTheRawWording() async {
         let rig = Rig()
         await rig.run()
 
-        // The fake clean-up upper-cases, so the turns the note saw prove the order.
-        #expect(rig.cleaner.noteTurns.last?.first?.text == "SO ARE WE GOOD TO MOVE IT")
+        // The model sees what the speech model heard. Nothing tidies it first — the note
+        // prompt carries the repair rules itself, which is why the second pass was only
+        // ever paying to write a transcript out again.
+        #expect(rig.cleaner.noteTurns.last?.first?.text == "so are we good to move it")
+        #expect(rig.cleaner.noteTurns.count == 1)
     }
 
     @Test("the style that wrote the note is recorded in the front matter")
@@ -275,18 +268,18 @@ struct MeetingCoordinatorTests {
         await rig.run()
 
         let full = (try? String(contentsOf: rig.notes.notes[0].url, encoding: .utf8)) ?? ""
-        #expect(full.contains("note: Summary"))
+        #expect(full.contains("note: Notes"))
     }
 
-    @Test("with no style set for Summary, the transcript is saved on its own")
-    func noSummaryStyle() async {
+    @Test("with no style set for Notetaker, the transcript is saved on its own")
+    func noNotetakerStyle() async {
         let rig = Rig()
-        rig.prompts.summaryPromptID = nil
+        rig.prompts.notetakerPromptID = nil
         await rig.run()
 
         let body = rig.notes.body(of: rig.notes.notes[0])
         #expect(!body.contains("## Transcript"))
-        #expect(body.contains("SO ARE WE GOOD TO MOVE IT"))
+        #expect(body.contains("so are we good to move it"))
         #expect(!rig.stages.stages.contains(.transcribing(.noting)))
     }
 
@@ -300,7 +293,7 @@ struct MeetingCoordinatorTests {
 
         #expect(rig.coordinator.stage == .saved)
         let body = rig.notes.body(of: rig.notes.notes[0])
-        #expect(body.contains("SO ARE WE GOOD TO MOVE IT"))
+        #expect(body.contains("so are we good to move it"))
         #expect(!body.contains("## Transcript"))
         #expect(rig.coordinator.lastResult?.cleanupNote?.contains("The model refused.") == true)
     }
@@ -323,7 +316,7 @@ struct MeetingCoordinatorTests {
         let file = rig.notes.notes[0]
         let before = try String(contentsOf: file.url, encoding: .utf8)
         let after = NoteFile.rewritingTitle(in: before, to: "Weekly sync", fallbackDate: Date())
-        #expect(after.contains("note: Summary"))
+        #expect(after.contains("note: Notes"))
         #expect(after.contains("### What was said"))
     }
 
