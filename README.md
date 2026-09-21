@@ -27,23 +27,42 @@
 The speech model runs entirely on-device. Audio never leaves the machine; only
 cleaned-up text is sent to an AI provider, and only if you configure one.
 
-> **Work in progress.** Both jobs work end to end and this has been a daily driver for
-> months. What it is not yet is notarized, which changes what macOS says on first
-> launch — see [Install](#install).
-
 ![Home — the two halves of the pipeline, your audio devices, and what you dictated today](docs/screenshots/home.png)
 
 ## Install
 
-### Download
+### macOS
 
-[**Download the latest release**](https://github.com/mcathala/murmr-flow/releases/latest),
-unzip it, and drag `Murmr Flow.app` to `/Applications`.
+One line, pasted into the Terminal:
 
-The builds are not notarized, so the first launch gets Gatekeeper's *"cannot be opened
-because the developer cannot be verified"*. Right-click the app → **Open** → **Open**.
-Once, and never again for that copy. If that trade is not one you want to make,
-[build it yourself](#building-from-source) — the result is the same app, signed by you.
+```sh
+curl -fsSL "$(curl -fsSL https://api.github.com/repos/mcathala/murmr-flow/releases/latest \
+  | grep -o '"browser_download_url": *"[^"]*\.zip"' | head -1 | cut -d'"' -f4)" \
+  -o /tmp/MurmrFlow.zip \
+  && unzip -oq /tmp/MurmrFlow.zip -d /Applications \
+  && open "/Applications/Murmr Flow.app"
+```
+
+That finds the latest release, unpacks it into `/Applications`, and opens it. It also
+skips the warning below, because the quarantine flag that triggers Gatekeeper is set by
+browsers, not by `curl`.
+
+Prefer to click: [**download the latest release**](https://github.com/mcathala/murmr-flow/releases/latest),
+unzip, drag `Murmr Flow.app` to `/Applications`. The builds are not notarized, so the
+first launch gets *"cannot be opened because the developer cannot be verified"*.
+Right-click the app → **Open** → **Open**. Once, and never again for that copy. If that
+trade is not one you want to make, [build it yourself](#building-from-source) — the
+result is the same app, signed by you.
+
+Either route installs the same ad-hoc signed build. macOS ties permission grants to a
+signature, so until these are signed with a Developer ID and notarized, each new
+release asks for Accessibility and the microphone again.
+
+### Windows
+
+Not yet. The interface is a rewrite either way; the open question is the speech stack,
+because the on-device model runs on Apple's Neural Engine and there is no drop-in
+equivalent. Watch the repo if you want to know when that changes.
 
 ### Permissions
 
