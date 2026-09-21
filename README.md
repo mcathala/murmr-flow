@@ -220,13 +220,23 @@ test rather than quietly aging the screenshots.
 ./scripts/demo-data.sh            # invented notes and history in place of yours
 ./scripts/dev.sh                  # build, install, launch
 ./scripts/screenshot.sh home      # with Home open
-./scripts/screenshot.sh notes     # with Notes open and a note selected
+./scripts/screenshot.sh notes     # with Notetaker open and a note selected
 ./scripts/demo-data.sh --restore  # your own data back
 ```
 
 Captured without the drop shadow, on purpose: a shadow baked into the PNG is the wrong
 shadow against every background but the one it was taken on, and GitHub's dark theme is
 not that background.
+
+Capturing another app's window needs the Screen Recording grant, and macOS gives it to
+the terminal rather than to Murmr Flow — so on a machine without it, `screencapture`
+answers *"could not create image from display"* and there is nothing a script can do
+about that from the inside. Take the shot with macOS's own screenshotter instead
+(⌘⇧4, Space, click the window) and file it under the right name:
+
+```sh
+./scripts/screenshot.sh home --adopt
+```
 
 ## Contributing
 
