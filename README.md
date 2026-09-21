@@ -5,8 +5,9 @@
 <h1 align="center">Murmr Flow</h1>
 
 <p align="center">
-  <b>Local-first dictation and notes for macOS.</b><br />
-  Hold a key and speak, or record what you are listening to. The audio never leaves the Mac.
+  <b>Dictation and notes for macOS, with the speech model on your Mac.</b><br />
+  Hold a key and speak, or record what you are listening to.<br />
+  Audio never leaves the machine — only text, and only to a provider you choose.
 </p>
 
 <p align="center">
