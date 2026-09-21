@@ -308,46 +308,58 @@ search is the one people actually ask for""",
             ),
         ],
     ),
+    # Not a work meeting. The notetaker gets pointed at a call with a builder or a
+    # doctor at least as often as at a standup, and a folder of nothing but sprint
+    # ceremonies describes a narrower app than this one.
     dict(
-        when=at(6, 15, 30),
-        title="Bug triage",
-        duration=18 * 60 + 44,
+        when=at(6, 18, 15),
+        title="Call with the builder",
+        duration=16 * 60 + 22,
         cleanup="Meeting notes",
-        note="""Eleven open, four closed as not-a-bug.
+        note="""**Quote**: €4,800 for the kitchen, materials included. Two and a half
+weeks, starting the first Monday of next month.
 
-**Real**
+**Watch**
 
-- Panel drifts one pixel per display change on a mixed-DPI setup.
-- Hotkey stops firing after the Mac sleeps with an external keyboard attached.
-- Clean-up silently falls back to raw when the provider 429s — should say so.
+- The €4,800 does not include the electrics. Separate trade, separate quote.
+- He wants half up front. Ask whether a third is acceptable.
 
-**Not a bug**
+**Next**
 
-- "Notes folder is empty" — the person had moved it in Finder. The app follows
-  the folder, not the path, and that surprised them. Worth a line in the docs.""",
-        own_notes=None,
+- [ ] Get the electrician's number from him
+- [ ] Measure the alcove properly before Friday""",
+        own_notes="""half up front feels like a lot — ask around
+he mentioned the neighbours' place, go and look at it""",
         turns=[
             (
-                7,
-                46,
+                9,
+                54,
                 "Them",
-                "Start with the hotkey one. Two reports now, both with external "
-                "keyboards.",
+                "So for the kitchen itself, taking out the old units, the plastering "
+                "and putting the new run in, you're looking at four thousand eight "
+                "hundred with materials.",
+            ),
+            (55, 71, "You", "And that includes the electrics?"),
+            (
+                72,
+                126,
+                "Them",
+                "No, that's a separate trade. I can give you a number for the chap I "
+                "use, but he'll quote you himself. It's usually six or seven hundred "
+                "for a job this size.",
             ),
             (
-                47,
-                102,
+                127,
+                168,
                 "You",
-                "It's the event tap going stale after sleep. macOS disables it and "
-                "doesn't tell you. We should re-arm on wake rather than trusting it.",
+                "Right. And how long would the whole thing take, start to finish?",
             ),
-            (103, 124, "Them", "Is that a one-liner or a week?"),
             (
-                125,
-                163,
-                "You",
-                "A one-liner to re-arm, a week to be sure we didn't create a duplicate "
-                "tap every time the lid opens.",
+                169,
+                232,
+                "Them",
+                "Two and a half weeks if nothing surprises us. I could start the first "
+                "Monday of next month. I'd want half up front for the materials.",
             ),
         ],
     ),
@@ -430,32 +442,50 @@ print(f"  \033[32m✓\033[0m {written} notes → {NOTES_DIR}")
 # The durations are set so the words-per-minute figures land where a real person's do,
 # roughly 130 to 165. `demo-data-tests.swift` fails the build if any of them drifts
 # somewhere implausible.
+#
+# **Half of these are not work.** A list of nothing but git commands and bug reports
+# makes the app look like a developer tool, and it is not one — the person dictating a
+# shopping list into Notes is the same person rebasing a branch. The lengths are mixed
+# on purpose too: a row that truncates proves the list handles a real paragraph, and a
+# row of four words proves it does not need one.
 DICTATIONS = [
-    (12, 5.0, "Brave Browser", "com.brave.Browser",
-     "Reply to the thread: the flag is off until Thursday, nothing moves before then."),
-    (34, 7.2, "Claude", "com.anthropic.claudefordesktop",
+    # — everyday —
+    (8, 2.6, "Brave Browser", "com.brave.Browser",
+     "best ramen near gare du nord"),
+    # — programming —
+    (17, 7.2, "Claude", "com.anthropic.claudefordesktop",
      "Write a test that reads the demo notes back through the real parser, not a copy of it."),
-    (58, 3.9, "Terminal", "com.apple.Terminal",
+    (29, 3.7, "Terminal", "com.apple.Terminal",
      "git rebase onto main and force push with lease"),
-    (95, 5.8, "Cursor", "com.todesktop.230313mzl4w4u92",
-     "Re-arm the event tap on wake — macOS disables it after sleep without telling us."),
-    (140, 4.8, "Slack", "com.tinyspeck.slackmacgap",
-     "Taking the snapshot suite off Nils. I broke them, I'll fix them."),
-    (190, 3.5, "Brave Browser", "com.brave.Browser",
-     "local first dictation macos neural engine benchmark"),
-    (255, 5.2, "Claude", "com.anthropic.claudefordesktop",
-     "Summarise the design review in five bullets, keep every number exactly as stated."),
-    (320, 3.7, "Terminal", "com.apple.Terminal",
-     "swift test with the command line tools framework flags"),
-    (1_400, 7.5, "Slack", "com.tinyspeck.slackmacgap",
-     "Design review done: microphone moves to first use, Screen Recording gets its own "
-     "page, model download goes to the background."),
-    (1_580, 4.1, "Cursor", "com.todesktop.230313mzl4w4u92",
-     "The file is the source of truth, not a database."),
-    (2_900, 4.4, "Brave Browser", "com.brave.Browser",
-     "how long does parakeet take to load on apple silicon"),
-    (3_040, 5.6, "Claude", "com.anthropic.claudefordesktop",
-     "Draft the release note for 0.3 — two fixes and the new notes pane."),
+    # — everyday —
+    (46, 1.8, "Notes", "com.apple.Notes",
+     "Milk, olive oil, coffee."),
+    # — programming —
+    (64, 10.0, "Cursor", "com.todesktop.230313mzl4w4u92",
+     "Re-arm the event tap on wake — macOS disables it after sleep without telling us, "
+     "and we should not be trusting it to still be live."),
+    # — everyday —
+    (88, 11.8, "Mail", "com.apple.mail",
+     "Thanks for having us on Saturday — the lamb was extraordinary and I am still "
+     "thinking about that walnut thing. Let us return the favour in a couple of weeks."),
+    (130, 5.6, "Notes", "com.apple.Notes",
+     "Dentist Thursday at half four, and pick up the prescription on the way back."),
+    # — programming —
+    (190, 2.5, "Slack", "com.tinyspeck.slackmacgap",
+     "Merged, flag is off until Thursday."),
+    (260, 1.7, "Brave Browser", "com.brave.Browser",
+     "swiftui imagerenderer vibrancy transparent"),
+    # — everyday —
+    (1_400, 9.5, "Mail", "com.apple.mail",
+     "Sorry to miss the call — I am on a train with no signal until half past. Can we "
+     "push to tomorrow morning?"),
+    # — programming —
+    (1_560, 9.3, "Claude", "com.anthropic.claudefordesktop",
+     "Draft the release note for 0.3 — two fixes, the new notes pane, and say plainly "
+     "that the builds are not notarized yet."),
+    # — everyday —
+    (2_900, 4.9, "Brave Browser", "com.brave.Browser",
+     "How long should you rest between sets for strength rather than size?"),
 ]
 
 records = []
