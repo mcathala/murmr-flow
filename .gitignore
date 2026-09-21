@@ -18,8 +18,11 @@ scripts/local-*.sh
 # Agent scratch space and git worktrees
 .claude/
 
-# Design docs are kept locally for now
-docs/
+# Design docs are kept locally for now — but the README's screenshots are not a design
+# doc, they are part of what the repo publishes. `docs/*` rather than `docs/`, because
+# git will not look inside an excluded directory to find the exception.
+docs/*
+!docs/screenshots/
 
 # Models are downloaded at runtime, never committed (~600 MB each)
 Models/
