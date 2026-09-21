@@ -64,18 +64,13 @@ final class PromptStore {
 
     /// Notetaker's preset. Still optional: a preset can be deleted, and pointing at a
     /// prompt that no longer exists would be worse than pointing at nothing.
-    var notetakerPromptID: UUID? {
-        didSet { defaults.set(notetakerPromptID?.uuidString, forKey: Key.note) }
-    }
-
     /// Which style writes the note above a meeting's transcript, or nil for no note at
-    /// all. Separate from `notetakerPromptID`, which tidies the wording of each turn: one
-    /// says how the conversation reads, the other says what is worth keeping from it.
-    var summaryPromptID: UUID? {
+    /// all — a meeting saved as what was said, with nothing written over it.
+    var notetakerPromptID: UUID? {
         // An empty string, not nil: `set(nil:)` removes the key, which reads back as
         // "never chosen" and would put the shipped style back on the next launch —
-        // turning the note off would last until you quit.
-        didSet { defaults.set(summaryPromptID?.uuidString ?? "", forKey: Key.summary) }
+        // turning the note off would last only until you quit.
+        didSet { defaults.set(notetakerPromptID?.uuidString ?? "", forKey: Key.note) }
     }
 
     /// One rule per app, in the order they were added. Dictation only: Notetaker has no
@@ -149,11 +144,15 @@ final class PromptStore {
         // Resolved from `loaded` rather than `self.presets`: the stored properties are
         // not all initialised yet, so touching `self` here is a compile error.
         let storedDictation = defaults.string(forKey: Key.dictation).flatMap(UUID.init)
-        let storedNote = defaults.string(forKey: Key.note).flatMap(UUID.init)
-        // Three states, like the meeting key: never set (take the built-in), set, and
+        var storedNote = defaults.string(forKey: Key.note).flatMap(UUID.init)
+        // A meeting is one pass now, so the Notetaker style *writes the note* — it no
+        // longer tidies turns for a second style to read. `Notes` did the tidying and is
+        // gone; anyone pointed at it is moved to the style that does the remaining job,
+        // which is the one they were getting the output of anyway.
+        if storedNote == ID.meeting { storedNote = ID.summary }
+        // Three states, not two: never set (take the shipped style), set, and deliberately
         // cleared. Without the third, turning the note off would come back on next launch.
-        let storedSummary = defaults.string(forKey: Key.summary).flatMap(UUID.init)
-        let summaryWasChosen = defaults.object(forKey: Key.summary) != nil
+        let noteWasChosen = defaults.object(forKey: Key.note) != nil
 
         self.presets = loaded
         // Default and Notes are the fallbacks, unless they have been deleted — then the
@@ -164,10 +163,7 @@ final class PromptStore {
             ?? loaded.first?.id
             ?? Self.defaultPreset.id
         self.notetakerPromptID = loaded.first { $0.id == storedNote }?.id
-            ?? loaded.first { $0.id == ID.meeting }?.id
-            ?? loaded.first?.id
-        self.summaryPromptID = loaded.first { $0.id == storedSummary }?.id
-            ?? (summaryWasChosen ? nil : loaded.first { $0.id == ID.summary }?.id)
+            ?? (noteWasChosen ? nil : loaded.first { $0.id == ID.summary }?.id)
 
         // Rules and keys for styles that no longer exist are dropped on load rather than
         // guarded against at every read: a rule pointing at a deleted style would silently
@@ -200,10 +196,6 @@ final class PromptStore {
 
     var notetakerPrompt: PromptPreset? {
         notetakerPromptID.flatMap { id in presets.first { $0.id == id } }
-    }
-
-    var summaryPrompt: PromptPreset? {
-        summaryPromptID.flatMap { id in presets.first { $0.id == id } }
     }
 
     func preset(id: UUID) -> PromptPreset? { presets.first { $0.id == id } }
@@ -368,12 +360,9 @@ final class PromptStore {
         if dictationPromptID == preset.id, let next = presets.first {
             dictationPromptID = next.id
         }
-        if notetakerPromptID == preset.id {
-            notetakerPromptID = (presets.first { $0.id == ID.meeting } ?? presets.first)?.id
-        }
-        // No fallback for the note: writing one with a style meant for tidying turns would
+        // No fallback: writing the note with whatever style happens to be next would
         // produce something nobody asked for. It simply stops until a style is named.
-        if summaryPromptID == preset.id { summaryPromptID = nil }
+        if notetakerPromptID == preset.id { notetakerPromptID = nil }
         // The style is gone, so the rules and the key that pointed at it go with it. A
         // rule left behind would read as a working setting and quietly do nothing.
         appRules.removeAll { $0.styleID == preset.id }
@@ -408,10 +397,14 @@ final class PromptStore {
 
     static var defaultPreset: PromptPreset { builtIns[0] }
 
-    /// Notetaker's default, Notes. Looked up by id rather than position, so reordering the
-    /// built-ins can't quietly change which prompt meetings use.
+    /// Notetaker's default, Notes — the style that writes the note. Looked up by id rather
+    /// than position, so reordering the built-ins can't quietly change which prompt
+    /// meetings use.
+    ///
+    /// `ID.meeting` was the tidying style this replaced; it is kept only as the id a
+    /// stored assignment might still be pointing at.
     static var meetingPreset: PromptPreset {
-        builtIns.first { $0.id == ID.meeting } ?? defaultPreset
+        builtIns.first { $0.id == ID.summary } ?? defaultPreset
     }
 
     /// Fixed identifiers, so an assignment survives a rebuild.
@@ -428,8 +421,9 @@ final class PromptStore {
         PromptPreset(id: ID.standard, name: "Default", template: ShippedPrompts.standard, isBuiltIn: true),
         PromptPreset(id: ID.structure, name: "Structure", template: ShippedPrompts.structure, isBuiltIn: true),
         PromptPreset(id: ID.formal, name: "Formal", template: ShippedPrompts.formal, isBuiltIn: true),
-        PromptPreset(id: ID.meeting, name: "Notes", template: ShippedPrompts.meeting, isBuiltIn: true),
-        PromptPreset(id: ID.summary, name: "Summary", template: ShippedPrompts.summary, isBuiltIn: true),
+        // `Notes` retired with the tidying pass it existed for. A meeting is one request
+        // now, so the only thing a Notetaker style can do is write the note.
+        PromptPreset(id: ID.summary, name: "Notes", template: ShippedPrompts.summary, isBuiltIn: true),
     ]
 }
 
