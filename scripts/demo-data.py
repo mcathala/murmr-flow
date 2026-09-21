@@ -37,6 +37,18 @@ def at(days_ago, hour, minute):
     return moment
 
 
+def hours_ago(hours):
+    """A round-ish time that many hours back, wherever the clock happens to be.
+
+    `at()` pins a meeting to an hour of the day, which is right for anything older
+    than today but wrong for the most recent one: how long ago it was then depends on
+    when the screenshot is taken, and at 08:30 a 09:32 standup outranks every dictation
+    and takes a row in Recents that was meant for one. This keeps the gap fixed instead.
+    """
+    moment = NOW - timedelta(hours=hours)
+    return moment.replace(minute=moment.minute // 5 * 5, second=0, microsecond=0)
+
+
 def iso(moment):
     """`ISO8601DateFormatter` with `.withInternetDateTime` — no fractional seconds."""
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -57,7 +69,7 @@ def clock(seconds):
 # (start, end, speaker, text). Seconds from the top of the meeting.
 MEETINGS = [
     dict(
-        when=at(0, 9, 32),
+        when=hours_ago(3),
         title="Standup",
         duration=11 * 60 + 40,
         cleanup="Meeting notes",
@@ -448,44 +460,46 @@ print(f"  \033[32m✓\033[0m {written} notes → {NOTES_DIR}")
 # shopping list into Notes is the same person rebasing a branch. The lengths are mixed
 # on purpose too: a row that truncates proves the list handles a real paragraph, and a
 # row of four words proves it does not need one.
+#
+# Nothing here models bad practice. A README screenshot is read as a recommendation by
+# someone who has never seen the app, so the terminal row greps a log rather than force
+# pushing, however well-leased the force push was.
+#
+# The text is also written the way clean-up *should* return it: prose, no stray `###`.
+# A markdown heading leaking into a one-line row is a clean-up bug, and reproducing it
+# in the screenshot would ship the bug as the intended look.
 DICTATIONS = [
-    # — everyday —
-    (8, 2.6, "Brave Browser", "com.brave.Browser",
-     "best ramen near gare du nord"),
-    # — programming —
-    (17, 7.2, "Claude", "com.anthropic.claudefordesktop",
+    # The first five are what Home's Recents shows. Everything below them is there to
+    # make the week's figures and the Insights page add up.
+    (8, 1.7, "Brave Browser", "com.brave.Browser",
+     "Best brasserie in Paris?"),
+    (17, 7.2, "Cursor", "com.todesktop.230313mzl4w4u92",
      "Write a test that reads the demo notes back through the real parser, not a copy of it."),
-    (29, 3.7, "Terminal", "com.apple.Terminal",
-     "git rebase onto main and force push with lease"),
-    # — everyday —
-    (46, 1.8, "Notes", "com.apple.Notes",
-     "Milk, olive oil, coffee."),
-    # — programming —
-    (64, 10.0, "Cursor", "com.todesktop.230313mzl4w4u92",
-     "Re-arm the event tap on wake — macOS disables it after sleep without telling us, "
-     "and we should not be trusting it to still be live."),
-    # — everyday —
+    (29, 5.3, "Terminal", "com.apple.Terminal",
+     "Tail the log and grep for the line where the permission is denied."),
+    (46, 4.2, "Notes", "com.apple.Notes",
+     "Grocery list: water, spinach, greek yoghurt, almonds, oat milk, blueberries."),
+    (58, 4.0, "Claude", "com.anthropic.claudefordesktop",
+     "Reminder: find an open-source alternative to Wispr Flow and Granola."),
+
     (88, 11.8, "Mail", "com.apple.mail",
      "Thanks for having us on Saturday — the lamb was extraordinary and I am still "
      "thinking about that walnut thing. Let us return the favour in a couple of weeks."),
-    (130, 5.6, "Notes", "com.apple.Notes",
-     "Dentist Thursday at half four, and pick up the prescription on the way back."),
-    # — programming —
+    (130, 10.0, "Cursor", "com.todesktop.230313mzl4w4u92",
+     "Re-arm the event tap on wake — macOS disables it after sleep without telling us, "
+     "and we should not be trusting it to still be live."),
     (190, 2.5, "Slack", "com.tinyspeck.slackmacgap",
      "Merged, flag is off until Thursday."),
     (260, 1.7, "Brave Browser", "com.brave.Browser",
      "swiftui imagerenderer vibrancy transparent"),
-    # — everyday —
     (1_400, 9.5, "Mail", "com.apple.mail",
      "Sorry to miss the call — I am on a train with no signal until half past. Can we "
      "push to tomorrow morning?"),
-    # — programming —
     (1_560, 9.3, "Claude", "com.anthropic.claudefordesktop",
      "Draft the release note for 0.3 — two fixes, the new notes pane, and say plainly "
      "that the builds are not notarized yet."),
-    # — everyday —
-    (2_900, 4.9, "Brave Browser", "com.brave.Browser",
-     "How long should you rest between sets for strength rather than size?"),
+    (2_900, 5.6, "Notes", "com.apple.Notes",
+     "Dentist Thursday at half four, and pick up the prescription on the way back."),
 ]
 
 records = []
