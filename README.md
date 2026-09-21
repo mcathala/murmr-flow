@@ -5,8 +5,9 @@
 <h1 align="center">Murmr Flow</h1>
 
 <p align="center">
-  <b>Local-first dictation and meeting notes for macOS.</b><br />
-  Hold a key, speak, and the words land where your cursor is — without the audio ever leaving the Mac.
+  <b>Local-first dictation and notes for macOS.</b><br />
+  Hold a key, speak, and the words land where your cursor is. Or record what you are listening to and get a written note.<br />
+  Either way the audio never leaves the Mac.
 </p>
 
 <p align="center">
@@ -21,8 +22,9 @@
 
 - **Dictation** — hold a hotkey, speak, and the text is inserted wherever your cursor
   is. Any app, no integration, nothing to paste.
-- **Notetaker** — record a meeting, both sides of it, and get a Markdown note with
-  speaker labels and a written summary above the transcript.
+- **Notetaker** — record your microphone and whatever is playing through the Mac, and
+  get a Markdown note with speaker labels and a written summary above the transcript.
+  A meeting, a call, a lecture, a podcast — or just you, thinking out loud.
 
 The speech model runs entirely on-device. Audio never leaves the machine; only
 cleaned-up text is sent to an AI provider, and only if you configure one.
@@ -72,7 +74,7 @@ macOS asks for three things, and it is worth knowing why before you grant any of
 |---|---|
 | **Microphone** | Hearing you. There is no version of this that works without it. |
 | **Accessibility** | Two things: noticing the hotkey while another app is focused, and typing the finished text into that app. |
-| **Screen Recording** | Recording the *other* side of a meeting. macOS files the system-audio grant under Screen Recording; nothing looks at your screen, and no video is ever captured. |
+| **Screen Recording** | Hearing what the Mac itself is playing — the other side of a call, the video you are watching. macOS files the system-audio grant under Screen Recording; nothing looks at your screen, and no video is ever captured. |
 
 Nothing is asked for until the moment it is needed, and dictation works with the
 microphone alone — Screen Recording is only for the notetaker.
@@ -96,11 +98,21 @@ Both versions are kept — the raw transcript and what was actually inserted —
 see whether the model improved your words or mangled them, and re-run clean-up against
 a different prompt without saying the whole thing again.
 
-## Meeting notes
+## Notes from anything you hear
 
-Record a meeting and get a Markdown file: a written note at the top, your own typed
-notes kept whole and separate beneath it, and the full speaker-labelled transcript
-below that.
+The notetaker records two things: your microphone, and whatever is playing through the
+Mac. Between them that covers most of what is worth keeping —
+
+- **Meetings and calls**, where the speaker labels do real work.
+- **Lectures, courses and tutorials** — one person talking, you chipping in
+  occasionally.
+- **Podcasts and videos**, where nothing comes from your microphone at all and the
+  note is simply what you listened to.
+- **Thinking out loud**, with nothing playing: a structured note back instead of a
+  transcript of yourself rambling.
+
+You get a Markdown file: a written note at the top, your own typed notes kept whole and
+separate beneath it, and the full speaker-labelled transcript below that.
 
 ![Notes — the written note above, the transcript below, the folder on the left](docs/screenshots/notes.png)
 
@@ -117,8 +129,8 @@ renames, and buys the thing that matters: the notes outlive the tool.
 - **Dictation audio** lives in memory only and is gone once the text is typed. The
   dictation log — raw and cleaned text, when, and which app it went to — is at
   `~/Library/Application Support/Murmr Flow/dictations.jsonl`.
-- **Meeting audio** is written to a temporary folder while recording and deleted as
-  soon as the note is saved. The note is the only copy.
+- **Recorded audio** is written to a temporary folder while the notetaker runs and
+  deleted as soon as the note is saved. The note is the only copy.
 - **Notes** are plain Markdown files with YAML front matter in `~/Documents/MurmurNotes`.
   Edit or delete them in any editor; the app re-reads the folder.
 - **API keys** are stored in the macOS Keychain.
