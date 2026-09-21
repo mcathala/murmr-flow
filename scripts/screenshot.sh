@@ -31,7 +31,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 OUT_DIR="docs/screenshots"
-OWNER="MurmrFlow"
+# `pgrep` wants the executable; the window server wants the display name. They differ.
+PROCESS="MurmrFlow"
+OWNER="Murmr Flow"
 
 bold() { printf '\033[1m%s\033[0m\n' "$1"; }
 fail() { printf '\033[31m%s\033[0m\n' "$1" >&2; exit 1; }
@@ -55,9 +57,9 @@ if [ "$PICK" -eq 1 ]; then
     bold "Click the window to capture…"
     screencapture -o -w "$TARGET"
 else
-    pgrep -x "$OWNER" >/dev/null 2>&1 || fail "$OWNER is not running. Try ./scripts/dev.sh first."
+    pgrep -x "$PROCESS" >/dev/null 2>&1 || fail "$OWNER is not running. Try ./scripts/dev.sh first."
     WINDOW_ID="$(swift "$ROOT/scripts/window-id.swift" "$OWNER" 2>/dev/null)" \
-        || fail "Could not find the main window. Is it open? Otherwise try --pick."
+        || fail "No main window — it is a menu bar app, so open the window first (click the M). Otherwise try --pick."
     bold "Capturing window $WINDOW_ID"
     # A moment for the terminal to stop being the front app, so no focus ring or
     # inactive-window tint lands in the shot.

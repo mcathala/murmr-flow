@@ -10,7 +10,10 @@
 import CoreGraphics
 import Foundation
 
-let owner = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "MurmrFlow"
+// The window server knows the app by its display name, not the executable's — the
+// bundle is `MurmrFlow` and the windows belong to "Murmr Flow". Getting this wrong
+// looks exactly like the window being closed, which cost an afternoon.
+let owner = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "Murmr Flow"
 
 guard
     let windows = CGWindowListCopyWindowInfo(
