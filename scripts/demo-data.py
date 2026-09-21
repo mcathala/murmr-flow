@@ -23,9 +23,18 @@ NOW = datetime.now().astimezone()
 
 
 def at(days_ago, hour, minute):
-    """A local wall-clock time, N days back — what the filename and the UI both show."""
+    """A local wall-clock time, N days back — what the filename and the UI both show.
+
+    Always in the past. A meeting at a fixed hour of *today* is in the future whenever
+    the script runs before that hour, and a note dated later this afternoon is the one
+    detail in a screenshot that tells everyone the data is fake. If the slot has not
+    happened yet, it becomes the same time yesterday.
+    """
     day = NOW - timedelta(days=days_ago)
-    return day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    moment = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    while moment >= NOW:
+        moment -= timedelta(days=1)
+    return moment
 
 
 def iso(moment):
@@ -409,106 +418,44 @@ print(f"  \033[32m✓\033[0m {written} notes → {NOTES_DIR}")
 # Dictation history
 # ---------------------------------------------------------------------------
 
-# (minutes ago, seconds of speech, app name, bundle id, text). The durations are set so
-# the words-per-minute figures land where a real person's do — roughly 140 to 170.
+# (minutes ago, seconds of speech, app name, bundle id, text).
+#
+# Two constraints that are easy to miss. **Length**: Home draws each of these on one
+# line and truncates, so a paragraph shows as a wall of grey ending in an ellipsis —
+# the rows have to be short enough to actually read. **Apps**: the icon is looked up by
+# bundle id through `AppIconCache`, so an app that is not installed draws a generic
+# placeholder and the row looks broken. These five are the ones on the machine the
+# screenshots are taken from.
+#
+# The durations are set so the words-per-minute figures land where a real person's do,
+# roughly 130 to 165. `demo-data-tests.swift` fails the build if any of them drifts
+# somewhere implausible.
 DICTATIONS = [
-    (
-        14,
-        11.4,
-        "Slack",
-        "com.tinyspeck.slackmacgap",
-        "Pushed the flag change — it's off by default, so nothing moves until we flip "
-        "it on Thursday. Shout if staging looks wrong.",
-    ),
-    (
-        38,
-        23.8,
-        "Mail",
-        "com.apple.mail",
-        "Thanks for the call this morning. I've attached the guide for pointing "
-        "clean-up at your own model, which is the configuration where nothing at all "
-        "leaves your network. Happy to walk your security team through it if that's "
-        "easier than reading it.",
-    ),
-    (
-        52,
-        8.2,
-        "Xcode",
-        "com.apple.dt.Xcode",
-        "Re-arm the event tap on wake. macOS disables it after sleep without telling us.",
-    ),
-    (
-        96,
-        17.1,
-        "Linear",
-        "com.linear",
-        "Panel drifts a pixel per display change on a mixed-DPI setup. Reproduces by "
-        "moving the window between the laptop screen and the external one twice.",
-    ),
-    (
-        140,
-        13.6,
-        "Notes",
-        "com.apple.Notes",
-        "Look at the thing instead of reasoning about it. Every layout bug so far was "
-        "found by eye and missed by arithmetic.",
-    ),
-    (
-        188,
-        6.9,
-        "Safari",
-        "com.apple.Safari",
-        "local first dictation macos neural engine benchmark",
-    ),
-    (
-        244,
-        29.3,
-        "Slack",
-        "com.tinyspeck.slackmacgap",
-        "Summary of the design review: the microphone prompt moves to first use, Screen "
-        "Recording gets its own page because the system dialog is misleading on its "
-        "own, and the model download goes to the background so onboarding stops "
-        "waiting on it. The sample dictation step is still up for debate.",
-    ),
-    (
-        310,
-        9.7,
-        "Mail",
-        "com.apple.mail",
-        "Can you send over the DPA template? Procurement wants it signed before the "
-        "trial rather than after.",
-    ),
-    (
-        1_420,
-        15.2,
-        "Xcode",
-        "com.apple.dt.Xcode",
-        "The file is the source of truth, not a database. Edit a note in any editor and "
-        "the app re-reads it.",
-    ),
-    (
-        1_610,
-        11.0,
-        "Slack",
-        "com.tinyspeck.slackmacgap",
-        "Taking the snapshot suite off Nils — I broke them, I'll fix them.",
-    ),
-    (
-        2_890,
-        21.5,
-        "Notes",
-        "com.apple.Notes",
-        "Two weeks on one machine to find out what the speech stack costs on Windows. "
-        "After that I'll have a number instead of a feeling, and we can promise "
-        "something or stop talking about it.",
-    ),
-    (
-        3_020,
-        7.8,
-        "Safari",
-        "com.apple.Safari",
-        "How long does an on-device Parakeet model take to load on an M-series Mac?",
-    ),
+    (12, 5.0, "Brave Browser", "com.brave.Browser",
+     "Reply to the thread: the flag is off until Thursday, nothing moves before then."),
+    (34, 7.2, "Claude", "com.anthropic.claudefordesktop",
+     "Write a test that reads the demo notes back through the real parser, not a copy of it."),
+    (58, 3.9, "Terminal", "com.apple.Terminal",
+     "git rebase onto main and force push with lease"),
+    (95, 5.8, "Cursor", "com.todesktop.230313mzl4w4u92",
+     "Re-arm the event tap on wake — macOS disables it after sleep without telling us."),
+    (140, 4.8, "Slack", "com.tinyspeck.slackmacgap",
+     "Taking the snapshot suite off Nils. I broke them, I'll fix them."),
+    (190, 3.5, "Brave Browser", "com.brave.Browser",
+     "local first dictation macos neural engine benchmark"),
+    (255, 5.2, "Claude", "com.anthropic.claudefordesktop",
+     "Summarise the design review in five bullets, keep every number exactly as stated."),
+    (320, 3.7, "Terminal", "com.apple.Terminal",
+     "swift test with the command line tools framework flags"),
+    (1_400, 7.5, "Slack", "com.tinyspeck.slackmacgap",
+     "Design review done: microphone moves to first use, Screen Recording gets its own "
+     "page, model download goes to the background."),
+    (1_580, 4.1, "Cursor", "com.todesktop.230313mzl4w4u92",
+     "The file is the source of truth, not a database."),
+    (2_900, 4.4, "Brave Browser", "com.brave.Browser",
+     "how long does parakeet take to load on apple silicon"),
+    (3_040, 5.6, "Claude", "com.anthropic.claudefordesktop",
+     "Draft the release note for 0.3 — two fixes and the new notes pane."),
 ]
 
 records = []
