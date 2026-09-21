@@ -52,7 +52,6 @@ final class MeetingCoordinator {
         case reading
         case you
         case them
-        case cleaning
         case noting
         case writing
 
@@ -61,7 +60,6 @@ final class MeetingCoordinator {
             case .reading: "Reading the recording"
             case .you: "Transcribing your side"
             case .them: "Transcribing their side"
-            case .cleaning: "Cleaning up the notes"
             case .noting: "Writing the note"
             case .writing: "Writing the note"
             }
@@ -291,8 +289,20 @@ final class MeetingCoordinator {
                 throw RecordingError.systemCaptureFailed
             }
 
-            let (cleanedTranscript, cleanupNote) = await cleaned(woven)
-            let (transcript, noteWarning) = await noted(cleanedTranscript)
+            // One request, and the transcript is kept as heard.
+            //
+            // There used to be two: tidy every turn, then write the note from the tidied
+            // turns. The second pass never needed the first — it carries the same
+            // repair rules, the same corrections handling and the same dictionary hints,
+            // so the transcript was being cleaned twice and sent twice. And the expensive
+            // half was the tidying: a pass whose output is as long as its input, on a
+            // forty-minute conversation, to produce something the next pass compresses to
+            // a dozen bullets.
+            //
+            // What the transcript loses by staying raw, it arguably gains. It is the
+            // evidence behind the note, the recording is deleted, and evidence reads
+            // better unedited.
+            let (transcript, noteWarning) = await noted(woven)
 
             stage = .transcribing(.writing)
             let saved: NoteFile
@@ -306,9 +316,7 @@ final class MeetingCoordinator {
                 transcript: transcript,
                 note: saved,
                 processingTime: (clock.now - started).seconds,
-                // One line for whatever went less than perfectly. Two warnings about two
-                // halves of the same request would read as two things being broken.
-                cleanupNote: Self.joined(cleanupNote, noteWarning)
+                cleanupNote: noteWarning
             )
             stage = .saved
             Self.log.notice(
@@ -336,47 +344,7 @@ final class MeetingCoordinator {
         elapsed = 0
     }
 
-    // MARK: - Clean-up
-
-    /// Runs the note prompt over the conversation, turn by turn.
-    ///
-    /// Returns the transcript to save and, when relevant, something to tell the user.
-    /// Never throws and never returns fewer turns than it was given: the recording is
-    /// deleted the moment this finishes, so the note is the only copy of the meeting and
-    /// a failed request must cost wording at most, never content.
-    private func cleaned(
-        _ transcript: MeetingTranscript
-    ) async -> (MeetingTranscript, String?) {
-        guard settings.notetakerCleanupEnabled else { return (transcript, nil) }
-        guard !transcript.isEmpty else { return (transcript, nil) }
-        guard let preset = prompts.notetakerPrompt else {
-            return (transcript, "No clean-up prompt is set for Notetaker.")
-        }
-
-        stage = .transcribing(.cleaning)
-        let outcome = await cleanup.cleanTurns(
-            transcript.utterances.map {
-                CleanupService.Turn(speaker: $0.speaker.rawValue, text: $0.text)
-            },
-            config: providers.activeConfig,
-            prompt: PromptLibrary(template: preset.template),
-            context: PromptLibrary.Context(
-                transcript: "",  // filled in per batch
-                outputLanguage: settings.notetakerTargetLanguage
-            ),
-            dictionary: dictionary.entries(usedIn: .notetaker),
-            timeout: CleanupService.noteTimeout
-        )
-
-        guard !outcome.usedRawFallback else { return (transcript, outcome.note) }
-        Self.log.notice(
-            "note cleanup: \(outcome.cleanedCount, privacy: .public) of \(transcript.utterances.count, privacy: .public) turns"
-        )
-        return (
-            transcript.applying(texts: outcome.texts, cleanedBy: preset.name),
-            outcome.note
-        )
-    }
+    // MARK: - The note
 
     /// Writes the note that goes above the transcript.
     ///
@@ -395,7 +363,7 @@ final class MeetingCoordinator {
 
         guard settings.notetakerCleanupEnabled else { return (transcript, nil) }
         guard !transcript.isEmpty else { return (transcript, nil) }
-        guard let preset = prompts.summaryPrompt else { return (transcript, nil) }
+        guard let preset = prompts.notetakerPrompt else { return (transcript, nil) }
 
         stage = .transcribing(.noting)
         let outcome = await cleanup.writeNote(
@@ -435,8 +403,8 @@ final class MeetingCoordinator {
     @discardableResult
     func writeNote(for note: NoteFile) async -> String? {
         guard !isWritingNote else { return nil }
-        guard let preset = prompts.summaryPrompt else {
-            return "No style is set for Summary."
+        guard let preset = prompts.notetakerPrompt else {
+            return "No style is set for Notetaker."
         }
         guard providers.activeConfig != nil else { return "No AI is connected." }
 
@@ -466,12 +434,6 @@ final class MeetingCoordinator {
         }
         notes.saveSummary(text, in: note)
         return nil
-    }
-
-    /// Two optional sentences as one, or nil when there is nothing to say.
-    private static func joined(_ parts: String?...) -> String? {
-        let text = parts.compactMap { $0 }.joined(separator: " ")
-        return text.isEmpty ? nil : text
     }
 
     // MARK: - Transcription

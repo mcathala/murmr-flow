@@ -54,15 +54,7 @@ struct PromptsSection: View {
             .controlSize(.small)
 
             if prompts.notetakerPrompt == nil {
-                Text("No prompt is assigned to Notetaker, so meetings are saved exactly "
-                     + "as transcribed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if prompts.summaryPrompt == nil {
-                Text("No style is set for Summary, so a meeting is saved as the "
+                Text("No style is set for Notetaker, so a meeting is saved as the "
                      + "transcript alone, with nothing written above it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -93,24 +85,21 @@ struct PromptsSection: View {
                         title: "Dictation", symbol: "mic.fill",
                         isOn: prompts.dictationPromptID == preset.id
                     ) { prompts.dictationPromptID = preset.id }
+                    // Two jobs, because there are two. A meeting is one request now, so
+                    // the Notetaker style *is* the one that writes the note — there is no
+                    // longer a second style tidying turns for it to read, and no third
+                    // chip to explain the difference between.
                     AssignmentToggle(
                         title: "Notetaker", symbol: "text.document",
-                        isOn: prompts.notetakerPromptID == preset.id
-                    ) { prompts.notetakerPromptID = preset.id }
-                    // The one pill that switches *off* as well as on. Dictation and
-                    // Notetaker always run through some style; a meeting with no note
-                    // written above it is an ordinary thing to want.
-                    AssignmentToggle(
-                        title: "Summary", symbol: "list.bullet.rectangle",
-                        isOn: prompts.summaryPromptID == preset.id,
+                        isOn: prompts.notetakerPromptID == preset.id,
                         togglesOff: true,
                         help: (
                             on: "Stop writing a note above the transcript",
                             off: "Write the note above the transcript with this style"
                         )
                     ) {
-                        prompts.summaryPromptID =
-                            prompts.summaryPromptID == preset.id ? nil : preset.id
+                        prompts.notetakerPromptID =
+                            prompts.notetakerPromptID == preset.id ? nil : preset.id
                     }
 
                     keySlot(preset)
@@ -262,7 +251,6 @@ struct PromptsSection: View {
         var jobs: [String] = []
         if prompts.dictationPromptID == preset.id { jobs.append("Dictation") }
         if prompts.notetakerPromptID == preset.id { jobs.append("Notetaker") }
-        if prompts.summaryPromptID == preset.id { jobs.append("Summary") }
         guard !jobs.isEmpty else { return nil }
         if jobs.count == 1 { return jobs[0] }
         return jobs.dropLast().joined(separator: ", ") + " and " + jobs[jobs.count - 1]

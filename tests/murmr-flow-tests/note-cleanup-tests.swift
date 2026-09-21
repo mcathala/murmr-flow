@@ -423,9 +423,11 @@ struct PromptPresetTests {
         store.set(true, forKey: "prompts.strippedPlaceholders")
 
         let prompts = PromptStore(defaults: store)
+        // The tidier retired with the pass it existed for, so an install still pointed at
+        // it lands on the style that writes the note — the output they were getting anyway.
         let notes = prompts.preset(id: PromptStore.meetingPreset.id)
         #expect(notes?.name == "Notes")
-        #expect(notes?.template == ShippedPrompts.meeting)
+        #expect(notes?.template == ShippedPrompts.summary)
         let casual = prompts.presets.first { $0.name == "Casual" }
         #expect(casual?.isBuiltIn == false)
         #expect(prompts.notetakerPrompt?.name == "Notes")
@@ -478,13 +480,15 @@ struct PromptPresetTests {
         #expect(prompts.notetakerPrompt?.name == "Notes")
     }
 
-    @Test("deleting the prompt Notetaker used falls back rather than leaving nothing")
-    func deleteFallsBack() {
+    @Test("deleting the prompt Notetaker used stops the note rather than picking another")
+    func deleteStopsTheNote() {
         let prompts = PromptStore(defaults: defaults())
         let mine = prompts.addNew()
         prompts.notetakerPromptID = mine.id
 
+        // Falling back would write the meeting's note in whatever style happened to be
+        // next — a dictation style, most likely, asked to summarise a conversation.
         prompts.delete(mine)
-        #expect(prompts.notetakerPromptID == PromptStore.meetingPreset.id)
+        #expect(prompts.notetakerPromptID == nil)
     }
 }
